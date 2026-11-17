@@ -1,6 +1,6 @@
 # Sistema de Estoque: guia para desenvolvimento
 
-Repositório `pepehend/sistema-gestao` (antes `sistema-estoque`; o GitHub redireciona o nome antigo). No cPanel, a pasta do clone continua `~/repositories/sistema-estoque`, e o `deploy/auto-deploy.sh` descobre a própria pasta sozinho.
+Repositório `pepehend/sistema-gestao`. No cPanel, a pasta do clone continua `~/repositories/sistema-estoque`, e o `deploy/auto-deploy.sh` descobre a própria pasta sozinho.
 
 Sistema de estoque, vendas e lucro em PHP 8 + MySQL, feito para hospedagem compartilhada (cPanel). Não há Composer nem etapa de build: os arquivos são enviados como estão.
 
