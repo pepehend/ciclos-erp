@@ -1,4 +1,4 @@
-# Sistema de Estoque: guia para desenvolvimento
+# Sistema de Gestão de Serviços: guia para desenvolvimento
 
 Repositório `pepehend/sistema-gestao`. No cPanel, a pasta do clone continua `~/repositories/sistema-gestao`, e o `deploy/auto-deploy.sh` descobre a própria pasta sozinho.
 

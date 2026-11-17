@@ -1,4 +1,4 @@
-# Sistema de Estoque - configurações do Apache
+# Sistema de Gestão de Serviços - configurações do Apache
 Options -Indexes
 DirectoryIndex index.php
 

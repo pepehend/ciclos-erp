@@ -1,4 +1,4 @@
-/* Sistema de Estoque — interface (JavaScript puro, sem dependências) */
+/* Sistema de Gestão de Serviços — interface (JavaScript puro, sem dependências) */
 'use strict';
 
 // ============ Utilidades ============
@@ -868,12 +868,12 @@ function navSection(path) {
   return path;
 }
 
-/** Cabeçalho do menu: logo e nome da empresa (Configurações → Dados da empresa); sem eles, o ícone e "Estoque". */
+/** Cabeçalho do menu: logo e nome da empresa (Configurações → Dados da empresa); sem eles, o ícone e "Gestão de Serviços". */
 function brandHtml() {
   const co = state.meta?.company || {};
   const name = String(co.name || '').trim();
   const logo = /^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,/.test(co.logo || '') ? co.logo : '';
-  return `${logo ? `<img class="brand-img" src="${esc(logo)}" alt="">` : `<span class="logo">${icon('box')}</span>`}<span class="brand-name" title="${esc(name || 'Estoque')}">${esc(name || 'Estoque')}</span>`;
+  return `${logo ? `<img class="brand-img" src="${esc(logo)}" alt="">` : `<span class="logo">${icon('box')}</span>`}<span class="brand-name" title="${esc(name || 'Gestão de Serviços')}">${esc(name || 'Gestão de Serviços')}</span>`;
 }
 function paintBrand() {
   const b = document.getElementById('brand'); if (b) { b.innerHTML = brandHtml(); b.classList.toggle('has-img', !!b.querySelector('.brand-img')); }
@@ -882,10 +882,10 @@ function paintBrand() {
 /** Nome e ícone da aba do navegador: nome fantasia e logo da empresa (guardados no aparelho para já abrir certo). */
 function brandTab() {
   const co = state.meta?.company || {};
-  const name = String(co.name || '').trim() || 'Estoque';
+  const name = String(co.name || '').trim() || 'Gestão de Serviços';
   const link = document.querySelector('link[rel=icon]');
   const save = (k, v) => { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (_) {} };
-  document.title = name; save('brandTitle', name === 'Estoque' ? '' : name);
+  document.title = name; save('brandTitle', name === 'Gestão de Serviços' ? '' : name);
   if (!link) return;
   const logo = /^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,/.test(co.logo || '') ? co.logo : '';
   if (!logo) { link.href = link.dataset.default || link.href; save('brandIcon', ''); return; }
@@ -925,7 +925,7 @@ function renderShell() {
         ${state.version ? `<div class="ver" title="Versão do sistema">Versão ${esc(state.version)}</div>` : ''}</div>
     </aside>
     <div>
-      <header class="topbar"><button class="icon-btn" id="menu" aria-label="Menu">${icon('menu')}</button><span class="title" id="top-title">Estoque</span></header>
+      <header class="topbar"><button class="icon-btn" id="menu" aria-label="Menu">${icon('menu')}</button><span class="title" id="top-title">Gestão de Serviços</span></header>
       <main class="main" id="view"></main>
     </div></div>`;
   // Grupos abertos/fechados ficam guardados neste navegador
@@ -1005,7 +1005,7 @@ async function route() {
   $$('.nav a').forEach((a) => a.classList.toggle('active', a.dataset.r === section));
   const active = $('.nav a.active');
   if (active) { const g = active.closest('.nav-group'); if (g) g.classList.add('open'); const sg = active.closest('.nav-sub'); if (sg) sg.classList.add('open'); }
-  $('#top-title').textContent = active ? active.textContent : 'Estoque';
+  $('#top-title').textContent = active ? active.textContent : 'Gestão de Serviços';
   // Troca o elemento da página para não acumular eventos de telas anteriores
   const old = $('#view'); const view = old.cloneNode(false); old.replaceWith(view);
   const token = ++routeToken;
@@ -1039,7 +1039,7 @@ function renderLogin() {
   const logo = /^data:image\//.test(b.logo || '') ? `<img src="${esc(b.logo)}" alt="">` : icon('box');
   const h = new Date().getHours(), hello = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
   $('#app').innerHTML = `<div class="lg-page">
-    <header class="lg-top"><div class="lg-brand"><span class="lg-logo ${/^data:image/.test(b.logo || '') ? 'img' : ''}">${logo}</span>${esc(b.name || 'Estoque')}</div><a class="lg-client" href="cliente/">${icon('user')}Área do cliente</a></header>
+    <header class="lg-top"><div class="lg-brand"><span class="lg-logo ${/^data:image/.test(b.logo || '') ? 'img' : ''}">${logo}</span>${esc(b.name || 'Gestão de Serviços')}</div><a class="lg-client" href="cliente/">${icon('user')}Área do cliente</a></header>
     <main class="lg-main">
       <section class="lg-hero">
         ${state.version ? `<span class="lg-ver">Versão ${esc(state.version)}</span>` : ''}
@@ -1057,7 +1057,7 @@ function renderLogin() {
       </form>
     </main>
     <footer class="lg-foot"><svg viewBox="0 0 600 12" preserveAspectRatio="none" aria-hidden="true"><path d="M0 6 Q 15 0 30 6 T 60 6 T 90 6 T 120 6 T 150 6 T 180 6 T 210 6 T 240 6 T 270 6 T 300 6 T 330 6 T 360 6 T 390 6 T 420 6 T 450 6 T 480 6 T 510 6 T 540 6 T 570 6 T 600 6" fill="none" stroke="#c6f04a" stroke-width="2"/></svg>
-      <span>${new Date().getFullYear()} © ${esc(b.name || 'Sistema de Estoque')}</span></footer>
+      <span>${new Date().getFullYear()} © ${esc(b.name || 'Sistema de Gestão de Serviços')}</span></footer>
   </div>`;
   const f = $('#login');
   $('input', f).focus();

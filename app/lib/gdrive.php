@@ -139,7 +139,7 @@ class GDrive
     {
         $key = self::key();
         return <<<JS
-// Backup do Sistema de Estoque no Google Drive.
+// Backup do Sistema de Gestão de Serviços no Google Drive.
 // Gerado pelo sistema (Configurações → Sistema → Backup). Não compartilhe: a chave abaixo libera o envio de arquivos.
 const CHAVE = '$key';
 

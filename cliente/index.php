@@ -94,7 +94,7 @@ if ($page === 'convite') {
 // Tela de entrada (login e convite): mesmo visual da entrada do sistema
 $hour = (int)date('G');
 $hello = $hour < 12 ? 'Bom dia' : ($hour < 18 ? 'Boa tarde' : 'Boa noite');
-$brandName = $co['company_name'] ?: 'Estoque';
+$brandName = $co['company_name'] ?: 'Gestão de Serviços';
 $loginIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>';
 $sitLabel = ['pago' => ['Pago', 'ok'], 'aberto' => ['Em aberto', 'warn'], 'vencido' => ['Vencido', 'err']];
 $csrf = $e(Portal::csrf());
@@ -269,7 +269,7 @@ $csrf = $e(Portal::csrf());
     </div>
   </main>
   <footer class="lg-foot"><svg viewBox="0 0 600 12" preserveAspectRatio="none" aria-hidden="true"><path d="M0 6 Q 15 0 30 6 T 60 6 T 90 6 T 120 6 T 150 6 T 180 6 T 210 6 T 240 6 T 270 6 T 300 6 T 330 6 T 360 6 T 390 6 T 420 6 T 450 6 T 480 6 T 510 6 T 540 6 T 570 6 T 600 6" fill="none" stroke="#c6f04a" stroke-width="2"/></svg>
-    <span><?= date('Y') ?> © <?= $e($co['company_name'] ?: 'Sistema de Estoque') ?></span></footer>
+    <span><?= date('Y') ?> © <?= $e($co['company_name'] ?: 'Sistema de Gestão de Serviços') ?></span></footer>
 </div>
 <?php else: ?>
 <header class="bar"><div class="wrap">

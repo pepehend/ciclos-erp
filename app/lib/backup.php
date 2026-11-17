@@ -11,7 +11,7 @@ class Backup
     public static function sql(): string
     {
         $pdo = DB::pdo();
-        $out = "-- Backup do Sistema de Estoque - " . date('d/m/Y H:i:s') . "\n";
+        $out = "-- Backup do Sistema de Gestão de Serviços - " . date('d/m/Y H:i:s') . "\n";
         $out .= "-- Para restaurar: crie as tabelas pelo install.php e importe este arquivo no phpMyAdmin.\n";
         $out .= "SET FOREIGN_KEY_CHECKS=0;\n\n";
         foreach (self::TABLES as $t) {
