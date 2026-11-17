@@ -68,3 +68,6 @@ Sistema de estoque, vendas e lucro em PHP 8 + MySQL, feito para hospedagem compa
 - Segundo número (**menor**): muda a cada funcionalidade nova. Ao subir este número, o terceiro volta a `0`.
 - Terceiro número (**correção**): muda a cada correção de erro sem funcionalidade nova.
 - Cada PR que muda o comportamento do sistema atualiza `APP_VERSION` no mesmo commit.
+
+## Telas em paralelo
+- A tela de entrada da equipe (`renderLogin` em `assets/app.js`) e a do portal do cliente (`cliente/index.php`) devem ter o mesmo texto de destaque e o mesmo subtítulo. Quando mudar uma, mude a outra no mesmo commit.
