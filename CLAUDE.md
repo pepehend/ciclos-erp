@@ -61,3 +61,10 @@ Sistema de estoque, vendas e lucro em PHP 8 + MySQL, feito para hospedagem compa
 - Commite e envie para `development`. Existe sempre **um** pull request `development → main`; se já estiver aberto, os commits novos entram nele (atualize a descrição). Se não houver, abra um novo.
 - O Pedro aprova com **Merge** no GitHub; o Cron do cPanel publica a `main` em até ~15 minutos.
 - **Antes de dizer que um commit entrou num PR aberto, confira** com `gh api repos/pepehend/sistema-gestao/pulls/N --jq .state` (o PR pode ter sido aprovado nesse meio tempo). Se estiver fechado, abra um PR novo; nunca edite a descrição de um PR já fechado.
+
+## Versionamento
+- A versão fica em `APP_VERSION` (`app/bootstrap.php`) e aparece no rodapé do menu. Começa em `1.0.0`.
+- Primeiro número (**maior**): muda quando há alteração que quebra compatibilidade (ex.: remoção de funcionalidade ou de dados).
+- Segundo número (**menor**): muda a cada funcionalidade nova. Ao subir este número, o terceiro volta a `0`.
+- Terceiro número (**correção**): muda a cada correção de erro sem funcionalidade nova.
+- Cada PR que muda o comportamento do sistema atualiza `APP_VERSION` no mesmo commit.
