@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe35261012345678000195550010000045211123456780" versao="4.00">
+<ide><cUF>35</cUF><natOp>VENDA</natOp><mod>55</mod><serie>1</serie><nNF>4521</nNF><dhEmi>2026-10-28T14:32:10-03:00</dhEmi><tpNF>1</tpNF></ide>
+<emit><CNPJ>12345678000195</CNPJ><xNome>DISTRIBUIDORA DOCE BOM LTDA</xNome><xFant>Doce Bom</xFant></emit><dest><CNPJ>13789718000150</CNPJ><xNome>SS COMPRESSORES E PERFURATRIZES LTDA</xNome></dest>
+<det nItem="1"><prod><cProd>FAR-25</cProd><cEAN>7891234567895</cEAN><xProd>FARINHA DE TRIGO TIPO 1 25KG</xProd><NCM>11010010</NCM><CFOP>5102</CFOP><uCom>SC</uCom><qCom>2.0000</qCom><vUnCom>95.0000000000</vUnCom><vProd>190.00</vProd><cEANTrib>7891234567895</cEANTrib><uTrib>SC</uTrib><qTrib>2.0000</qTrib><vUnTrib>95.00</vUnTrib><vFrete>10.00</vFrete><indTot>1</indTot></prod>
+<imposto><ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS></imposto></det>
+<det nItem="2"><prod><cProd>ACU-5</cProd><cEAN>SEM GTIN</cEAN><xProd>ACUCAR REFINADO 5KG</xProd><NCM>17019900</NCM><CFOP>5102</CFOP><uCom>FD</uCom><qCom>1.0000</qCom><vUnCom>120.0000</vUnCom><vProd>120.00</vProd><cEANTrib>SEM GTIN</cEANTrib><uTrib>FD</uTrib><qTrib>1</qTrib><vUnTrib>120</vUnTrib><vDesc>6.00</vDesc><indTot>1</indTot></prod>
+<imposto><ICMS><ICMS10><orig>0</orig><CST>10</CST><vICMSST>4.50</vICMSST></ICMS10></ICMS><IPI><cEnq>999</cEnq><IPITrib><CST>50</CST><vIPI>1.50</vIPI></IPITrib></IPI></imposto></det>
+<total><ICMSTot><vProd>310.00</vProd><vFrete>10.00</vFrete><vDesc>6.00</vDesc><vST>4.50</vST><vIPI>1.50</vIPI><vNF>320.00</vNF></ICMSTot></total>
+</infNFe></NFe><protNFe versao="4.00"><infProt><chNFe>35261012345678000195550010000045211123456780</chNFe></infProt></protNFe></nfeProc>

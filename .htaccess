@@ -1,0 +1,25 @@
+# Sistema de Gestão de Serviços - configurações do Apache
+Options -Indexes
+DirectoryIndex index.php
+
+<FilesMatch "\.(sql|sqlite|log|md|txt|ini|lock)$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Referrer-Policy "same-origin"
+</IfModule>
+
+# Permite enviar notas em PDF de até 15 MB (se a hospedagem permitir)
+<IfModule mod_php.c>
+  php_value upload_max_filesize 16M
+  php_value post_max_size 18M
+</IfModule>
