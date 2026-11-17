@@ -1043,8 +1043,8 @@ function renderLogin() {
     <main class="lg-main">
       <section class="lg-hero">
         ${state.version ? `<span class="lg-ver">Versão ${esc(state.version)}</span>` : ''}
-        <h1>Seu estoque<br>sob <mark>controle</mark>.</h1>
-        <p>Estoque, vendas, orçamentos e financeiro num só lugar</p>
+        <h1>Suas ordens<br>sob <mark>controle</mark>.</h1>
+        <p>Ordens de serviço, clientes, orçamentos e financeiro num só lugar</p>
         ${LOGIN_STICKERS.box}${LOGIN_STICKERS.board}
       </section>
       <form class="lg-card" id="login">
