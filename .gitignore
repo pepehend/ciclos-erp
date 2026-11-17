@@ -1,0 +1,9 @@
+# Dados e configuração do servidor nunca vão para o GitHub
+app/config.php
+data/*
+!data/.htaccess
+!data/index.php
+*.sqlite
+*.sqlite-*
+*.sql
+.DS_Store

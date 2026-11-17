@@ -1,0 +1,14 @@
+---
+# Publicação automática pelo cPanel (Git Version Control → "Deploy HEAD Commit").
+# Ajuste DEPLOYPATH se o sistema estiver em outra pasta.
+# Não copia: install.php, testes, app/config.php e os dados — o que já está no servidor é preservado.
+deployment:
+  tasks:
+    - export DEPLOYPATH=$HOME/public_html/estoque/
+    - /bin/mkdir -p $DEPLOYPATH
+    - /bin/cp index.php api.php orcamento.php pedido.php .htaccess .user.ini $DEPLOYPATH
+    - /bin/cp -R assets $DEPLOYPATH
+    - /bin/cp -R app $DEPLOYPATH
+    - /bin/cp -R cliente $DEPLOYPATH
+    - /bin/mkdir -p ${DEPLOYPATH}data
+    - /bin/cp data/.htaccess data/index.php ${DEPLOYPATH}data/
