@@ -4,7 +4,7 @@
 #
 # Uso no cPanel → Cron Jobs (a cada 15 minutos; a hospedagem não aceita menos):
 #   /bin/bash $HOME/repositories/<pasta do repositório>/deploy/auto-deploy.sh >/dev/null 2>&1
-# (na instalação atual a pasta é sistema-estoque)
+# (na instalação atual a pasta é sistema-gestao)
 #
 # O registro fica em ~/logs/estoque-deploy.log (só quando algo é publicado ou dá erro).
 

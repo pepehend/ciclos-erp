@@ -42,15 +42,15 @@ Sistema web de controle de estoque, vendas e lucro, feito para rodar em hospedag
 - **Movimentações**: entrada sem nota, saída/uso, perda e contagem de inventário, com histórico completo de quem fez o quê.
 - **Relatórios**: faturamento, custo, lucro bruto, margem, ticket médio, perdas, compras, valor em estoque, vendas por produto, por dia e por forma de pagamento. Exporta CSV (abre no Excel) e imprime.
 - **Usuários**: administradores e membros. Só o administrador gerencia usuários, desativa produtos, desfaz notas e baixa o backup. Em Configurações → Sistema → Usuários → Editar, o administrador troca nome, **e-mail** (login), telefone, perfil e senha e pode **Excluir** um membro: quem nunca usou o sistema é apagado de vez; quem já tem vendas, orçamentos, notas ou outros registros só é desativado, para manter o histórico.
-- **Portal do cliente** (`<endereço do sistema>/cliente/`, por exemplo `https://seudominio.com.br/estoque/cliente/`): o cliente entra com o **CPF ou CNPJ** e uma senha e vê os **orçamentos** (com aprovar e recusar), as **compras** (com itens e parcelas), as **parcelas** em aberto, pagas e vencidas, e os **dados cadastrais**. Ali ele também pode pedir correção dos dados e trocar a senha. O botão de sol/lua no topo alterna entre o **tema claro e o escuro** (na primeira visita, segue o do aparelho; a escolha fica salva no navegador).
+- **Portal do cliente** (`<endereço do sistema>/cliente/`, por exemplo `https://seudominio.com.br/sistema/cliente/`): o cliente entra com o **CPF ou CNPJ** e uma senha e vê os **orçamentos** (com aprovar e recusar), as **compras** (com itens e parcelas), as **parcelas** em aberto, pagas e vencidas, e os **dados cadastrais**. Ali ele também pode pedir correção dos dados e trocar a senha. O botão de sol/lua no topo alterna entre o **tema claro e o escuro** (na primeira visita, segue o do aparelho; a escolha fica salva no navegador).
   - **Liberar o acesso:** na tela do cliente (Cadastros → Clientes → abrir o cliente), cartão **Portal do cliente** → **Gerar link de acesso**. Envie a mensagem pelo WhatsApp ou copie. O link vale 7 dias e só funciona uma vez: o cliente cria a senha e já entra. O cliente precisa ter CPF ou CNPJ cadastrado.
   - **Esqueceu a senha:** gere um link novo no mesmo cartão. **Remover acesso** apaga a senha e o link.
   - **Pedidos de correção:** aparecem no cartão, com **Marcar como resolvido**, e na lista de clientes com a etiqueta "correção pedida".
   - **O que o cliente não vê:** orçamentos em rascunho, em elaboração ou aguardando envio, e nada de outros clientes. Cliente desativado perde o acesso na hora.
 - **Administradores protegidos**: pela tela, um administrador altera só os próprios dados e os dos membros; os dados de **outro administrador** (nome, e-mail, telefone, senha) não mudam, e ninguém rebaixa, desativa ou exclui um administrador. Isso só é feito pelo console do servidor; no cPanel, em **Terminal** (se a hospedagem liberar):
   ```
-  php ~/public_html/estoque/app/users-cli.php listar
-  php ~/public_html/estoque/app/users-cli.php desativar fulano@empresa.com
+  php ~/public_html/sistema/app/users-cli.php listar
+  php ~/public_html/sistema/app/users-cli.php desativar fulano@empresa.com
   ```
   Comandos: `listar`, `desativar`, `ativar`, `rebaixar` (administrador vira membro), `promover`, `excluir`, `senha` (gera uma senha nova e mostra na tela) e `email <e-mail> <novo-e-mail>`. O sistema nunca fica sem nenhum administrador ativo. Sem Terminal, dá para fazer pelo phpMyAdmin, tabela `users` (`active` = 0 desativa; `role` = `membro` rebaixa).
 - **Backup** em um clique (arquivo .sql) e **backup automático no Google Drive** (Configurações → Sistema → Backup).
@@ -101,9 +101,9 @@ O código fica no repositório privado `pepehend/sistema-gestao`. Toda alteraç�
 **Publicação automática** (configurar uma vez): no cPanel → **Cron Jobs** → adicione:
 
 - Configuração comum: **A cada 15 minutos** (`*/15 * * * *`). A hospedagem não aceita intervalos menores: se você puser menos, ela troca sozinha por 15 minutos ou um pouco mais (`*/16`, `*/17`), o que é normal.
-- Comando: `/bin/bash $HOME/repositories/sistema-estoque/deploy/auto-deploy.sh >/dev/null 2>&1` (troque `sistema-estoque` pelo nome da pasta do repositório no cPanel, se for outro)
+- Comando: `/bin/bash $HOME/repositories/sistema-gestao/deploy/auto-deploy.sh >/dev/null 2>&1` (troque `sistema-gestao` pelo nome da pasta do repositório no cPanel, se for outro)
 
-A cada 15 minutos (mais ou menos) o script confere o GitHub; se houver versão nova aprovada, atualiza o repositório e publica em `public_html/estoque` (usando o `.cpanel.yml`). O `config.php`, os dados e o `install.php` nunca são sobrescritos. O registro fica em `logs/estoque-deploy.log` na sua pasta pessoal (só quando publica ou dá erro).
+A cada 15 minutos (mais ou menos) o script confere o GitHub; se houver versão nova aprovada, atualiza o repositório e publica em `public_html/sistema` (usando o `.cpanel.yml`). O `config.php`, os dados e o `install.php` nunca são sobrescritos. O registro fica em `logs/estoque-deploy.log` na sua pasta pessoal (só quando publica ou dá erro).
 
 Publicar na hora, sem esperar: cPanel → Git Version Control → Gerenciar → Extrair ou implantar → **Atualizar do remoto** e **Implantar commit HEAD**.
 
