@@ -6,21 +6,91 @@
 class Auth
 {
     /** Áreas que podem ser liberadas ou bloqueadas para quem não é administrador. */
-    const PERMS = [
-        'vendas' => 'Vendas (nova venda, lista, cancelar)',
-        'orcamentos' => 'Orçamentos',
-        'notas' => 'Notas fiscais (importar)',
-        'produtos' => 'Cadastro de produtos',
-        'servicos' => 'Cadastro de serviços',
-        'clientes' => 'Cadastro de clientes',
-        'fornecedores' => 'Cadastro de fornecedores',
-        'relatorios' => 'Relatórios de vendas e valores do painel (faturamento, lucro)',
-        'movimentacoes' => 'Movimentações de estoque (ver e lançar entradas, saídas, perdas, contagem)',
-        'compras' => 'Ordens de compra (pedidos aos fornecedores)',
-        'ordens' => 'Ordens de serviço (equipamentos, tipos de tarefa, questionários, atendimento e agenda)',
-        'financeiro' => 'Financeiro (pagamentos, recebimentos e fluxo de caixa)',
-        'formas_pagamento' => 'Formas de pagamento (cadastrar e editar)',
+    /**
+     * Permissões por módulo: a chave do módulo é "acessar/visualizar"; cada ação vira "modulo.acao".
+     * Ex.: ordens (ver as OS) + ordens.add, ordens.edit, ordens.execute, ordens.hours…
+     * Perfis e usuários gravados no formato novo levam "_v2" na lista (ver normalizePerms/upgradePerms).
+     */
+    const MODULES = [
+        'ordens' => ['Ordens de serviço', 'Visualizar ordens de serviço e agenda', [
+            'add' => 'Adicionar OS',
+            'edit' => 'Editar OS (cliente, equipamento, tipo, técnico, data e orientação)',
+            'execute' => 'Executar OS (a caminho, check-in, pausar, check-out e preencher relatório, fotos, questionários, peças e serviços)',
+            'reschedule' => 'Reagendar OS (agenda)',
+            'hours' => 'Editar controle de horas',
+            'after_checkout' => 'Editar OS depois do check-out',
+            'send' => 'Enviar OS digital e pesquisa de satisfação',
+            'all' => 'Ver as OS de todos os técnicos (sem isso, só as OS em que é o técnico)',
+        ]],
+        'app' => ['Aplicativo do técnico', null, [
+            'switch' => 'Alternar entre o app do técnico e a versão completa (só no celular)',
+        ]],
+        'equipamentos' => ['Equipamentos', 'Visualizar equipamentos', ['add' => 'Cadastrar equipamento', 'edit' => 'Editar equipamento', 'delete' => 'Excluir equipamento']],
+        'tipos_tarefa' => ['Tipos de tarefa', 'Visualizar tipos de tarefa', ['add' => 'Cadastrar tipo de tarefa', 'edit' => 'Editar tipo de tarefa', 'delete' => 'Excluir tipo de tarefa']],
+        'questionarios' => ['Questionários', 'Visualizar questionários', ['add' => 'Cadastrar questionário', 'edit' => 'Editar questionário', 'delete' => 'Excluir questionário']],
+        'orcamentos' => ['Orçamentos', 'Visualizar orçamentos', [
+            'add' => 'Adicionar orçamento (e duplicar)', 'edit' => 'Editar orçamento', 'delete' => 'Excluir orçamento',
+            'status' => 'Alterar status (enviar, aprovar, recusar)', 'convert' => 'Gerar venda a partir do orçamento',
+        ]],
+        'vendas' => ['Vendas', 'Visualizar vendas', ['add' => 'Nova venda', 'cancel' => 'Cancelar venda']],
+        'clientes' => ['Clientes', 'Visualizar clientes', ['add' => 'Cadastrar cliente', 'edit' => 'Editar cliente', 'delete' => 'Excluir cliente', 'portal' => 'Liberar e remover acesso ao portal do cliente']],
+        'fornecedores' => ['Fornecedores', 'Visualizar fornecedores', ['add' => 'Cadastrar fornecedor', 'edit' => 'Editar fornecedor', 'delete' => 'Excluir fornecedor']],
+        'produtos' => ['Produtos (peças)', 'Visualizar produtos', [
+            'add' => 'Cadastrar produto (e importar planilha)', 'edit' => 'Editar produto', 'delete' => 'Excluir produto',
+            'review' => 'Revisar peças novas lançadas nas OS',
+        ]],
+        'servicos' => ['Serviços', 'Visualizar serviços', ['add' => 'Cadastrar serviço', 'edit' => 'Editar serviço', 'delete' => 'Excluir serviço', 'review' => 'Revisar serviços novos lançados nas OS']],
+        'movimentacoes' => ['Movimentações de estoque', 'Visualizar movimentações', ['add' => 'Lançar entradas, saídas, perdas e contagem']],
+        'notas' => ['Notas fiscais', 'Visualizar notas', ['import' => 'Importar nota fiscal', 'revert' => 'Desfazer nota importada']],
+        'compras' => ['Ordens de compra', 'Visualizar ordens de compra', ['add' => 'Adicionar ordem de compra (e duplicar)', 'edit' => 'Editar, enviar e mudar status', 'delete' => 'Excluir ordem de compra']],
+        'financeiro' => ['Financeiro', 'Visualizar pagamentos, recebimentos e fluxo de caixa', ['add' => 'Lançar conta a pagar ou a receber', 'edit' => 'Editar, dar baixa e reabrir', 'delete' => 'Excluir lançamento']],
+        'formas_pagamento' => ['Formas de pagamento', 'Cadastrar e editar formas de pagamento', []],
+        'relatorios' => ['Relatórios', 'Relatórios de vendas e valores do painel (faturamento, lucro)', []],
     ];
+
+    /** Módulos que nasceram de "ordens" (v3.1.0): quem tinha ordens antes ganha estes também. */
+    const LEGACY_FROM_ORDENS = ['equipamentos', 'tipos_tarefa', 'questionarios', 'app'];
+
+    /** Todas as permissões: código => descrição. */
+    public static function perms(): array
+    {
+        $out = [];
+        foreach (self::MODULES as $m => [$label, $view, $actions]) {
+            if ($view !== null) $out[$m] = $label . ': ' . $view;
+            foreach ($actions as $a => $l) $out["$m.$a"] = $label . ': ' . $l;
+        }
+        return $out;
+    }
+
+    /** Estrutura para a tela de permissões. */
+    public static function modules(): array
+    {
+        $out = [];
+        foreach (self::MODULES as $m => [$label, $view, $actions]) {
+            $items = [];
+            if ($view !== null) $items[] = ['code' => $m, 'label' => $view, 'view' => true];
+            foreach ($actions as $a => $l) $items[] = ['code' => "$m.$a", 'label' => $l, 'view' => false];
+            $out[] = ['code' => $m, 'label' => $label, 'items' => $items];
+        }
+        return $out;
+    }
+
+    /**
+     * Lista antiga (só módulos, sem "_v2") para a nova: cada módulo ganha todas as ações dele,
+     * menos "ver as OS de todos os técnicos" (fica só para quem tinha acesso a tudo).
+     */
+    public static function expandLegacy(array $list): array
+    {
+        $all = array_keys(self::perms());
+        $out = [];
+        foreach ($list as $m) {
+            if (!isset(self::MODULES[$m])) continue;
+            $mods = $m === 'ordens' ? array_merge(['ordens'], self::LEGACY_FROM_ORDENS) : [$m];
+            foreach ($mods as $mm) foreach ($all as $code) if ($code === $mm || str_starts_with($code, "$mm.")) $out[$code] = true;
+        }
+        unset($out['ordens.all']);
+        return array_keys($out);
+    }
 
     const MAX_ATTEMPTS = 8;      // tentativas erradas por IP...
     const WINDOW_MIN = 15;       // ...a cada 15 minutos
@@ -78,16 +148,44 @@ class Auth
     /** Lista de permissões do usuário (administrador e usuários antigos sem configuração têm todas). */
     public static function permsOf(array $u): array
     {
-        if (($u['role'] ?? '') === 'admin') return array_keys(self::PERMS);
+        $all = array_keys(self::perms());
+        if (($u['role'] ?? '') === 'admin') return $all;
         // Com perfil: vale o perfil. Sem perfil: lista própria do usuário (vazia = acesso total, para não travar quem já usava)
         $raw = !empty($u['profile_id']) ? ($u['profile_permissions'] ?? '') : ($u['permissions'] ?? null);
-        if ($raw === null) return array_keys(self::PERMS);
-        return array_values(array_intersect(array_keys(self::PERMS), explode(',', (string)$raw)));
+        if ($raw === null) return $all;
+        $list = explode(',', (string)$raw);
+        if (!in_array('_v2', $list, true)) $list = self::expandLegacy($list);
+        return array_values(array_intersect($all, $list));
     }
 
+    /** Lista para gravar: só códigos válidos; ação marcada leva junto o "visualizar" do módulo; marca "_v2". */
     public static function normalizePerms($list): string
     {
-        return implode(',', array_values(array_intersect(array_keys(self::PERMS), is_array($list) ? $list : [])));
+        $all = self::perms();
+        $set = [];
+        foreach (is_array($list) ? $list : [] as $c) {
+            $c = (string)$c;
+            if (!isset($all[$c])) continue;
+            $set[$c] = true;
+            $m = explode('.', $c)[0];
+            if (isset($all[$m])) $set[$m] = true;
+        }
+        return implode(',', array_merge(['_v2'], array_values(array_intersect(array_keys($all), array_keys($set)))));
+    }
+
+    /** v3.1.0: perfis e usuários gravados no formato antigo passam para o novo (com as ações de cada módulo). */
+    public static function upgradePerms(): void
+    {
+        foreach (['permission_profiles', 'users'] as $t) {
+            foreach (DB::all("SELECT id, permissions FROM $t WHERE permissions IS NOT NULL") as $r) {
+                $list = $r['permissions'] === '' ? [] : explode(',', $r['permissions']);
+                if (in_array('_v2', $list, true)) continue;
+                $new = self::expandLegacy($list);
+                // "Acesso total" continua com tudo (inclusive ver as OS de todos)
+                if ($t === 'permission_profiles' && DB::val('SELECT name FROM permission_profiles WHERE id = ?', [$r['id']]) === 'Acesso total') $new = array_keys(self::perms());
+                DB::update($t, (int)$r['id'], ['permissions' => self::normalizePerms($new)]);
+            }
+        }
     }
 
     // ---------- Perfis de permissão ----------
@@ -98,7 +196,7 @@ class Auth
             FROM permission_profiles p ORDER BY p.name');
         foreach ($rows as &$r) {
             $r['id'] = (int)$r['id']; $r['users'] = (int)$r['users'];
-            $r['permissions'] = $r['permissions'] === null || $r['permissions'] === '' ? [] : explode(',', $r['permissions']);
+            $r['permissions'] = $r['permissions'] === null || $r['permissions'] === '' ? [] : array_values(array_diff(explode(',', $r['permissions']), ['_v2']));
         }
         return $rows;
     }
@@ -132,14 +230,14 @@ class Auth
     public static function seedProfiles(): void
     {
         $base = [
-            'Acesso total' => array_keys(self::PERMS),
-            'Vendedor' => ['vendas', 'orcamentos', 'clientes', 'servicos'],
-            'Estoque' => ['produtos', 'notas', 'movimentacoes', 'fornecedores'],
-            'Técnico' => ['ordens'],
+            'Acesso total' => array_keys(self::perms()),
+            'Vendedor' => self::expandLegacy(['vendas', 'orcamentos', 'clientes', 'servicos']),
+            'Estoque' => self::expandLegacy(['produtos', 'notas', 'movimentacoes', 'fornecedores']),
+            'Técnico' => ['ordens', 'ordens.execute', 'ordens.send', 'equipamentos', 'equipamentos.add', 'clientes'],
         ];
         foreach ($base as $name => $perms) {
             if (!DB::val('SELECT id FROM permission_profiles WHERE name = ?', [$name])) {
-                DB::insert('permission_profiles', ['name' => $name, 'permissions' => implode(',', $perms), 'created_at' => now()]);
+                DB::insert('permission_profiles', ['name' => $name, 'permissions' => self::normalizePerms($perms), 'created_at' => now()]);
             }
         }
     }
@@ -155,7 +253,8 @@ class Auth
     {
         $u = self::require();
         foreach ($perms as $p) if (in_array($p, $u['permissions'], true)) return $u;
-        $labels = array_map(fn($p) => self::PERMS[$p] ?? $p, $perms);
+        $all = self::perms();
+        $labels = array_map(fn($p) => $all[$p] ?? $p, $perms);
         throw new AppError('Você não tem permissão para isso (' . implode(' / ', $labels) . '). Peça a um administrador.', 403);
     }
 
