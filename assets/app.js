@@ -2476,13 +2476,13 @@ async function viewEquipments(v) {
   const f = { q: '', all: false };
   v.innerHTML = `<div class="page-head"><div><h1>Equipamentos</h1><p class="muted">Aparelhos dos clientes que recebem manutenção e atendimento.</p></div>
       <div class="actions"><button class="btn primary" id="new">${icon('plus')}Novo equipamento</button></div></div>
-    <div class="card"><div class="filters"><label class="grow">Buscar <input id="q" type="search" placeholder="Nome, marca, modelo, série ou cliente"></label>
+    <div class="card"><div class="filters"><label class="grow">Buscar <input id="q" type="search" placeholder="Nome, marca, modelo, identificador ou cliente"></label>
       <label class="check"><input type="checkbox" id="all"> Mostrar inativos</label></div><div id="list"></div></div>`;
   const load = async () => {
     const rows = await api('equipments', { params: { q: f.q, all: f.all ? 1 : '' } });
-    $('#list', v).innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Equipamento</th><th>Cliente</th><th>Nº de série</th><th></th></tr></thead><tbody>
-      ${rows.map((e) => `<tr class="click" data-id="${e.id}"><td><strong>${esc(e.name)}</strong><div class="small muted">${esc([e.brand, e.model].filter(Boolean).join(' '))}</div></td>
-        <td>${esc(e.customer_trade_name || e.customer_name)}</td><td>${esc(e.serial || '—')}</td><td>${+e.active ? '' : '<span class="badge">inativo</span>'}</td></tr>`).join('')}</tbody></table></div>`
+    $('#list', v).innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Equipamento</th><th>Cliente</th><th>Identificador</th><th>Garantia</th><th></th></tr></thead><tbody>
+      ${rows.map((e) => `<tr class="click" data-id="${e.id}"><td><strong>${esc(e.name)}</strong><div class="small muted">${esc([e.brand, e.model, e.category].filter(Boolean).join(' · '))}</div></td>
+        <td>${esc(e.customer_trade_name || e.customer_name)}</td><td>${esc(e.serial || '—')}</td><td>${e.warranty_until ? esc(e.warranty_until.split('-').reverse().join('/')) : '—'}</td><td>${+e.active ? '' : '<span class="badge">inativo</span>'}</td></tr>`).join('')}</tbody></table></div>`
       : '<div class="empty">Nenhum equipamento cadastrado. Clique em <strong>Novo equipamento</strong>.</div>';
   };
   $('#q', v).oninput = debounce((e) => { f.q = e.target.value; load().catch(fail); });
@@ -2500,21 +2500,51 @@ async function viewEquipments(v) {
 async function equipmentForm(eq, onSaved) {
   const isNew = !eq;
   const customers = await api('customers', { params: { active: '1', limit: 200, sort: 'asc' } });
+  const specs = (eq?.specs || []);
   const m = modal({
     title: isNew ? 'Novo equipamento' : 'Editar equipamento',
-    body: `<form class="form" id="eqf"><label>Cliente * <select name="customer_id" required><option value="">Selecione…</option>${customers.rows.map((c) => `<option value="${c.id}" ${eq && +eq.customer_id === +c.id ? 'selected' : ''}>${esc(custName(c))}</option>`).join('')}</select></label>
-      <label>Nome do equipamento * <input name="name" required maxlength="120" value="${esc(eq?.name)}" placeholder="Ex.: Compressor de parafuso"></label>
-      <div class="grid two"><label>Marca <input name="brand" maxlength="80" value="${esc(eq?.brand)}"></label><label>Modelo <input name="model" maxlength="80" value="${esc(eq?.model)}"></label></div>
-      <label>Nº de série <input name="serial" maxlength="80" value="${esc(eq?.serial)}"></label>
-      <label>Observações <input name="notes" maxlength="500" value="${esc(eq?.notes)}"></label></form>`,
+    body: `<div class="seg" id="eqtabs"><button type="button" data-et="geral" class="on">Geral</button><button type="button" data-et="specs">Especificações</button></div>
+    <form class="form" id="eqf">
+      <div data-pane="geral">
+        <label>Cliente * <select name="customer_id" required><option value="">Selecione…</option>${customers.rows.map((c) => `<option value="${c.id}" ${eq && +eq.customer_id === +c.id ? 'selected' : ''}>${esc(custName(c))}</option>`).join('')}</select></label>
+        <label>Nome do equipamento * <input name="name" required maxlength="120" value="${esc(eq?.name)}" placeholder="Ex.: Compressor de parafuso"></label>
+        <div class="grid two"><label>Identificador <input name="serial" maxlength="80" value="${esc(eq?.serial)}" placeholder="Nº de série ou código"></label><label>Categoria <input name="category" maxlength="80" value="${esc(eq?.category)}" placeholder="Ex.: Compressores"></label></div>
+        <div class="grid two"><label>Marca <input name="brand" maxlength="80" value="${esc(eq?.brand)}"></label><label>Modelo <input name="model" maxlength="80" value="${esc(eq?.model)}"></label></div>
+        <div class="grid two"><label>Data de validade <input name="valid_until" type="date" value="${esc(eq?.valid_until)}"></label><label>Garantia até <input name="warranty_until" type="date" value="${esc(eq?.warranty_until)}"></label></div>
+        <label>Descrição <textarea name="notes" maxlength="500" rows="3">${esc(eq?.notes)}</textarea></label>
+      </div>
+      <div data-pane="specs" hidden>
+        <p class="small muted">Dados técnicos do aparelho, como potência, voltagem ou pressão de trabalho.</p>
+        <div id="splist"></div>
+        <button type="button" class="btn ghost" id="spadd">${icon('plus')}Adicionar especificação</button>
+      </div>
+    </form>`,
     foot: `${!isNew ? `<button class="btn ghost" id="eqact" style="margin-right:auto">${+eq.active ? 'Desativar' : 'Reativar'}</button>` : ''}<button class="btn" data-close>Cancelar</button><button class="btn primary" id="eqsave">Salvar equipamento</button>`,
   });
   const f = $('#eqf', m.el);
+  const splist = $('#splist', m.el);
+  const specRow = (sp = {}) => {
+    const row = document.createElement('div');
+    row.className = 'grid two spec-row';
+    row.innerHTML = `<label>Especificação <input class="sp-l" maxlength="80" value="${esc(sp.label)}" placeholder="Ex.: Potência"></label>
+      <label>Valor <span class="spec-val"><input class="sp-v" maxlength="200" value="${esc(sp.value)}" placeholder="Ex.: 5 HP"><button type="button" class="btn ghost sp-del" title="Remover">${icon('x')}</button></span></label>`;
+    row.querySelector('.sp-del').onclick = () => row.remove();
+    splist.appendChild(row);
+  };
+  specs.forEach((sp) => specRow(sp));
+  $('#spadd', m.el).onclick = () => { specRow(); splist.lastElementChild.querySelector('.sp-l').focus(); };
+  $$('#eqtabs button', m.el).forEach((b) => (b.onclick = () => {
+    $$('#eqtabs button', m.el).forEach((x) => x.classList.toggle('on', x === b));
+    $('[data-pane="geral"]', m.el).hidden = b.dataset.et !== 'geral';
+    $('[data-pane="specs"]', m.el).hidden = b.dataset.et !== 'specs';
+  }));
   const save = (btn) => busy(btn, async () => {
     const d = formData(f);
     if (!d.customer_id) throw new Error('Selecione o cliente');
     if (!d.name.trim()) throw new Error('Informe o nome do equipamento');
-    await api('equipment_save', { body: { ...d, id: eq?.id } });
+    const list = $$('.spec-row', m.el).map((r) => ({ label: r.querySelector('.sp-l').value, value: r.querySelector('.sp-v').value }));
+    if (list.some((x) => !x.label.trim() && x.value.trim())) throw new Error('Informe o nome de cada especificação');
+    await api('equipment_save', { body: { ...d, id: eq?.id, specs: list } });
     m.close(); toast('Equipamento salvo'); onSaved && onSaved();
   });
   $('#eqsave', m.el).onclick = (e) => save(e.currentTarget);

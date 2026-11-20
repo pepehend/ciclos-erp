@@ -1245,6 +1245,19 @@ ok(count(Equipments::list(['customer_id' => $osCli])) === 1, 'lista equipamentos
 Equipments::setActive($eqB, false);
 ok(count(Equipments::list(['customer_id' => $osOutro])) === 0 && count(Equipments::list(['customer_id' => $osOutro, 'all' => 1])) === 1, 'inativo some da lista, aparece com "todos"');
 Equipments::setActive($eqB, true);
+$eqC = Equipments::save(['name' => 'Secador 3HP', 'customer_id' => $osCli, 'category' => 'Secadores', 'serial' => 'SEC-9',
+    'valid_until' => '2030-05-31', 'warranty_until' => '2027-01-15',
+    'specs' => [['label' => 'Potência', 'value' => '3 HP'], ['label' => '', 'value' => ''], ['label' => 'Voltagem', 'value' => '220 V']]]);
+$gotC = Equipments::get($eqC);
+ok($gotC['category'] === 'Secadores' && $gotC['valid_until'] === '2030-05-31' && $gotC['warranty_until'] === '2027-01-15', 'equipamento guarda categoria, validade e garantia');
+ok(count($gotC['specs']) === 2 && $gotC['specs'][1] === ['label' => 'Voltagem', 'value' => '220 V'], 'especificações vazias somem e a lista volta em ordem');
+$listC = Equipments::list(['customer_id' => $osCli]);
+ok(isset($listC[0]['specs']) && is_array($listC[0]['specs']), 'lista devolve especificações como lista');
+throws(fn() => Equipments::save(['name' => 'X', 'customer_id' => $osCli, 'valid_until' => '31/05/2030']), 'Data de validade inválida', 'data em formato errado recusada');
+throws(fn() => Equipments::save(['name' => 'X', 'customer_id' => $osCli, 'warranty_until' => '2030-02-31']), 'Garantia inválida', 'data que não existe recusada');
+throws(fn() => Equipments::save(['name' => 'X', 'customer_id' => $osCli, 'specs' => [['label' => '', 'value' => '10']]]), 'nome de cada especificação', 'valor sem nome de especificação recusado');
+Equipments::save(['name' => 'Secador 3HP', 'customer_id' => $osCli, 'warranty_until' => ''], $eqC);
+ok(Equipments::get($eqC)['warranty_until'] === null && Equipments::get($eqC)['specs'] === [], 'edição limpa datas e especificações vazias');
 
 $ckFull = ChecklistModels::save(['name' => 'Manutenção compressor', 'service_type' => 'preventiva', 'items' => "Trocar óleo\n\nVerificar pressão\nLimpar filtro"]);
 $ck = ChecklistModels::get($ckFull);
