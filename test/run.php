@@ -1634,6 +1634,20 @@ $pdLate = array_map(fn($r) => (int)$r['id'], $pd['late']);
 ok($pd['late_count'] === $pdBefore['late_count'] + 2 && in_array($pdAtr, $pdLate, true) && in_array($pdPrazo, $pdLate, true) && !in_array($pdHoje, $pdLate, true), 'painel mostra as atrasadas (agendada no passado ou prazo vencido)');
 ok($pd['unscheduled'] === $pdBefore['unscheduled'] + 1, 'painel conta as OS sem agendamento');
 
+echo "\nApp do técnico\n";
+$tkTech = Auth::createUser(['name' => 'Técnico App', 'email' => 'tecapp@x.com', 'password' => 'senha12345', 'role' => 'member']);
+$tkCli = Customers::save(['type' => 'pf', 'name' => 'Cliente app']);
+$tkOs = ServiceOrders::save(['customer_id' => $tkCli, 'description' => 'Visita', 'technician_id' => $tkTech, 'scheduled_at' => date('Y-m-d') . ' 10:00'], $uid);
+ServiceOrders::save(['customer_id' => $tkCli, 'description' => 'De outro', 'scheduled_at' => date('Y-m-d') . ' 11:00'], $uid);
+$tkMine = ServiceOrders::techTasks(date('Y-m-d'), date('Y-m-d'), $tkTech);
+ok(count($tkMine) === 1 && (int)$tkMine[0]['id'] === $tkOs && isset($tkMine[0]['pending']), 'tarefas do técnico: só as dele, com o número de pendências');
+ok(count(ServiceOrders::techTasks(date('Y-m-d'), date('Y-m-d'), null)) >= 2, 'tarefas da equipe: todas do dia');
+$tkH = ServiceOrders::techHome($tkTech, true);
+ok(count($tkH['today']) === 1 && $tkH['done'] === 0 && isset($tkH['late'], $tkH['running'], $tkH['quotes']['count']), 'início do app: OS de hoje, atrasadas, em execução e orçamentos');
+throws(fn() => ServiceOrders::techTasks('2026-01-01', '2026-06-01', null), 'Período inválido', 'período longo é recusado');
+$tkO = ServiceOrders::get($tkOs);
+ok(array_key_exists('customer_street', $tkO) && array_key_exists('task_type_duration', $tkO), 'OS traz o endereço do cliente e o tempo do tipo de tarefa');
+
 @unlink($db);
 echo "\n$passes passaram, $fails falharam\n";
 exit($fails ? 1 : 0);

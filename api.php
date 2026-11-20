@@ -615,6 +615,15 @@ try {
             ServiceOrders::setStatus((int)($in['id'] ?? 0), (string)($in['status'] ?? ''), (int)$u['id'], isset($in['reason']) ? (string)$in['reason'] : null);
             return ['ok' => true];
         },
+        // ---- App do técnico (celular) ----
+        'GET tech_home' => function () {
+            $u = Auth::requirePerm('ordens');
+            return ServiceOrders::techHome((int)$u['id'], q('all') !== '1') + ['can_quotes' => Auth::can('orcamentos')];
+        },
+        'GET tech_tasks' => function () {
+            $u = Auth::requirePerm('ordens');
+            return ['rows' => ServiceOrders::techTasks((string)q('from'), (string)q('to'), q('all') === '1' ? null : (int)$u['id']), 'statuses' => ServiceOrders::STATUSES];
+        },
         'GET service_order_detail' => function () {
             Auth::requirePerm('ordens');
             return OrderExec::detail((int)q('id'));
