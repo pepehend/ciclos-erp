@@ -1,7 +1,8 @@
 ---
 # Publicação automática pelo cPanel (Git Version Control → "Deploy HEAD Commit").
 # Ajuste DEPLOYPATH se o sistema estiver em outra pasta.
-# Não copia: install.php, testes, app/config.php e os dados — o que já está no servidor é preservado.
+# Não copia: testes, app/config.php e os dados — o que já está no servidor é preservado.
+# O install.php só vai na primeira publicação (enquanto não existe app/config.php); apague-o depois de instalar.
 deployment:
   tasks:
     - export DEPLOYPATH=$HOME/public_html/sistema/
@@ -12,3 +13,4 @@ deployment:
     - /bin/cp -R cliente $DEPLOYPATH
     - /bin/mkdir -p ${DEPLOYPATH}data
     - /bin/cp data/.htaccess data/index.php ${DEPLOYPATH}data/
+    - /bin/test -f ${DEPLOYPATH}app/config.php || /bin/cp install.php $DEPLOYPATH
