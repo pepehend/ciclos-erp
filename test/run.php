@@ -1304,6 +1304,12 @@ throws(fn() => $tq('multipla', 'contem_um', ['Z'], $mx), 'preencha "Resposta esp
 foreach (['texto', 'area', 'documento', 'assinatura', 'foto'] as $bad) throws(fn() => $tq($bad, 'igual', 'x'), 'não suporta condições', "$bad não pode ser pergunta de origem");
 throws(fn() => Questionnaires::save(['name' => 'T', 'questions' => [['id' => 'c', 'label' => 'Filha', 'type' => 'texto', 'cond' => ['question' => 'm', 'op' => 'igual', 'value' => 'Sim']], ['id' => 'm', 'label' => 'Mãe', 'type' => 'itens', 'options' => "Sim\nNão"]]]),
     'A pergunta 1 depende da pergunta 2, que está depois dela', 'pergunta mãe depois da condicional é recusada');
+$qch = Questionnaires::get(Questionnaires::save(['name' => 'Cadeia', 'questions' => [
+    ['id' => 'a', 'label' => 'Liga?', 'type' => 'itens', 'options' => "Sim\nNão"],
+    ['id' => 'b', 'label' => 'Temperatura', 'type' => 'numerica', 'cond' => ['question' => 'a', 'op' => 'igual', 'value' => 'Sim']],
+    ['id' => 'c', 'label' => 'Por que quente?', 'type' => 'texto', 'cond' => ['question' => 'b', 'op' => 'maior', 'value' => '80']]]]))['questions'];
+$chv = fn($a) => array_keys(array_filter(OrderExec::visibleMap($qch, $a)));
+ok($chv(['a' => 'Sim', 'b' => '90']) === ['a', 'b', 'c'] && $chv(['a' => 'Não', 'b' => '90']) === ['a'], 'pergunta condicional também pode ser a pergunta de origem de outra (em cadeia)');
 ok(OrderExec::visibleMap([['id' => 'm', 'type' => 'multipla', 'options' => ['A', 'B']], ['id' => 'c', 'type' => 'texto', 'cond' => ['question' => 'm', 'value' => 'A']]], ['m' => ['A']])['c'], 'condição antiga sem "op" em múltipla vale como Contém um');
 throws(fn() => Questionnaires::save(['name' => 'Sem perguntas', 'questions' => []]), 'pelo menos uma pergunta', 'questionário exige pergunta');
 throws(fn() => Questionnaires::save(['name' => 'Tipo', 'questions' => [['label' => 'x', 'type' => 'xyz']]]), 'Tipo de resposta inválido', 'tipo de resposta validado');
