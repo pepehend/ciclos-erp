@@ -1339,16 +1339,21 @@ function readFiscal(root) {
 // .js-view-only aparece na visualização; .js-edit-only aparece ao editar; .js-needs-edit (adicionar, remover,
 // buscar) fica travado na visualização; abas e links continuam clicáveis.
 const NEEDS_EDIT = '.js-needs-edit, .sp-del, [data-delref]';
-function editLock(root, form, startLocked, after) {
-  const apply = (locked) => {
+/**
+ * Trava/libera um formulário (visualização → "Editar"). Sem permissão de editar (canEdit = false),
+ * o "Editar" some e o formulário fica sempre só para consulta.
+ */
+function editLock(root, form, startLocked, after, canEdit = true) {
+  const apply0 = (locked) => {
     form.querySelectorAll('input, select, textarea').forEach((el) => (el.disabled = locked));
     root.querySelectorAll(NEEDS_EDIT).forEach((el) => (el.disabled = locked));
     root.querySelectorAll('.js-view-only').forEach((el) => (el.hidden = !locked));
     root.querySelectorAll('.js-edit-only').forEach((el) => (el.hidden = locked));
     if (after) after(locked);
   };
+  const apply = (locked) => apply0(locked || !canEdit);
   const ed = root.querySelector('[data-edit]');
-  if (ed) ed.onclick = () => apply(false);
+  if (ed) { if (canEdit) ed.onclick = () => apply(false); else ed.remove(); }
   apply(startLocked);
   return apply;
 }
@@ -1359,7 +1364,7 @@ async function productForm(p, onSaved, { editing = false } = {}) {
   p = p || { type: 'produto', unit: 'un' };
   const cats = state.meta.categories || [];
   const m = modal({
-    title: isNew ? 'Novo produto' : 'Editar produto', wide: true,
+    title: isNew ? 'Novo produto' : can('produtos.edit') ? 'Editar produto' : 'Produto', wide: true,
     body: `<form class="form" id="pf">
       <div class="seg" id="ptabs"><button type="button" data-pt="geral" class="on">Geral</button><button type="button" data-pt="desc">Observações</button><button type="button" data-pt="refs">Referências cruzadas</button><button type="button" data-pt="trib">Tributação</button></div>
       <div class="form" data-pp="geral">
@@ -1452,7 +1457,7 @@ async function productForm(p, onSaved, { editing = false } = {}) {
   if (f.elements.avg_cost) f.elements.avg_cost.oninput = pricing;
   pricing();
 
-  editLock(m.el, f, !isNew && !editing);
+  editLock(m.el, f, !isNew && !editing, null, can(isNew ? 'produtos.add' : 'produtos.edit'));
   $('#save', m.el).onclick = (e) => busy(e.target, async () => {
     const d = formData(f);
     d.type = type;
@@ -2168,7 +2173,7 @@ function customerForm(c, onSaved, { entity = 'customer', editing = false } = {})
   c = c || { type: 'pj' };
   const v = (k) => esc(c[k] ?? '');
   const m = modal({
-    title: (isNew ? 'Novo ' : 'Editar ') + (sup ? 'fornecedor' : 'cliente'), wide: true,
+    title: isNew ? 'Novo ' + (sup ? 'fornecedor' : 'cliente') : can(sup ? 'fornecedores.edit' : 'clientes.edit') ? 'Editar ' + (sup ? 'fornecedor' : 'cliente') : (sup ? 'Fornecedor' : 'Cliente'), wide: true,
     body: `<form class="form" id="cf" autocomplete="off">
       <div class="seg" id="ctype"><button type="button" data-t="pj">Empresa (CNPJ)</button><button type="button" data-t="pf">Pessoa física (CPF)</button></div>
       <div class="row">
@@ -2255,7 +2260,7 @@ function customerForm(c, onSaved, { entity = 'customer', editing = false } = {})
     try { const d = await api('cep', { params: { cep } }); fill({ street: d.street, district: d.district, city: d.city, state: d.state }); $('#cephelp', m.el).textContent = 'Endereço preenchido. Falta o número.'; f.elements.number.focus(); }
     catch (err) { $('#cephelp', m.el).innerHTML = `<span class="stock-low">${esc(err.message)}</span>`; }
   });
-  editLock(m.el, f, !isNew && !editing);
+  editLock(m.el, f, !isNew && !editing, null, can((sup ? 'fornecedores' : 'clientes') + (isNew ? '.add' : '.edit')));
   $('#save', m.el).onclick = (e) => busy(e.target, async () => {
     const d = formData(f);
     const doc = d.document.replace(/\D/g, '');
@@ -2501,7 +2506,7 @@ async function viewCustomer(v, id) {
 function serviceForm(sv, onSaved) {
   const isNew = !sv || !sv.id;
   const m = modal({
-    title: isNew ? 'Novo serviço' : 'Editar serviço',
+    title: isNew ? 'Novo serviço' : can('servicos.edit') ? 'Editar serviço' : 'Serviço',
     body: `<form class="form" id="svf"><label>Nome do serviço * <input name="name" required maxlength="200" value="${esc(sv?.name)}" placeholder="Ex.: Montagem de mesa de doces"></label>
       <label>Preço (R$) * <input name="sale_price" data-num="money" inputmode="decimal" value="${sv && +sv.sale_price ? qty(sv.sale_price, 2) : ''}" placeholder="0,00"></label></form>`,
     foot: `${!isNew && can('servicos.delete') ? `<button class="btn danger" id="svdel" style="margin-right:auto">${icon('trash')}Excluir</button>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="svsave">Salvar serviço</button>`,
@@ -2518,7 +2523,7 @@ function serviceForm(sv, onSaved) {
     const r = await api('product_save', { body });
     invalidateProducts(); m.close(); toast('Serviço salvo'); onSaved && onSaved(r.id);
   });
-  editLock(m.el, f, !isNew);
+  editLock(m.el, f, !isNew, null, can(isNew ? 'servicos.add' : 'servicos.edit'));
   $('#svsave', m.el).onclick = (e) => save(e.currentTarget);
   f.onsubmit = (e) => { e.preventDefault(); save($('#svsave', m.el)); };
 }
@@ -3385,7 +3390,7 @@ async function equipmentForm(eq, onSaved) {
   const customers = await api('customers', { params: { active: '1', limit: 200, sort: 'asc' } });
   const specs = (eq?.specs || []);
   const m = modal({
-    title: isNew ? 'Novo equipamento' : 'Editar equipamento',
+    title: isNew ? 'Novo equipamento' : can('equipamentos.edit') ? 'Editar equipamento' : 'Equipamento',
     body: `<div class="seg" id="eqtabs"><button type="button" data-et="geral" class="on">Geral</button><button type="button" data-et="specs">Especificações</button>${isNew ? '' : '<button type="button" data-et="ordens">Ordens</button>'}</div>
     <form class="form" id="eqf">
       <div data-pane="geral">
@@ -3445,7 +3450,7 @@ async function equipmentForm(eq, onSaved) {
     await api('equipment_save', { body: { ...d, id: eq?.id, specs: list } });
     m.close(); toast('Equipamento salvo'); onSaved && onSaved();
   });
-  editLock(m.el, f, !isNew);
+  editLock(m.el, f, !isNew, null, can(isNew ? 'equipamentos.add' : 'equipamentos.edit'));
   $('#eqsave', m.el).onclick = (e) => save(e.currentTarget);
   f.onsubmit = (e) => { e.preventDefault(); save($('#eqsave', m.el)); };
   const del = $('#eqdel', m.el);
@@ -3789,7 +3794,7 @@ function taskTypeForm(t, meta, qRows, onSaved) {
   // Questionários ativos, mais os inativos que este tipo ainda usa (para não sumirem ao salvar).
   const qList = qRows.filter((q) => +q.active || chosen.has(+q.id));
   const md = modal({
-    title: isNew ? 'Novo tipo de tarefa' : 'Editar tipo de tarefa',
+    title: isNew ? 'Novo tipo de tarefa' : can('tipos_tarefa.edit') ? 'Editar tipo de tarefa' : 'Tipo de tarefa',
     wide: true,
     body: `<form class="form" id="ttf">
       <label>Descrição * <input name="name" required maxlength="120" value="${esc(t?.name)}" placeholder="Ex.: Manutenção preventiva"></label>
@@ -3851,7 +3856,7 @@ function taskTypeForm(t, meta, qRows, onSaved) {
     } });
     md.close(); toast('Tipo salvo'); onSaved && onSaved();
   });
-  editLock(md.el, f, !isNew, (l) => { lockedTT = l; paintQ(); });
+  editLock(md.el, f, !isNew, (l) => { lockedTT = l; paintQ(); }, can(isNew ? 'tipos_tarefa.add' : 'tipos_tarefa.edit'));
   $('#ttsave', md.el).onclick = (e) => save(e.currentTarget);
   f.onsubmit = (e) => { e.preventDefault(); save($('#ttsave', md.el)); };
   const del = $('#ttdel', md.el);
@@ -4124,7 +4129,7 @@ async function viewQuestionnaireForm(v, id) {
     toast(to ? 'Questionário reativado' : 'Questionário desativado'); route();
   });
 
-  editLock(v, $('#qform', v), !isNew, (l) => { locked = l; render(); });
+  editLock(v, $('#qform', v), !isNew, (l) => { locked = l; render(); }, can(isNew ? 'questionarios.add' : 'questionarios.edit'));
   const qc = $('#qcancel', v); if (qc) qc.onclick = () => route();
 }
 
@@ -5824,7 +5829,7 @@ function financeForm(e, meta, onSaved) {
   if (locked) $$('input,select,textarea,#pickp,#clrp', fm).forEach((x) => (x.disabled = true));
   const paintParty = () => { $('#party', m.el).innerHTML = party ? `<div class="cust-card" style="padding:8px 12px"><div class="cust-name">${esc(custName(party))}</div></div>` : '<span class="muted small">Nenhum</span>'; $('#clrp', m.el).hidden = !party || locked; };
   paintParty();
-  if (!locked) editLock(m.el, fm, !isNew);
+  if (!locked) editLock(m.el, fm, !isNew, null, can(isNew ? 'financeiro.add' : 'financeiro.edit'));
   $('#pickp', m.el).onclick = () => customerBrowser({ entity: rec ? 'customer' : 'supplier', selected: party, onSelect: (c) => { party = c; paintParty(); } });
   $('#clrp', m.el).onclick = () => { party = null; paintParty(); };
   if (isNew) {
