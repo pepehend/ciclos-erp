@@ -1272,19 +1272,49 @@ ok(count($qg['questions']) === 5 && $qg['questions'][0]['id'] === 'p1' && $qg['q
 ok($qg['questions'][2]['options'] === ['Funcionando', 'Com defeito'], 'opções: vazias e repetidas somem');
 ok($qg['questions'][1]['geo'] === true && $qg['questions'][3]['cond'] === ['question' => 'p3', 'op' => 'igual', 'value' => 'Com defeito'], 'foto com localização e condição (Igual por padrão) são guardadas');
 $cBase = [['label' => 'Situação', 'type' => 'itens', 'options' => "Funcionando\nCom defeito"], ['label' => 'Obs', 'type' => 'texto']];
-throws(fn() => Questionnaires::save(['name' => 'C', 'questions' => [...$cBase, ['label' => 'Depende', 'type' => 'texto', 'cond' => ['question' => 'p2', 'value' => 'x']]]]), 'do tipo Itens', 'condição só aceita pergunta anterior do tipo Itens');
-throws(fn() => Questionnaires::save(['name' => 'C', 'questions' => [...$cBase, ['label' => 'Depende', 'type' => 'texto', 'cond' => ['question' => 'p1', 'value' => 'Quebrado']]]]), 'uma das opções', 'resposta esperada precisa ser uma opção da pergunta');
-throws(fn() => Questionnaires::save(['name' => 'C', 'questions' => [...$cBase, ['label' => 'Depende', 'type' => 'texto', 'cond' => ['question' => 'p1', 'op' => 'maior', 'value' => 'Funcionando']]]]), 'Igual ou Diferente', 'condição só Igual ou Diferente');
+throws(fn() => Questionnaires::save(['name' => 'C', 'questions' => [...$cBase, ['label' => 'Depende', 'type' => 'texto', 'cond' => ['question' => 'p2', 'value' => 'x']]]]), 'não suporta condições', 'texto não pode ser usado em "Apresentar quando"');
+throws(fn() => Questionnaires::save(['name' => 'C', 'questions' => [...$cBase, ['label' => 'Depende', 'type' => 'texto', 'cond' => ['question' => 'p1', 'value' => 'Quebrado']]]]), 'preencha "Resposta esperada"', 'resposta esperada precisa ser uma opção da pergunta');
+throws(fn() => Questionnaires::save(['name' => 'C', 'questions' => [...$cBase, ['label' => 'Depende', 'type' => 'texto', 'cond' => ['question' => 'p1', 'op' => 'maior', 'value' => 'Funcionando']]]]), 'preencha "Condição"', 'Itens só aceita Igual ou Diferente');
 $qDif = Questionnaires::get(Questionnaires::save(['name' => 'C', 'questions' => [...$cBase, ['label' => 'Por quê?', 'type' => 'texto', 'cond' => ['question' => 'p1', 'op' => 'diferente', 'value' => 'Funcionando']],
     ['label' => 'Detalhe', 'type' => 'texto', 'cond' => ['question' => 'p1', 'op' => 'igual', 'value' => 'Com defeito']]]]))['questions'];
 $vm = fn($a) => array_keys(array_filter(OrderExec::visibleMap($qDif, $a)));
 ok($vm([]) === ['p1', 'p2'], 'condicional não aparece enquanto a pergunta de origem não foi respondida (Igual e Diferente)');
 ok($vm(['p1' => 'Com defeito']) === ['p1', 'p2', 'p3', 'p4'], 'Diferente de "Funcionando" e Igual a "Com defeito" aparecem');
 ok($vm(['p1' => 'Funcionando']) === ['p1', 'p2'], 'resposta igual à esperada esconde a condicional "Diferente"');
+// Condições por tipo da pergunta de origem (Numérica, Monetária, Data, Hora, Check e Itens com múltipla escolha)
+$tq = fn($type, $op, $value, $extra = []) => Questionnaires::get(Questionnaires::save(['name' => 'T', 'questions' => [
+    ['id' => 'm', 'label' => 'Mãe', 'type' => $type] + $extra, ['id' => 'c', 'label' => 'Filha', 'type' => 'texto', 'cond' => ['question' => 'm', 'op' => $op, 'value' => $value]]]]))['questions'];
+$shows = fn($qs, $ans) => OrderExec::visibleMap($qs, ['m' => $ans])['c'];
+$qn = $tq('numerica', 'maior_igual', '10,5');
+ok($qn[1]['cond']['value'] === '10.5' && $shows($qn, '10,5') && $shows($qn, '11') && !$shows($qn, '10') && !$shows($qn, ''), 'Numérica: Maior ou igual (vírgula aceita, sem resposta esconde)');
+ok($shows($tq('monetaria', 'menor', 'R$ 1.000,00'), '999.99') && !$shows($tq('monetaria', 'menor', '1000'), '1000'), 'Monetária: Menor');
+$qd = $tq('data', 'maior', '01/12/2026');
+ok($qd[1]['cond']['value'] === '2026-12-01' && $shows($qd, '2026-12-02') && !$shows($qd, '2026-12-01'), 'Data: Maior (dd/mm/aaaa vira aaaa-mm-dd)');
+ok($shows($tq('hora', 'diferente', '8:00'), '09:00') && !$shows($tq('hora', 'diferente', '08:00'), '08:00'), 'Hora: Diferente');
+$qc = $tq('check', 'igual', 'Falso');
+ok($qc[1]['cond']['value'] === 'nao' && $shows($qc, '') && !$shows($qc, 'Sim') && $shows($tq('check', 'igual', 'Verdadeiro'), 'Sim'), 'Check: Igual a Verdadeiro/Falso (sem marcar = Falso)');
+throws(fn() => $tq('check', 'diferente', 'sim'), 'preencha "Condição"', 'Check só aceita Igual');
+$mx = ['options' => "A\nB\nC"];
+$qm = $tq('multipla', 'contem_todos', ['A', 'B'], $mx);
+ok($qm[1]['cond']['value'] === ['A', 'B'] && $shows($qm, ['A', 'B', 'C']) && !$shows($qm, ['A']), 'Múltipla: Contém todos');
+ok($shows($tq('multipla', 'contem_um', ['A', 'B'], $mx), ['B']) && !$shows($tq('multipla', 'contem_um', ['A', 'B'], $mx), ['C']), 'Múltipla: Contém um');
+ok($shows($tq('multipla', 'nao_contem_um', ['A', 'B'], $mx), ['C']) && !$shows($tq('multipla', 'nao_contem_um', ['A', 'B'], $mx), ['B', 'C']) && !$shows($tq('multipla', 'nao_contem_um', ['A'], $mx), []), 'Múltipla: Não contém um (sem resposta esconde)');
+throws(fn() => $tq('multipla', 'igual', ['A'], $mx), 'preencha "Condição"', 'Múltipla não aceita Igual');
+throws(fn() => $tq('multipla', 'contem_um', ['Z'], $mx), 'preencha "Resposta esperada"', 'Múltipla: itens esperados precisam estar nas opções');
+foreach (['texto', 'area', 'documento', 'assinatura', 'foto'] as $bad) throws(fn() => $tq($bad, 'igual', 'x'), 'não suporta condições', "$bad não pode ser pergunta de origem");
+throws(fn() => Questionnaires::save(['name' => 'T', 'questions' => [['id' => 'c', 'label' => 'Filha', 'type' => 'texto', 'cond' => ['question' => 'm', 'op' => 'igual', 'value' => 'Sim']], ['id' => 'm', 'label' => 'Mãe', 'type' => 'itens', 'options' => "Sim\nNão"]]]),
+    'A pergunta 1 depende da pergunta 2, que está depois dela', 'pergunta mãe depois da condicional é recusada');
+$qch = Questionnaires::get(Questionnaires::save(['name' => 'Cadeia', 'questions' => [
+    ['id' => 'a', 'label' => 'Liga?', 'type' => 'itens', 'options' => "Sim\nNão"],
+    ['id' => 'b', 'label' => 'Temperatura', 'type' => 'numerica', 'cond' => ['question' => 'a', 'op' => 'igual', 'value' => 'Sim']],
+    ['id' => 'c', 'label' => 'Por que quente?', 'type' => 'texto', 'cond' => ['question' => 'b', 'op' => 'maior', 'value' => '80']]]]))['questions'];
+$chv = fn($a) => array_keys(array_filter(OrderExec::visibleMap($qch, $a)));
+ok($chv(['a' => 'Sim', 'b' => '90']) === ['a', 'b', 'c'] && $chv(['a' => 'Não', 'b' => '90']) === ['a'], 'pergunta condicional também pode ser a pergunta de origem de outra (em cadeia)');
+ok(OrderExec::visibleMap([['id' => 'm', 'type' => 'multipla', 'options' => ['A', 'B']], ['id' => 'c', 'type' => 'texto', 'cond' => ['question' => 'm', 'value' => 'A']]], ['m' => ['A']])['c'], 'condição antiga sem "op" em múltipla vale como Contém um');
 throws(fn() => Questionnaires::save(['name' => 'Sem perguntas', 'questions' => []]), 'pelo menos uma pergunta', 'questionário exige pergunta');
 throws(fn() => Questionnaires::save(['name' => 'Tipo', 'questions' => [['label' => 'x', 'type' => 'xyz']]]), 'Tipo de resposta inválido', 'tipo de resposta validado');
 throws(fn() => Questionnaires::save(['name' => 'Opções', 'questions' => [['label' => 'Escolha', 'type' => 'multipla', 'options' => '']]]), 'opções', 'pergunta de itens exige opções');
-throws(fn() => Questionnaires::save(['name' => 'Cond', 'questions' => [['label' => 'Depende', 'type' => 'texto', 'cond' => ['question' => 'p9', 'value' => 'x']]]]), 'pergunta anterior', 'condição precisa de pergunta anterior');
+throws(fn() => Questionnaires::save(['name' => 'Cond', 'questions' => [['label' => 'Depende', 'type' => 'texto', 'cond' => ['question' => 'p9', 'value' => 'x']]]]), 'preencha "Apresentar quando"', 'condição precisa de pergunta anterior');
 throws(fn() => Questionnaires::save(['name' => 'Linha', 'per_line' => 5, 'questions' => [['label' => 'x', 'type' => 'texto']]]), 'de 1 a 4', 'perguntas por linha de 1 a 4');
 
 $ttFull = TaskTypes::save(['name' => 'Preventiva mensal', 'tolerance' => '01:30', 'duration' => '2:15', 'questionnaire_ids' => [$qFull], 'requires' => ['relato', 'questionario', 'assinatura'], 'send_survey' => 1]);
