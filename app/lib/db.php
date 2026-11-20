@@ -568,6 +568,10 @@ class DB
             self::pdo()->query('SELECT id FROM service_orders LIMIT 1');
         } catch (PDOException $e) {
             self::migrate();
+            // O perfil "Acesso total" ganha a área nova e entra o perfil "Técnico"
+            $p = self::one("SELECT id FROM permission_profiles WHERE name = 'Acesso total'");
+            if ($p) self::update('permission_profiles', (int)$p['id'], ['permissions' => implode(',', array_keys(Auth::PERMS))]);
+            Auth::seedProfiles();
         }
         // v1.25.0: portal do cliente (acesso e pedidos de correção)
         try {

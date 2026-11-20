@@ -135,6 +135,7 @@ class Auth
             'Acesso total' => array_keys(self::PERMS),
             'Vendedor' => ['vendas', 'orcamentos', 'clientes', 'servicos'],
             'Estoque' => ['produtos', 'notas', 'movimentacoes', 'fornecedores'],
+            'Técnico' => ['ordens'],
         ];
         foreach ($base as $name => $perms) {
             if (!DB::val('SELECT id FROM permission_profiles WHERE name = ?', [$name])) {
