@@ -2662,6 +2662,19 @@ function qVisible(questions, ans) {
   return vis;
 }
 
+// Situação do questionário (igual a OrderExec::progress/missing): não respondido, falta obrigatória/equipamento, completo
+const qFilled = (q, v) => (Array.isArray(v) ? v.length > 0 : q.type === 'check' ? v === 'Sim' : String(v ?? '').trim() !== '');
+function qStatusHtml(q, ans, equipmentId) {
+  const vis = qVisible(q.questions, ans);
+  const shown = q.questions.filter((x) => vis[x.id]);
+  const filled = shown.filter((x) => qFilled(x, ans[x.id])).length;
+  const missing = shown.filter((x) => x.required && !qFilled(x, ans[x.id])).length;
+  const count = `<span class="muted"> · ${filled} de ${shown.length} respondida(s)</span>`;
+  if (!filled) return `<span class="badge${q.linked ? ' red' : ''}">Não respondido</span>`;
+  const faltas = [missing ? `${missing} obrigatória(s)` : '', +q.allow_equipment && +q.equipment_required && !equipmentId ? 'o equipamento' : ''].filter(Boolean);
+  return (faltas.length ? `<span class="badge red">Incompleto: falta ${faltas.join(' e ')}</span>` : '<span class="badge ok">Respondido</span>') + count;
+}
+
 // Campo de resposta de uma pergunta (o valor fica em "ans"; fotos e assinatura por botões)
 function qFieldHtml(q, v) {
   const id = esc(q.id);
@@ -2881,8 +2894,8 @@ async function viewServiceOrderForm(v, id) {
   const qp = pane('questionarios');
   qp.innerHTML = qs.length ? qs.map((q, n) => `<div class="card qrun" data-qn="${n}">
       <div class="card-head"><div><h2>${esc(q.name)}</h2>
-        <div class="small">${!q.answered ? `<span class="badge${q.linked ? ' red' : ''}">Não respondido</span>` : q.missing.length ? `<span class="badge red">Falta ${q.missing.length} obrigatória(s)</span>` : '<span class="badge ok">Respondido</span>'}
-          ${q.answered_at ? `<span class="muted"> · atualizado em ${dt(q.answered_at)}</span>` : ''}${q.linked ? '' : '<span class="muted"> · fora do tipo de tarefa atual</span>'}</div></div></div>
+        <div class="small"><span class="qstat">${qStatusHtml(q, q.answers || {}, q.answer_equipment_id)}</span>
+          ${q.answered && q.answered_at ? `<span class="muted"> · atualizado em ${dt(q.answered_at)}</span>` : ''}${q.linked ? '' : '<span class="muted"> · fora do tipo de tarefa atual</span>'}</div></div></div>
       <form class="form" onsubmit="return false">
         ${q.allow_equipment ? `<label>Equipamento${q.equipment_required ? ' *' : ''} <select data-eq><option value="">Nenhum</option>${D.equipments.map((e) => `<option value="${e.id}" ${+q.answer_equipment_id === +e.id ? 'selected' : ''}>${esc(e.name)}${e.serial ? ' · ' + esc(e.serial) : ''}</option>`).join('')}</select></label>` : ''}
         <div class="qr-grid" style="--cols:${Math.max(1, +q.per_line || 1)}"></div>
@@ -2907,9 +2920,15 @@ async function viewServiceOrderForm(v, id) {
       else ans[x.id] = el.value;
       dirty = true;
     };
-    const updVis = () => { const vis = qVisible(q.questions, ans); $$('.qf', grid).forEach((f) => (f.hidden = !vis[f.dataset.qid])); };
-    card.addEventListener('input', (e) => { if (e.target.dataset.q) { read(e.target); updVis(); } if (e.target.matches('[data-eq]')) dirty = true; });
-    card.addEventListener('change', (e) => { if (e.target.dataset.q) { read(e.target); updVis(); } if (e.target.matches('[data-eq]')) dirty = true; });
+    // A cada mudança: mostra/esconde as condicionais e confere de novo se o questionário está completo
+    const updVis = () => {
+      const vis = qVisible(q.questions, ans);
+      $$('.qf', grid).forEach((f) => (f.hidden = !vis[f.dataset.qid]));
+      const eq = $('[data-eq]', card);
+      $('.qstat', card).innerHTML = qStatusHtml(q, ans, eq ? +eq.value || null : q.answer_equipment_id);
+    };
+    card.addEventListener('input', (e) => { if (e.target.dataset.q) { read(e.target); updVis(); } if (e.target.matches('[data-eq]')) { dirty = true; updVis(); } });
+    card.addEventListener('change', (e) => { if (e.target.dataset.q) { read(e.target); updVis(); } if (e.target.matches('[data-eq]')) { dirty = true; updVis(); } });
     grid.addEventListener('click', async (e) => {
       if (isLocked) return;
       const add = e.target.closest('[data-phadd]'), del = e.target.closest('[data-phdel]'), sg = e.target.closest('[data-sig]'), sgd = e.target.closest('[data-sigdel]');
