@@ -35,6 +35,9 @@ const ICONS = {
   palette: '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.9 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="14.5" cy="7" r="1"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3.6 14H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 9.7 3.6V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1.3z"/>',
   tool: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3.5 17.3a1.7 1.7 0 0 0 2.4 2.4l5.8-5.8a4 4 0 0 0 5.2-5.4l-2.5 2.5-2.1-.4-.4-2.1z"/>',
+  history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
   truck: '<path d="M2 6h11v10H2zM13 9h4l3 3.5V16h-7z"/><circle cx="6" cy="17.5" r="1.8"/><circle cx="16.5" cy="17.5" r="1.8"/>',
   lock: '<rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/>',
   chevron: '<path d="M9 6l6 6-6 6"/>',
@@ -2303,7 +2306,7 @@ function bindPortalCard(v, c) {
 }
 
 /** Status em que a ordem ainda não foi concluída (mesma regra de ServiceOrders::OPEN). */
-const SO_OPEN_CODES = ['aberta', 'agendada', 'em_execucao', 'pausada'];
+const SO_OPEN_CODES = ['aberta', 'agendada', 'a_caminho', 'em_execucao', 'pausada'];
 const soDate = (s) => (s ? String(s).split('-').reverse().join('/') : '—');
 
 /** Tabela de ordens (ficha do cliente e histórico do equipamento). */
@@ -2438,9 +2441,9 @@ async function viewServices(v) {
 }
 
 // ============ Ordens de serviço ============
-const SO_TABS = [['abertas', 'Em aberto'], ['aberta', 'Abertas'], ['agendada', 'Agendadas'], ['em_execucao', 'Em execução'], ['pausada', 'Pausadas'], ['concluida', 'Concluídas'], ['faturada', 'Faturadas'], ['todas', 'Todas']];
+const SO_TABS = [['abertas', 'Em aberto'], ['aberta', 'Abertas'], ['agendada', 'Agendadas'], ['a_caminho', 'A caminho'], ['em_execucao', 'Em execução'], ['pausada', 'Pausadas'], ['concluida', 'Concluídas'], ['todas', 'Todas']];
 const soStatusHtml = (code, labels) => {
-  const cls = { concluida: 'ok', faturada: 'ok', pausada: 'warn', em_execucao: 'accent', agendada: 'accent' }[code] || '';
+  const cls = { concluida: 'ok', pausada: 'warn', em_execucao: 'accent', a_caminho: 'accent', agendada: 'accent' }[code] || '';
   return `<span class="badge ${cls}">${esc(labels[code] || code)}</span>`;
 };
 const soCustomer = (r) => esc(r.customer_trade_name || r.customer_name || '');
@@ -2535,9 +2538,9 @@ function qVisible(questions, ans) {
     let ok = true;
     if (q.cond) {
       const want = String(q.cond.value).trim().toLowerCase(), v = ans[q.cond.question];
-      if (!vis[q.cond.question]) ok = false;
-      else if (Array.isArray(v)) ok = v.some((x) => String(x).trim().toLowerCase() === want);
-      else ok = String(v ?? '').trim().toLowerCase() === want;
+      const got = Array.isArray(v) ? v.map((x) => String(x).trim().toLowerCase()) : (String(v ?? '').trim() ? [String(v).trim().toLowerCase()] : []);
+      if (!vis[q.cond.question] || !got.length) ok = false;
+      else ok = (q.cond.op || 'igual') === 'diferente' ? !got.includes(want) : got.includes(want);
     }
     vis[q.id] = ok;
   }
@@ -2567,13 +2570,15 @@ function qFieldHtml(q, v) {
   }
 }
 
-const SO_ACTION = { aberta: 'Voltar para aberta', agendada: 'Marcar como agendada', pausada: 'Pausar', concluida: 'Concluir (check-out)', faturada: 'Marcar como faturada' };
-const SO_FICHA_TABS = [['detalhes', 'Detalhes'], ['relato', 'Relato'], ['questionarios', 'Questionários'], ['valores', 'Valores'], ['pendencias', 'Pendências'], ['horas', 'Controle de horas'], ['envios', 'Envios']];
+const SO_ACTION = { aberta: 'Voltar para aberta', agendada: 'Marcar como agendada', a_caminho: 'A caminho (deslocamento)', pausada: 'Pausar', concluida: 'Concluir (check-out)' };
+const SO_FICHA_TABS = [['detalhes', 'Detalhes'], ['relato', 'Relato'], ['questionarios', 'Questionários'], ['valores', 'Valores'], ['orcamentos', 'Orçamentos'], ['pendencias', 'Pendências'], ['horas', 'Controle de horas'], ['envios', 'Envios']];
 
 async function viewServiceOrderForm(v, id) {
   const isNew = !id;
   const D = isNew ? null : await api('service_order_detail', { params: { id } });
-  const o = isNew ? { status: 'aberta', origin: 'chamado' } : D.order;
+  const fromQuote = isNew ? JSON.parse(sessionStorage.getItem('soFromQuote') || 'null') : null;
+  sessionStorage.removeItem('soFromQuote');
+  const o = isNew ? { status: 'aberta', origin: 'chamado', ...(fromQuote || {}) } : D.order;
   const form = await api('service_order_form', { params: { customer_id: o.customer_id || 0 } });
   const customers = await api('customers', { params: { active: '1', limit: 200, sort: 'asc' } });
   const fields = (f) => {
@@ -2587,8 +2592,6 @@ async function viewServiceOrderForm(v, id) {
     if (o.task_type_id && !list.some((t) => +t.id === +o.task_type_id)) list.push({ id: o.task_type_id, name: `${o.task_type_name || 'Tipo removido'} (inativo)` });
     return list.map((t) => `<option value="${t.id}" ${+o.task_type_id === +t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
   })();
-  const locked = o.status === 'faturada';
-  const editBtns = (k) => locked ? '' : `<span class="inline"><button type="button" class="btn sm js-view-only" data-edit>${icon('pencil')}Editar</button><button type="button" class="btn sm js-edit-only" data-cancel="${k}">${icon('x')}Cancelar</button><button type="button" class="btn sm primary js-edit-only" data-save="${k}">Salvar</button></span>`;
   const detailsForm = `<form class="form" id="soform">
       <label>Cliente * <select name="customer_id" id="cust" required><option value="">Selecione…</option>${customers.rows.map((c) => `<option value="${c.id}" ${+o.customer_id === +c.id ? 'selected' : ''}>${esc(custName(c))}</option>`).join('')}</select></label>
       <div class="grid two"><label>Equipamento <span id="eqs"></span></label>
@@ -2621,50 +2624,56 @@ async function viewServiceOrderForm(v, id) {
       toast('Ordem salva');
       if (isNew) go('ordem/' + r.id); else route();
     });
-    $('#soform', v).onsubmit = (e) => { e.preventDefault(); saveDetails($('#sosave', v) || $('[data-save=detalhes]', root)); };
-    if (!isNew) {
-      editLock(root, $('#soform', v), true);
-      const sv = $('[data-save=detalhes]', root); if (sv) sv.onclick = () => saveDetails(sv);
-    }
+    $('#soform', v).onsubmit = (e) => { e.preventDefault(); if (isNew) saveDetails($('#sosave', v)); };
   };
 
   if (isNew) {
-    v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/ordens">← Ordens de serviço</a></p><h1>Nova ordem de serviço</h1></div></div><div class="card">${detailsForm}</div>`;
+    v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/ordens">← Ordens de serviço</a></p><h1>Nova ordem de serviço${fromQuote ? ` <span class="muted small">(do orçamento #${fromQuote.quote_id})</span>` : ''}</h1></div></div><div class="card">${detailsForm}</div>`;
     bindDetails(v);
     return;
   }
 
   // ---------- Ficha da OS existente ----------
+  // Uma edição só para a OS inteira: "Editar" no topo libera todas as abas; "Salvar" grava o que mudou em cada uma.
   const tabKey = 'soTab:' + o.id;
   let tab = sessionStorage.getItem(tabKey) || 'detalhes';
   const pend = D.pending;
   const qs = D.questionnaires;
-  const qMissing = qs.reduce((n, q) => n + (q.answered ? q.missing.length : (q.linked ? 1 : 0)), 0);
-  const counts = { questionarios: qs.length, valores: D.items.rows.length, pendencias: pend.length, envios: D.sends.length };
+  const counts = { questionarios: qs.length, valores: D.items.rows.length, orcamentos: D.quotes.length, pendencias: pend.length, envios: D.sends.length };
   const cust = o.customer_trade_name || o.customer_name;
+  const locks = [];   // funções que travam/liberam cada aba (editLock)
+  const savers = [];  // [nome, async () => número de alterações]
   const transitions = o.transitions.map((s) => {
-    const label = s === 'em_execucao' ? (o.status === 'pausada' ? 'Retomar atendimento' : 'Iniciar atendimento (check-in)') : SO_ACTION[s] || s;
+    const label = s === 'em_execucao' ? (o.status === 'pausada' ? 'Retomar atendimento' : 'Iniciar atendimento (check-in)')
+      : s === 'agendada' && o.status === 'a_caminho' ? 'Cancelar deslocamento' : SO_ACTION[s] || s;
     const cls = s === 'concluida' || s === 'em_execucao' ? 'btn primary' : 'btn';
-    return `<button class="${cls}" data-to="${s}">${icon(s === 'pausada' ? 'minusc' : 'check')}${esc(label)}</button>`;
+    return `<button class="${cls}" data-to="${s}">${icon(s === 'pausada' ? 'minusc' : s === 'a_caminho' ? 'truck' : 'check')}${esc(label)}</button>`;
   }).join('');
 
-  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/ordens">← Ordens de serviço</a></p><h1>Ordem de serviço #${o.id}</h1>
+  v.innerHTML = `<div class="page-head" id="sohead"><div><p class="small"><a href="#/ordens">← Ordens de serviço</a></p><h1>Ordem de serviço #${o.id}</h1>
       <p class="muted">${soStatusHtml(o.status, form.statuses)} · ${esc(cust)}${o.task_type_name ? ` · ${esc(o.task_type_name)}` : ''}${o.scheduled_at ? ` · ${dt(o.scheduled_at)}` : ''}</p></div>
-    <div class="actions">${transitions}
-      <div class="dd"><button type="button" class="btn dd-btn" aria-haspopup="true" aria-expanded="false">${icon('menu')}Mais ações${icon('chevron')}</button>
-        <div class="dd-menu" role="menu" hidden>
-          <a role="menuitem" href="${esc(o.public_url)}" target="_blank" rel="noopener">${icon('eye')}Ver OS digital</a>
-          <button type="button" role="menuitem" data-act="link">${icon('link')}Copiar link da OS</button>
-          <button type="button" role="menuitem" data-act="email">${icon('mail')}Enviar OS por e-mail</button>
-          <button type="button" role="menuitem" data-act="whats">${icon('whats')}Enviar pelo WhatsApp</button>
-        </div></div></div></div>
-    ${pend.length && !['concluida', 'faturada'].includes(o.status) ? `<div class="alert warn so-pend">${icon('warn')}<span>Para concluir esta ordem falta ${pend.length} ${pend.length === 1 ? 'item' : 'itens'}. <a href="#" data-tabgo="pendencias">Ver pendências</a></span></div>` : ''}
+    <div class="actions">
+      <span class="inline js-view-only">${transitions}
+        <button class="btn" id="soedit">${icon('pencil')}Editar</button>
+        <div class="dd"><button type="button" class="btn dd-btn" aria-haspopup="true" aria-expanded="false">${icon('menu')}Mais ações${icon('chevron')}</button>
+          <div class="dd-menu" role="menu" hidden>
+            <a role="menuitem" href="${esc(o.public_url)}" target="_blank" rel="noopener">${icon('eye')}Ver OS digital</a>
+            <button type="button" role="menuitem" data-act="link">${icon('link')}Copiar link da OS</button>
+            <button type="button" role="menuitem" data-act="email">${icon('mail')}Enviar OS por e-mail</button>
+            <button type="button" role="menuitem" data-act="whats">${icon('whats')}Enviar pelo WhatsApp</button>
+            ${can('orcamentos') ? `<button type="button" role="menuitem" data-act="quote">${icon('quote')}Abrir orçamento</button>` : ''}
+          </div></div></span>
+      <span class="inline js-edit-only" hidden><button class="btn" id="socancelall">${icon('x')}Cancelar</button><button class="btn primary" id="sosaveall">${icon('check')}Salvar</button></span>
+    </div></div>
+    <div class="alert info so-editing js-edit-only" hidden>${icon('pencil')}<span>Editando a ordem: altere o que precisar em qualquer aba e clique em <strong>Salvar</strong> no topo.</span></div>
+    ${pend.length && o.status !== 'concluida' ? `<div class="alert warn so-pend js-view-only">${icon('warn')}<span>Para concluir esta ordem falta ${pend.length} ${pend.length === 1 ? 'item' : 'itens'}. <a href="#" data-tabgo="pendencias">Ver pendências</a></span></div>` : ''}
     <div class="seg so-tabs" id="sotabs">${SO_FICHA_TABS.map(([k, l]) => `<button type="button" data-tab="${k}">${l}${counts[k] ? ` <span class="badge${k === 'pendencias' ? ' red' : ''}">${counts[k]}</span>` : ''}</button>`).join('')}</div>
     <div id="sopanes">
-      <div class="card" data-pane="detalhes"><div class="card-head"><h2>Dados da ordem</h2>${editBtns('detalhes')}</div>${detailsForm}</div>
+      <div class="card" data-pane="detalhes"><h2>Dados da ordem</h2>${detailsForm}</div>
       <div data-pane="relato"></div>
       <div data-pane="questionarios"></div>
       <div data-pane="valores"></div>
+      <div data-pane="orcamentos"></div>
       <div class="card" data-pane="pendencias"></div>
       <div class="card" data-pane="horas"></div>
       <div data-pane="envios"></div>
@@ -2678,16 +2687,26 @@ async function viewServiceOrderForm(v, id) {
   };
   $('#sotabs', v).onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) showTab(b.dataset.tab); };
   v.addEventListener('click', (e) => { const a = e.target.closest('[data-tabgo]'); if (a) { e.preventDefault(); showTab(a.dataset.tabgo); } });
-  // Cancelar a edição de qualquer aba: recarrega a ficha (descarta o que não foi salvo)
-  v.addEventListener('click', (e) => { if (e.target.closest('[data-cancel]')) route(); });
 
   // ---- Detalhes
   bindDetails(pane('detalhes'));
+  const sof = $('#soform', v);
+  const detSnap = JSON.stringify(formData(sof));
+  locks.push(editLock(pane('detalhes'), sof, true));
+  savers.push(['Detalhes', async () => {
+    if (JSON.stringify(formData(sof)) === detSnap) return 0;
+    if (!sof.reportValidity()) { showTab('detalhes'); throw new Error('Confira os campos obrigatórios em Detalhes'); }
+    const d = formData(sof);
+    if (d.origin === 'orcamento' && !d.quote_id) { showTab('detalhes'); throw new Error('Selecione o orçamento em Detalhes'); }
+    await api('service_order_save', { body: { ...d, id: o.id } });
+    return 1;
+  }]);
 
   // ---- Relato, fotos, assinatura e km
   const rp = pane('relato');
   let sig; // undefined = sem mudança; '' = remover; data URL = nova
-  rp.innerHTML = `<div class="card"><div class="card-head"><h2>Relato do atendimento</h2>${editBtns('relato')}</div>
+  const newPhotos = []; const delPhotos = new Set();
+  rp.innerHTML = `<div class="card"><h2>Relato do atendimento</h2>
       <form class="form" id="rpf">
         <label>O que foi feito <textarea name="report" rows="5" maxlength="10000" placeholder="Descreva o serviço realizado, peças trocadas, recomendações…">${esc(o.report || '')}</textarea></label>
         <div class="grid two"><label>Km rodado <input name="km" inputmode="decimal" value="${o.km != null ? esc(String(o.km).replace('.', ',')) : ''}" placeholder="0"></label></div>
@@ -2698,47 +2717,57 @@ async function viewServiceOrderForm(v, id) {
         </fieldset>
       </form></div>
     <div class="card"><div class="card-head"><h2>Fotos <span class="badge">${D.photos.length}</span></h2>
-        ${locked ? '' : `<button type="button" class="btn sm js-needs-edit" id="phadd">${icon('camera')}Adicionar fotos</button>`}</div>
-      ${D.photos.length ? `<div class="so-photos">${D.photos.map((p) => `<figure><a href="${esc(p.image)}" target="_blank" rel="noopener"><img src="${esc(p.image)}" alt="Foto"></a>
+        <button type="button" class="btn sm js-edit-only js-needs-edit" id="phadd" hidden>${icon('camera')}Adicionar fotos</button></div>
+      <div class="so-photos" id="phlist">${D.photos.map((p) => `<figure data-ph="${p.id}"><a href="${esc(p.image)}" target="_blank" rel="noopener"><img src="${esc(p.image)}" alt="Foto"></a>
           <figcaption>${esc(p.caption || '')}<span class="small muted">${dt(p.created_at)}${p.user_name ? ' · ' + esc(p.user_name) : ''}</span></figcaption>
-          ${locked ? '' : `<button type="button" class="icon-btn js-needs-edit" data-phdel="${p.id}" title="Excluir foto" aria-label="Excluir foto">${icon('trash')}</button>`}</figure>`).join('')}</div>`
-        : '<p class="muted small">Nenhuma foto. Fotos do equipamento, do serviço feito ou de peças trocadas.</p>'}</div>`;
+          <button type="button" class="icon-btn js-needs-edit" data-phdel="${p.id}" title="Excluir foto" aria-label="Excluir foto">${icon('trash')}</button></figure>`).join('')}</div>
+      <div class="so-photos" id="phnew"></div>
+      ${D.photos.length ? '' : '<p class="muted small" id="phempty">Nenhuma foto. Fotos do equipamento, do serviço feito ou de peças trocadas.</p>'}</div>`;
   const paintSig = () => {
     const cur = sig === undefined ? o.signature : sig;
     $('#rpsig', rp).innerHTML = `<div class="qsig">${cur ? `<img src="${esc(cur)}" alt="Assinatura">` : '<span class="muted small">Sem assinatura</span>'}
-      ${locked ? '' : `<span class="inline"><button type="button" class="btn sm js-needs-edit" id="sgnew">${icon('pencil')}${cur ? 'Assinar de novo' : 'Colher assinatura'}</button>${cur ? '<button type="button" class="btn sm ghost js-needs-edit" id="sgdel">Remover</button>' : ''}</span>`}</div>`;
+      <span class="inline"><button type="button" class="btn sm js-needs-edit" id="sgnew">${icon('pencil')}${cur ? 'Assinar de novo' : 'Colher assinatura'}</button>${cur ? '<button type="button" class="btn sm ghost js-needs-edit" id="sgdel">Remover</button>' : ''}</span></div>`;
+  };
+  const paintNewPhotos = () => {
+    $('#phnew', rp).innerHTML = newPhotos.map((p, i) => `<figure><img src="${esc(p.image)}" alt="Foto nova"><figcaption><span class="badge">Nova</span>${esc(p.caption)}</figcaption>
+      <button type="button" class="icon-btn" data-phnewdel="${i}" title="Tirar esta foto" aria-label="Tirar esta foto">${icon('x')}</button></figure>`).join('');
   };
   paintSig();
-  const rpLock = editLock(rp, $('#rpf', rp), true, (l) => $$('#rpsig button', rp).forEach((b) => (b.disabled = l)));
+  const rpf = $('#rpf', rp);
+  const rpSnap = JSON.stringify(formData(rpf));
+  let rpLocked = true;
+  locks.push(editLock(rp, rpf, true, (l) => { rpLocked = l; $$('#rpsig button', rp).forEach((b) => (b.disabled = l)); }));
   rp.addEventListener('click', async (e) => {
-    if (e.target.closest('#sgnew')) { const s = await signaturePad('Assinatura do cliente'); if (s) { sig = s; paintSig(); rpLock(false); } }
-    if (e.target.closest('#sgdel')) { sig = ''; paintSig(); rpLock(false); }
+    if (rpLocked) return;
+    if (e.target.closest('#sgnew')) { const s = await signaturePad('Assinatura do cliente'); if (s) { sig = s; paintSig(); } }
+    if (e.target.closest('#sgdel')) { sig = ''; paintSig(); }
+    if (e.target.closest('#phadd')) {
+      const imgs = await pickImages(true); if (!imgs.length) return;
+      const caption = imgs.length === 1 ? (window.prompt('Legenda da foto (opcional)') || '') : '';
+      imgs.forEach((image) => newPhotos.push({ image, caption }));
+      paintNewPhotos();
+    }
+    const nd = e.target.closest('[data-phnewdel]'); if (nd) { newPhotos.splice(+nd.dataset.phnewdel, 1); paintNewPhotos(); }
+    const pd = e.target.closest('[data-phdel]');
+    if (pd) { const id2 = +pd.dataset.phdel, fig = pd.closest('figure'); if (delPhotos.has(id2)) { delPhotos.delete(id2); fig.classList.remove('del'); } else { delPhotos.add(id2); fig.classList.add('del'); } }
   });
-  const rsv = $('[data-save=relato]', rp);
-  if (rsv) rsv.onclick = () => busy(rsv, async () => {
-    const d = formData($('#rpf', rp));
-    await api('so_report_save', { body: { id: o.id, ...d, ...(sig === undefined ? {} : { signature: sig }) } });
-    toast('Relato salvo'); route();
-  });
-  const pha = $('#phadd', rp);
-  if (pha) pha.onclick = async () => {
-    const imgs = await pickImages(true);
-    if (!imgs.length) return;
-    const caption = imgs.length === 1 ? (window.prompt('Legenda da foto (opcional)') || '') : '';
-    try { for (const im of imgs) await api('so_photo_add', { body: { id: o.id, image: im, caption } }); toast(imgs.length === 1 ? 'Foto incluída' : `${imgs.length} fotos incluídas`); route(); } catch (e) { fail(e); route(); }
-  };
-  rp.addEventListener('click', async (e) => {
-    const b = e.target.closest('[data-phdel]'); if (!b) return;
-    if (!(await confirmBox('Excluir esta foto?', { ok: 'Excluir', danger: true }))) return;
-    busy(b, async () => { await api('so_photo_delete', { body: { photo_id: +b.dataset.phdel } }); toast('Foto excluída'); route(); });
-  });
+  savers.push(['Relato', async () => {
+    let n = 0;
+    if (JSON.stringify(formData(rpf)) !== rpSnap || sig !== undefined) {
+      await api('so_report_save', { body: { id: o.id, ...formData(rpf), ...(sig === undefined ? {} : { signature: sig }) } });
+      sig = undefined; n++;
+    }
+    while (newPhotos.length) { const p = newPhotos[0]; await api('so_photo_add', { body: { id: o.id, image: p.image, caption: p.caption } }); newPhotos.shift(); n++; }
+    for (const id2 of [...delPhotos]) { await api('so_photo_delete', { body: { photo_id: id2 } }); delPhotos.delete(id2); n++; }
+    return n;
+  }]);
 
   // ---- Questionários
   const qp = pane('questionarios');
   qp.innerHTML = qs.length ? qs.map((q, n) => `<div class="card qrun" data-qn="${n}">
       <div class="card-head"><div><h2>${esc(q.name)}</h2>
         <div class="small">${!q.answered ? `<span class="badge${q.linked ? ' red' : ''}">Não respondido</span>` : q.missing.length ? `<span class="badge red">Falta ${q.missing.length} obrigatória(s)</span>` : '<span class="badge ok">Respondido</span>'}
-          ${q.answered_at ? `<span class="muted"> · atualizado em ${dt(q.answered_at)}</span>` : ''}${q.linked ? '' : '<span class="muted"> · fora do tipo de tarefa atual</span>'}</div></div>${editBtns('q' + n)}</div>
+          ${q.answered_at ? `<span class="muted"> · atualizado em ${dt(q.answered_at)}</span>` : ''}${q.linked ? '' : '<span class="muted"> · fora do tipo de tarefa atual</span>'}</div></div></div>
       <form class="form" onsubmit="return false">
         ${q.allow_equipment ? `<label>Equipamento${q.equipment_required ? ' *' : ''} <select data-eq><option value="">Nenhum</option>${D.equipments.map((e) => `<option value="${e.id}" ${+q.answer_equipment_id === +e.id ? 'selected' : ''}>${esc(e.name)}${e.serial ? ' · ' + esc(e.serial) : ''}</option>`).join('')}</select></label>` : ''}
         <div class="qr-grid" style="--cols:${Math.max(1, +q.per_line || 1)}"></div>
@@ -2748,7 +2777,7 @@ async function viewServiceOrderForm(v, id) {
     const q = qs[+card.dataset.qn];
     const ans = JSON.parse(JSON.stringify(q.answers || {}));
     const grid = $('.qr-grid', card);
-    let isLocked = true;
+    let isLocked = true, dirty = false;
     const paint = () => {
       const vis = qVisible(q.questions, ans);
       grid.innerHTML = q.questions.map((x, i) => `<div class="qf" data-qid="${esc(x.id)}" ${vis[x.id] ? '' : 'hidden'}>
@@ -2761,11 +2790,13 @@ async function viewServiceOrderForm(v, id) {
       if (x.type === 'multipla') ans[x.id] = $$(`[data-q="${CSS.escape(x.id)}"]:checked`, grid).map((c) => c.value);
       else if (x.type === 'check') ans[x.id] = el.checked ? 'Sim' : '';
       else ans[x.id] = el.value;
+      dirty = true;
     };
     const updVis = () => { const vis = qVisible(q.questions, ans); $$('.qf', grid).forEach((f) => (f.hidden = !vis[f.dataset.qid])); };
-    grid.addEventListener('input', (e) => { if (e.target.dataset.q) { read(e.target); updVis(); } });
-    grid.addEventListener('change', (e) => { if (e.target.dataset.q) { read(e.target); updVis(); } });
+    card.addEventListener('input', (e) => { if (e.target.dataset.q) { read(e.target); updVis(); } if (e.target.matches('[data-eq]')) dirty = true; });
+    card.addEventListener('change', (e) => { if (e.target.dataset.q) { read(e.target); updVis(); } if (e.target.matches('[data-eq]')) dirty = true; });
     grid.addEventListener('click', async (e) => {
+      if (isLocked) return;
       const add = e.target.closest('[data-phadd]'), del = e.target.closest('[data-phdel]'), sg = e.target.closest('[data-sig]'), sgd = e.target.closest('[data-sigdel]');
       if (add) {
         const x = q.questions.find((y) => y.id === add.dataset.phadd);
@@ -2774,152 +2805,207 @@ async function viewServiceOrderForm(v, id) {
         const now = new Date(), at = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${now.toTimeString().slice(0, 8)}`;
         ans[x.id] = [...(ans[x.id] || []), ...imgs.map((src) => ({ src, at, ...(geo || {}) }))];
         if (x.geo && !geo) toast('Não consegui pegar a localização (permita o acesso no navegador)', 'err');
-        paint();
+        dirty = true; paint();
       }
-      if (del) { ans[del.dataset.phdel].splice(+del.dataset.i, 1); paint(); }
-      if (sg) { const s = await signaturePad(q.questions.find((y) => y.id === sg.dataset.sig).label); if (s) { ans[sg.dataset.sig] = s; paint(); } }
-      if (sgd) { ans[sgd.dataset.sigdel] = ''; paint(); }
+      if (del) { ans[del.dataset.phdel].splice(+del.dataset.i, 1); dirty = true; paint(); }
+      if (sg) { const s = await signaturePad(q.questions.find((y) => y.id === sg.dataset.sig).label); if (s) { ans[sg.dataset.sig] = s; dirty = true; paint(); } }
+      if (sgd) { ans[sgd.dataset.sigdel] = ''; dirty = true; paint(); }
     });
     paint();
-    editLock(card, $('form', card), true, (l) => { isLocked = l; paint(); });
-    const sv = $('[data-save]', card);
-    if (sv) sv.onclick = () => busy(sv, async () => {
+    locks.push(editLock(card, $('form', card), true, (l) => { isLocked = l; paint(); }));
+    savers.push([`Questionário "${q.name}"`, async () => {
+      if (!dirty) return 0;
       const eq = $('[data-eq]', card);
-      if (q.allow_equipment && q.equipment_required && eq && !eq.value) throw new Error('Escolha o equipamento deste questionário');
+      if (q.allow_equipment && q.equipment_required && eq && !eq.value) { showTab('questionarios'); throw new Error(`Escolha o equipamento do questionário "${q.name}"`); }
       const vis = qVisible(q.questions, ans);
       const out = {}; for (const x of q.questions) if (vis[x.id] && ans[x.id] !== undefined) out[x.id] = ans[x.id];
-      const r = await api('so_answers_save', { body: { id: o.id, questionnaire_id: q.id, answers: out, equipment_id: eq ? eq.value : null } });
-      toast(r.missing.length ? `Salvo. Ainda falta: ${r.missing.join(', ')}` : 'Questionário salvo');
-      route();
-    });
+      await api('so_answers_save', { body: { id: o.id, questionnaire_id: q.id, answers: out, equipment_id: eq ? eq.value : null } });
+      dirty = false;
+      return 1;
+    }]);
   });
 
-  // ---- Valores
+  // ---- Valores (registro do que foi usado; não fatura: quem fatura é o orçamento)
   const vp = pane('valores');
   const it = D.items;
-  vp.innerHTML = `<div class="card"><div class="card-head"><h2>Produtos, serviços e custos</h2>${locked ? '' : `<span class="inline"><button type="button" class="btn sm js-view-only" data-edit>${icon('pencil')}Editar</button><button type="button" class="btn sm js-edit-only" data-cancel="valores">Concluir edição</button></span>`}</div>
-      <p class="small muted">Registro do que foi usado no atendimento. Não baixa o estoque nem gera cobrança.</p>
-      ${it.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Descrição</th><th>Tipo</th><th class="num">Qtd.</th><th class="num">Valor unit.</th><th class="num">Total</th><th></th></tr></thead><tbody>
-        ${it.rows.map((r) => `<tr><td>${esc(r.description)}</td><td>${esc(D.kinds[r.kind])}</td><td class="num">${qty(r.quantity)}</td><td class="num">${money(r.unit_price)}</td><td class="num">${money(r.total)}</td>
-          <td class="num">${locked ? '' : `<button type="button" class="icon-btn js-needs-edit" data-itdel="${r.id}" title="Remover" aria-label="Remover">${icon('trash')}</button>`}</td></tr>`).join('')}
-        </tbody><tfoot>${Object.entries({ produto: 'Produtos', servico: 'Serviços', custo: 'Custos adicionais' }).filter(([k]) => it.totals[k]).map(([k, l]) => `<tr><td colspan="4" class="num muted">${l}</td><td class="num">${money(it.totals[k])}</td><td></td></tr>`).join('')}
-          <tr><td colspan="4" class="num"><strong>Total</strong></td><td class="num"><strong>${money(it.totals.total)}</strong></td><td></td></tr></tfoot></table></div>`
-        : '<p class="muted">Nenhum item lançado.</p>'}
-      ${locked ? '' : `<form class="form js-edit-only so-additem" id="itf" hidden>
+  const newItems = []; const delItems = new Set();
+  const all = await products().catch(() => []);
+  vp.innerHTML = `<div class="card"><h2>Produtos, serviços e custos</h2>
+      <p class="small muted">Registro do que foi usado no atendimento. Não baixa o estoque nem gera cobrança: para cobrar, abra um orçamento a partir desta OS (Mais ações → Abrir orçamento).</p>
+      <div class="table-wrap"><table><thead><tr><th>Descrição</th><th>Tipo</th><th class="num">Qtd.</th><th class="num">Valor unit.</th><th class="num">Total</th><th></th></tr></thead>
+        <tbody id="itbody">${it.rows.map((r) => `<tr data-it="${r.id}"><td>${esc(r.description)}</td><td>${esc(D.kinds[r.kind])}</td><td class="num">${qty(r.quantity)}</td><td class="num">${money(r.unit_price)}</td><td class="num">${money(r.total)}</td>
+          <td class="num"><button type="button" class="icon-btn js-edit-only js-needs-edit" data-itdel="${r.id}" title="Remover" aria-label="Remover" hidden>${icon('trash')}</button></td></tr>`).join('')}</tbody>
+        <tbody id="itnew"></tbody>
+        <tfoot>${Object.entries({ produto: 'Produtos', servico: 'Serviços', custo: 'Custos adicionais' }).filter(([k]) => it.totals[k]).map(([k, l]) => `<tr><td colspan="4" class="num muted">${l}</td><td class="num">${money(it.totals[k])}</td><td></td></tr>`).join('')}
+          <tr><td colspan="4" class="num"><strong>Total</strong></td><td class="num"><strong>${money(it.totals.total)}</strong></td><td></td></tr></tfoot></table></div>
+      ${it.rows.length ? '' : '<p class="muted js-view-only">Nenhum item lançado.</p>'}
+      <form class="form js-edit-only so-additem" id="itf" hidden>
         <div class="so-itgrid"><label>Tipo <select name="kind">${Object.entries(D.kinds).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
           <label>Item <select name="product_id"></select><input name="description" maxlength="200" placeholder="Descrição" hidden></label>
           <label>Qtd. <input name="quantity" inputmode="decimal" value="1"></label></div>
         <div class="so-itgrid"><label>Valor unitário (R$) <input name="unit_price" inputmode="decimal" placeholder="0,00"></label>
-          <div class="actions" style="align-self:end"><button class="btn primary" id="itadd">${icon('plus')}Incluir item</button></div></div>
-      </form>`}</div>`;
-  if (!locked) {
-    const itf = $('#itf', vp);
-    const all = await products().catch(() => []);
-    const kindSel = itf.kind, pSel = itf.product_id, dIn = itf.description;
-    const fillProducts = () => {
-      const k = kindSel.value;
-      pSel.hidden = k === 'custo'; dIn.hidden = k !== 'custo';
-      const list = all.filter((p) => (k === 'servico' ? p.type === 'servico' : p.type !== 'servico'));
-      pSel.innerHTML = `<option value="">Selecione…</option>${list.map((p) => `<option value="${p.id}" data-price="${+p.sale_price || 0}">${esc(p.name)}</option>`).join('')}`;
-    };
-    kindSel.onchange = fillProducts; fillProducts();
-    pSel.onchange = () => { const op = pSel.selectedOptions[0]; if (op && op.dataset.price && !itf.unit_price.value) itf.unit_price.value = (+op.dataset.price).toLocaleString('pt-BR', { minimumFractionDigits: 2 }); };
-    editLock(vp, itf, true);
-    itf.onsubmit = (e) => { e.preventDefault(); busy($('#itadd', vp), async () => {
-      const d = formData(itf);
-      if (d.kind !== 'custo' && !d.product_id) throw new Error('Escolha o item do cadastro');
-      if (d.kind === 'custo' && !d.description.trim()) throw new Error('Descreva o custo');
-      await api('so_item_save', { body: { id: o.id, ...d } });
-      toast('Item incluído'); route();
-    }); };
-    vp.addEventListener('click', (e) => { const b = e.target.closest('[data-itdel]'); if (b) busy(b, async () => { await api('so_item_delete', { body: { item_id: +b.dataset.itdel } }); toast('Item removido'); route(); }); });
-  }
+          <div class="actions" style="align-self:end"><button type="button" class="btn" id="itadd">${icon('plus')}Incluir item</button></div></div>
+      </form></div>`;
+  const itf = $('#itf', vp);
+  const kindSel = itf.kind, pSel = itf.product_id, dIn = itf.description;
+  const fillProducts = () => {
+    const k = kindSel.value;
+    pSel.hidden = k === 'custo'; dIn.hidden = k !== 'custo';
+    const list = all.filter((p) => (k === 'servico' ? p.type === 'servico' : p.type !== 'servico'));
+    pSel.innerHTML = `<option value="">Selecione…</option>${list.map((p) => `<option value="${p.id}" data-price="${+p.sale_price || 0}">${esc(p.name)}</option>`).join('')}`;
+  };
+  kindSel.onchange = fillProducts; fillProducts();
+  pSel.onchange = () => { const op = pSel.selectedOptions[0]; if (op && op.dataset.price && !itf.unit_price.value) itf.unit_price.value = (+op.dataset.price).toLocaleString('pt-BR', { minimumFractionDigits: 2 }); };
+  const numBr = (x) => { const s2 = String(x || '').trim(); return +(s2.includes(',') ? s2.replace(/\./g, '').replace(',', '.') : s2) || 0; };
+  const paintNewItems = () => {
+    $('#itnew', vp).innerHTML = newItems.map((n, i) => `<tr class="it-new"><td>${esc(n.label)} <span class="badge">Novo</span></td><td>${esc(D.kinds[n.kind])}</td><td class="num">${qty(numBr(n.quantity) || 1)}</td>
+      <td class="num">${money(numBr(n.unit_price))}</td><td class="num">${money((numBr(n.quantity) || 1) * numBr(n.unit_price))}</td>
+      <td class="num"><button type="button" class="icon-btn" data-itnewdel="${i}" title="Tirar" aria-label="Tirar">${icon('x')}</button></td></tr>`).join('');
+  };
+  locks.push(editLock(vp, itf, true, (l) => { $('#itadd', vp).disabled = l; }));
+  $('#itadd', vp).onclick = () => {
+    const d = formData(itf);
+    if (d.kind !== 'custo' && !d.product_id) return toast('Escolha o item do cadastro', 'err');
+    if (d.kind === 'custo' && !d.description.trim()) return toast('Descreva o custo', 'err');
+    if (!(numBr(d.quantity) > 0)) return toast('A quantidade precisa ser maior que zero', 'err');
+    const label = d.kind === 'custo' ? d.description.trim() : pSel.selectedOptions[0].textContent;
+    newItems.push({ ...d, label });
+    paintNewItems();
+    itf.product_id.value = ''; itf.description.value = ''; itf.quantity.value = '1'; itf.unit_price.value = '';
+  };
+  vp.addEventListener('click', (e) => {
+    const nd = e.target.closest('[data-itnewdel]'); if (nd) { newItems.splice(+nd.dataset.itnewdel, 1); paintNewItems(); }
+    const b = e.target.closest('[data-itdel]');
+    if (b) { const id2 = +b.dataset.itdel, tr = b.closest('tr'); if (delItems.has(id2)) { delItems.delete(id2); tr.classList.remove('del'); } else { delItems.add(id2); tr.classList.add('del'); } }
+  });
+  savers.push(['Valores', async () => {
+    let n = 0;
+    for (const id2 of [...delItems]) { await api('so_item_delete', { body: { item_id: id2 } }); delItems.delete(id2); n++; }
+    while (newItems.length) { const x = newItems[0]; await api('so_item_save', { body: { id: o.id, kind: x.kind, product_id: x.product_id, description: x.description, quantity: x.quantity, unit_price: x.unit_price } }); newItems.shift(); n++; }
+    return n;
+  }]);
+
+  // ---- Orçamentos ligados (o de origem e os abertos a partir desta OS)
+  pane('orcamentos').innerHTML = `<div class="card"><div class="card-head"><h2>Orçamentos</h2>
+      ${can('orcamentos') ? `<button type="button" class="btn sm js-view-only" data-act="quote">${icon('plus')}Abrir orçamento</button>` : ''}</div>
+    <p class="small muted">A OS não gera cobrança. Para cobrar o serviço executado, abra um orçamento: ele já vem com o cliente e com os produtos, serviços e custos lançados em Valores.</p>
+    ${D.quotes.length ? `<div class="table-wrap"><table><thead><tr><th>Orçamento</th><th>Ligação</th><th>Status</th><th class="num">Total</th><th>Criado em</th></tr></thead><tbody>
+      ${D.quotes.map((q) => `<tr class="click" data-goq="${q.id}"><td><strong>#${q.id}</strong></td><td>${esc(q.relation)}</td><td>${qBadge(q.status)}</td><td class="num">${money(q.total)}</td><td>${dOnly(q.created_at)}</td></tr>`).join('')}</tbody></table></div>`
+      : '<p class="muted">Nenhum orçamento ligado a esta ordem.</p>'}</div>`;
+  pane('orcamentos').addEventListener('click', (e) => { const r = e.target.closest('[data-goq]'); if (r) go('orcamento/' + r.dataset.goq); });
 
   // ---- Pendências
   pane('pendencias').innerHTML = `<h2>Pendências para concluir</h2>
-    ${o.status === 'faturada' ? '<p class="muted">Ordem faturada.</p>'
-      : pend.length ? `<ul class="so-pendlist">${pend.map((p) => `<li>${icon('warn')}<span>${esc(p)}</span></li>`).join('')}</ul><p class="small muted">As pendências vêm das obrigatoriedades do tipo de tarefa e das perguntas obrigatórias dos questionários.</p>`
-      : `<p class="so-ok">${icon('check')} Nada pendente${['concluida'].includes(o.status) ? '.' : ': a ordem já pode ser concluída.'}</p>`}`;
+    ${pend.length ? `<ul class="so-pendlist">${pend.map((p) => `<li>${icon('warn')}<span>${esc(p)}</span></li>`).join('')}</ul><p class="small muted">As pendências vêm das obrigatoriedades do tipo de tarefa e das perguntas obrigatórias dos questionários.</p>`
+      : `<p class="so-ok">${icon('check')} Nada pendente${o.status === 'concluida' ? '.' : ': a ordem já pode ser concluída.'}</p>`}`;
 
-  // ---- Controle de horas (como no Auvo: ajustar horários, motivo e justificativa; incluir e excluir pausas)
+  // ---- Controle de horas (atividades, "Adicionar atividade", totais de deslocamento, pausa e trabalho)
   const h = D.hours;
   const hp = pane('horas');
-  const dtl = (x) => String(x || '').replace(' ', 'T').slice(0, 16);
-  const lastPauseOpen = o.status === 'pausada' && h.rows.length && h.rows[h.rows.length - 1].status === 'pausada';
-  const origem = (r) => r.manual ? '<span class="badge">Manual</span>'
-    : r.edited_at ? `<span class="badge" title="Antes: ${esc(dt(r.original_at || r.at))}">Ajustado</span>` : '<span class="badge ok">Sistema</span>';
-  hp.innerHTML = `<div class="card-head"><h2>Controle de horas</h2>${h.rows.length && !locked ? `<span class="inline">
-      <button type="button" class="btn sm js-edit-only js-needs-edit" id="hradd" hidden>${icon('plus')}Adicionar pausa</button>${editBtns('horas')}</span>` : ''}</div>
+  const HR_LABEL = { deslocamento: 'A caminho da tarefa', checkin: 'Check-in', pausa_inicio: 'Início da pausa', pausa_fim: 'Fim da pausa', checkout: 'Check-out' };
+  const HR_ADD = { deslocamento: 'Deslocamento', checkin: 'Check-in', pausa_inicio: 'Início da pausa', pausa_fim: 'Fim da pausa', checkout: 'Check-out' };
+  const HR_REASONS = ['Almoço', 'Fim do expediente', 'Aguardando peça', 'Aguardando cliente', 'Deslocamento', 'Outro'];
+  const hrNext = (last) => ({ '': ['deslocamento', 'checkin'], deslocamento: ['checkin'], checkin: ['pausa_inicio', 'checkout'], pausa_fim: ['pausa_inicio', 'checkout'], pausa_inicio: ['pausa_fim'] }[last || ''] || []);
+  const hrSeqOk = (kinds) => { let last = ''; for (const k of kinds) { if (!hrNext(last).includes(k)) return false; last = k; } return true; };
+  const hms = (s) => { s = Math.max(0, Math.round(+s || 0)); const p2 = (n) => String(n).padStart(2, '0'); return `${p2(Math.floor(s / 3600))}:${p2(Math.floor(s / 60) % 60)}:${p2(s % 60)}`; };
+  const dtSec = (x) => { const d = String(x || ''); return d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)} ${d.slice(11, 19)}` : ''; };
+  const nowParts = () => { const n = new Date(), p2 = (x) => String(x).padStart(2, '0'); return [`${n.getFullYear()}-${p2(n.getMonth() + 1)}-${p2(n.getDate())}`, `${p2(n.getHours())}:${p2(n.getMinutes())}:${p2(n.getSeconds())}`]; };
+  const origemHtml = (r) => `<span class="hr-web">Web</span>${r.edited_at ? `<span class="hr-hist" title="${esc(`${r.manual ? 'Incluída' : 'Ajustada'} por ${r.edited_by_name || '—'} em ${dt(r.edited_at)}${r.original_at ? ` · antes: ${dtSec(r.original_at)}` : ''}`)}">${icon('history')}</span>` : ''}`;
+  const reasonSel = (cur) => `<select data-reason class="hr-sel"><option value="">Selecione…</option>${[...new Set([...HR_REASONS, ...(cur ? [cur] : [])])].map((x) => `<option ${x === cur ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>`;
+  const rowHtml = (r, isNewRow) => {
+    const [d, t] = isNewRow ? nowParts() : [r.at.slice(0, 10), r.at.slice(11, 19)];
+    return `<tr data-row="${isNewRow ? '' : r.id}" data-kind="${r.kind}" ${isNewRow ? 'data-new="1"' : ''}>
+      <td>${esc(isNewRow ? (state.me?.name || '') : (r.user_name || '—'))}</td>
+      <td>${esc(HR_LABEL[r.kind])}<div class="small warn-t hr-open" hidden>${icon('warn')} Sem registro de fim de pausa.</div></td>
+      <td class="nowrap"><span class="js-view-only">${dtSec(r.at)}</span>
+        <span class="hr-dt js-edit-only" ${isNewRow ? '' : 'hidden'}><input type="date" data-d value="${d}" data-orig="${isNewRow ? '' : d}"><input type="time" step="1" data-t value="${t}" data-orig="${isNewRow ? '' : t}"></span></td>
+      <td class="hr-el">${r.elapsed != null ? `${icon('clock')} ${hms(r.elapsed)}` : ''}</td>
+      <td>${r.kind === 'pausa_inicio' ? `<span class="js-view-only">${esc(r.reason || '')}</span><span class="js-edit-only" ${isNewRow ? '' : 'hidden'}>${reasonSel(r.reason || '')}</span>` : ''}</td>
+      <td><span class="js-view-only small">${esc(r.note || '')}</span><input class="js-edit-only hr-note" data-note maxlength="300" value="${esc(r.note || '')}" data-orig="${esc(r.note || '')}" ${isNewRow ? '' : 'hidden'}></td>
+      <td>${isNewRow ? '' : origemHtml(r)}</td>
+      <td class="num"><button type="button" class="icon-btn js-edit-only js-needs-edit" data-hrdel title="Excluir atividade" aria-label="Excluir atividade" ${isNewRow ? '' : 'hidden'}>${icon('trash')}</button></td></tr>`;
+  };
+  hp.innerHTML = `<div class="hr-top">
+      <button type="button" class="btn sm js-view-only" id="hrhist">${icon('history')}Histórico completo</button>
+      <div class="dd js-edit-only" id="hradd" hidden><button type="button" class="btn sm primary dd-btn" aria-haspopup="true" aria-expanded="false">${icon('plus')}Adicionar atividade${icon('chevron')}</button>
+        <div class="dd-menu" role="menu" hidden id="hraddmenu"></div></div></div>
     <form class="form" id="hrf" onsubmit="return false">
-    ${h.rows.length ? `<div class="table-wrap"><table class="hr-table"><thead><tr><th>Colaborador</th><th>Monitoramento</th><th>Horário</th><th>Tempo corrido</th><th>Motivo</th><th>Justificativa</th><th>Origem</th><th></th></tr></thead>
-      <tbody id="hrbody">${h.rows.map((r, i) => {
-        const pause = r.status === 'pausada', open = lastPauseOpen && i === h.rows.length - 1;
-        return `<tr data-row="${r.id}"><td>${esc(r.user_name || '—')}</td><td>${esc(r.label)}${open ? '<div class="small warn-t">Sem registro de fim de pausa</div>' : ''}</td>
-          <td class="nowrap"><span class="js-view-only">${dt(r.at)}</span><input class="js-edit-only" type="datetime-local" step="60" data-at value="${dtl(r.at)}" data-orig="${dtl(r.at)}" hidden></td>
-          <td>${r.elapsed != null ? fmtDur(r.elapsed) : ''}</td>
-          <td>${pause ? `<span class="js-view-only">${esc(r.reason || '')}</span><input class="js-edit-only" data-reason maxlength="120" list="hrmotivos" value="${esc(r.reason || '')}" data-orig="${esc(r.reason || '')}" hidden>` : ''}</td>
-          <td><span class="js-view-only small">${esc(r.note || '')}${r.edited_at ? `<div class="muted">${esc(r.edited_by_name || '—')} em ${dt(r.edited_at)}</div>` : ''}</span>
-            <input class="js-edit-only" data-note maxlength="300" placeholder="Justificativa" hidden></td>
-          <td>${origem(r)}</td>
-          <td>${pause && !open ? `<button type="button" class="icon-btn js-edit-only js-needs-edit" data-hrdel="${r.id}" title="Excluir esta pausa (início e fim)" aria-label="Excluir pausa" hidden>${icon('trash')}</button>` : ''}</td></tr>`;
-      }).join('')}</tbody></table></div>
-      <datalist id="hrmotivos">${['Almoço', 'Fim do expediente', 'Aguardando peça', 'Aguardando cliente', 'Deslocamento'].map((x) => `<option value="${x}">`).join('')}</datalist>
-      <div id="hradds"></div>` : '<p class="muted">Sem registros.</p>'}
+      <div class="table-wrap"><table class="hr-table"><thead><tr><th>Colaborador</th><th>Monitoramento</th><th>Horário</th><th>Tempo corrido</th><th>Motivo</th><th>Justificativa</th><th>Origem</th><th></th></tr></thead>
+        <tbody id="hrbody">${h.rows.map((r) => rowHtml(r, false)).join('')}</tbody></table></div>
     </form>
-    <div class="kpis so-kpis"><div class="kpi"><div class="label">Tempo total de trabalho</div><div class="value">${fmtDur(h.work)}</div></div>
-      <div class="kpi"><div class="label">Tempo total de pausa</div><div class="value">${fmtDur(h.pause)}</div></div></div>
-    ${h.running ? `<p class="small muted">${h.running === 'work' ? 'Atendimento em andamento' : 'Atendimento pausado'}: os tempos contam até agora.</p>` : ''}
-    <p class="small muted">${icon('warn')} O check-in é feito em "Iniciar atendimento" e o check-out em "Concluir". Em Editar dá para corrigir horários e motivos, incluir ou excluir pausas; toda alteração de horário pede justificativa e fica registrada.${h.deleted ? ` ${h.deleted / 2} pausa(s) excluída(s) ficam guardadas no histórico.` : ''}</p>`;
-  if (h.rows.length && !locked) {
-    const form = $('#hrf', hp), adds = $('#hradds', hp);
-    const lock = editLock(hp, form, true, (l) => { if (l) { $$('tr.del', hp).forEach((t) => t.classList.remove('del')); adds.innerHTML = ''; } });
-    $('#hradd', hp).onclick = () => {
-      adds.insertAdjacentHTML('beforeend', `<div class="hr-add"><strong>Nova pausa</strong>
-        <div class="hr-add-grid"><label>Início * <input type="datetime-local" step="60" data-a="start" required></label><label>Fim * <input type="datetime-local" step="60" data-a="end" required></label>
-          <label>Motivo <input data-a="reason" maxlength="120" list="hrmotivos"></label><label>Justificativa * <input data-a="note" maxlength="300" required></label>
-          <button type="button" class="icon-btn" data-hraddrm title="Remover" aria-label="Remover">${icon('x')}</button></div></div>`);
-      adds.lastElementChild.querySelector('input').focus();
-    };
-    adds.onclick = (e) => { const b = e.target.closest('[data-hraddrm]'); if (b) b.closest('.hr-add').remove(); };
-    $('#hrbody', hp).onclick = (e) => {
-      const b = e.target.closest('[data-hrdel]'); if (!b) return;
-      const tr = b.closest('tr'), on = !tr.classList.contains('del'), pair = tr.nextElementSibling;
-      tr.classList.toggle('del', on); if (pair) { pair.classList.toggle('del', on); pair.dataset.pair = on ? '1' : ''; }
-      if (on) { const n = $('[data-note]', tr); n.placeholder = 'Por que excluir esta pausa? *'; n.focus(); }
-    };
-    const hsv = $('[data-save=horas]', hp);
-    hsv.onclick = () => busy(hsv, async () => {
-      const rows = [], del = [], add = [];
-      for (const tr of $$('#hrbody tr', hp)) {
-        const id = +tr.dataset.row, at = $('[data-at]', tr), rs = $('[data-reason]', tr), note = $('[data-note]', tr).value.trim();
-        const label = tr.children[1].firstChild.textContent;
-        if (tr.dataset.pair === '1') continue;
-        if (tr.classList.contains('del')) {
-          if (note.length < 3) { $('[data-note]', tr).focus(); throw new Error(`Escreva por que a pausa "${label}" de ${dt(at.dataset.orig.replace('T', ' '))} vai ser excluída`); }
-          del.push({ id, note }); continue;
-        }
-        const timeChanged = at.value && at.value !== at.dataset.orig, reasonChanged = rs && rs.value.trim() !== rs.dataset.orig;
-        if (timeChanged && note.length < 3) { $('[data-note]', tr).focus(); throw new Error(`Escreva a justificativa da alteração de "${label}"`); }
-        if (timeChanged || reasonChanged) rows.push({ id, ...(timeChanged ? { at: at.value } : {}), ...(rs ? { reason: rs.value } : {}), note });
-      }
-      for (const box of $$('.hr-add', adds)) {
-        const v2 = (k) => $(`[data-a=${k}]`, box).value.trim();
-        if (!v2('start') || !v2('end')) throw new Error('Informe o início e o fim da pausa incluída');
-        if (v2('note').length < 3) { $('[data-a=note]', box).focus(); throw new Error('Escreva a justificativa da pausa incluída'); }
-        add.push({ start: v2('start'), end: v2('end'), reason: v2('reason'), note: v2('note') });
-      }
-      if (!rows.length && !del.length && !add.length) throw new Error('Nada foi alterado');
-      const r = await api('so_hours_save', { body: { id: o.id, rows, delete: del, add } });
-      toast(r.changed === 1 ? '1 alteração salva no controle de horas' : `${r.changed} alterações salvas no controle de horas`); route();
+    <div class="hr-totals"><div><span>Tempo total de deslocamento</span><b id="hrtt"></b></div><div><span>Tempo total de pausa</span><b id="hrtp"></b></div><div><span>Tempo total de trabalho</span><b id="hrtw"></b></div></div>
+    <p class="small muted hr-info">${icon('info')} Os valores de tempo exibidos podem ultrapassar 24 horas quando a atividade abrange mais de um dia. O check-in é feito em "Iniciar atendimento" e o check-out em "Concluir"; em Editar dá para ajustar, incluir e excluir atividades.</p>`;
+  const hform = $('#hrf', hp), hbody = $('#hrbody', hp);
+  let hrEditing = false;
+  const hrRows = () => $$('#hrbody tr', hp);
+  const rowAt = (tr) => { const d = $('[data-d]', tr).value, t = $('[data-t]', tr).value; return d && t ? `${d} ${t.length === 5 ? t + ':00' : t}` : ''; };
+  // Totais, tempo corrido, aviso de pausa aberta, lixeiras e opções de "Adicionar atividade"
+  const hrRefresh = () => {
+    const rows = hrRows(), kinds = rows.map((tr) => tr.dataset.kind);
+    const times = rows.map((tr) => rowAt(tr));
+    const tot = { travel: 0, work: 0, pause: 0 }, nowMs = Date.now();
+    rows.forEach((tr, i) => {
+      const k = kinds[i], bucket = k === 'deslocamento' ? 'travel' : k === 'pausa_inicio' ? 'pause' : (k === 'checkin' || k === 'pausa_fim') ? 'work' : null;
+      const a = times[i] ? new Date(times[i].replace(' ', 'T')).getTime() : NaN;
+      const b = i + 1 < rows.length ? new Date((times[i + 1] || '').replace(' ', 'T')).getTime() : nowMs;
+      if (bucket && !isNaN(a) && !isNaN(b)) tot[bucket] += Math.max(0, (b - a) / 1000);
+      if (k === 'pausa_fim' && i > 0) { const p = new Date((times[i - 1] || '').replace(' ', 'T')).getTime(); $('.hr-el', tr).innerHTML = !isNaN(a) && !isNaN(p) ? `${icon('clock')} ${hms((a - p) / 1000)}` : ''; }
+      $('.hr-open', tr).hidden = !(k === 'pausa_inicio' && i === rows.length - 1);
+      const del = $('[data-hrdel]', tr); if (del) del.disabled = !hrEditing || !hrSeqOk(kinds.filter((_, j) => j !== i));
     });
-    void lock;
-  }
+    const show = (sel, s) => { $(sel, hp).innerHTML = `${s > 0 ? icon('clock') : ''} ${hms(s)}`; };
+    show('#hrtt', tot.travel); show('#hrtp', tot.pause); show('#hrtw', tot.work);
+    const next = hrNext(kinds[kinds.length - 1]);
+    $('#hraddmenu', hp).innerHTML = next.length ? next.map((k) => `<button type="button" role="menuitem" data-addk="${k}">${HR_ADD[k]}</button>`).join('')
+      : '<span class="muted small" style="padding:8px 12px;display:block">Atendimento finalizado</span>';
+  };
+  hrRefresh();
+  // Atendimento em andamento: os totais correm a cada segundo
+  if (h.running) { const tm = setInterval(() => { if (!document.body.contains(hp)) return clearInterval(tm); hrRefresh(); }, 1000); }
+  locks.push(editLock(hp, hform, true, (l) => { hrEditing = !l; $('#hradd', hp).hidden = l; hrRefresh(); }));
+  hbody.addEventListener('input', hrRefresh); hbody.addEventListener('change', hrRefresh);
+  const deleted = [];
+  hp.addEventListener('click', (e) => {
+    const ak = e.target.closest('[data-addk]');
+    if (ak) {
+      const k = ak.dataset.addk;
+      hbody.insertAdjacentHTML('beforeend', rowHtml({ kind: k }, true));
+      const tr = hbody.lastElementChild; $$('input, select', tr).forEach((el) => (el.disabled = false));
+      $('#hraddmenu', hp).hidden = true; $('#hradd .dd-btn', hp).setAttribute('aria-expanded', 'false');
+      hrRefresh(); return;
+    }
+    const del = e.target.closest('[data-hrdel]');
+    if (del && hrEditing && !del.disabled) { const tr = del.closest('tr'); if (tr.dataset.row) deleted.push(+tr.dataset.row); tr.remove(); hrRefresh(); }
+  });
+  $('#hrhist', hp).onclick = () => modal({
+    title: 'Histórico completo do controle de horas',
+    body: `<div class="table-wrap"><table><thead><tr><th>Registro</th><th>Horário</th><th>Colaborador</th><th>Motivo / justificativa</th><th>Situação</th></tr></thead><tbody>
+      ${h.history.map((x) => `<tr class="${x.deleted_at ? 'muted' : ''}"><td>${esc(x.label)}</td><td class="nowrap">${dtSec(x.at)}${x.original_at ? `<div class="small muted">antes: ${dtSec(x.original_at)}</div>` : ''}</td>
+        <td>${esc(x.user_name || '—')}</td><td class="small">${esc([x.reason, x.note].filter(Boolean).join(' · '))}</td>
+        <td class="small">${x.deleted_at ? `Excluída por ${esc(x.deleted_by_name || '—')} em ${dt(x.deleted_at)}` : x.manual ? `Incluída por ${esc(x.edited_by_name || '—')} em ${dt(x.edited_at)}` : x.edited_at ? `Ajustada por ${esc(x.edited_by_name || '—')} em ${dt(x.edited_at)}` : 'Registrada pelo sistema'}</td></tr>`).join('')}</tbody></table></div>`,
+    foot: '<button class="btn" data-close>Fechar</button>',
+  });
+  savers.push(['Controle de horas', async () => {
+    const rows = [], add = [];
+    for (const tr of hrRows()) {
+      const at = rowAt(tr), rs = $('[data-reason]', tr), note = $('[data-note]', tr).value.trim();
+      if (!at) { showTab('horas'); throw new Error(`Informe a data e o horário de "${HR_LABEL[tr.dataset.kind]}"`); }
+      if (tr.dataset.new) { add.push({ kind: tr.dataset.kind, at, reason: rs ? rs.value : '', note }); continue; }
+      const d = $('[data-d]', tr), t = $('[data-t]', tr);
+      const changed = d.value !== d.dataset.orig || t.value !== t.dataset.orig || note !== $('[data-note]', tr).dataset.orig || (rs && rs.value !== (h.rows.find((r) => r.id === +tr.dataset.row)?.reason || ''));
+      if (changed) rows.push({ id: +tr.dataset.row, at, ...(rs ? { reason: rs.value } : {}), note });
+    }
+    if (!rows.length && !add.length && !deleted.length) return 0;
+    const r = await api('so_hours_save', { body: { id: o.id, rows, delete: deleted.map((id2) => ({ id: id2 })), add } });
+    deleted.length = 0;
+    return r.changed;
+  }]);
 
   // ---- Envios
   const ep = pane('envios');
-  const done = ['concluida', 'faturada'].includes(o.status);
+  const done = o.status === 'concluida';
   ep.innerHTML = `<div class="card"><div class="card-head"><h2>Envios ao cliente</h2>
-      <span class="inline"><button type="button" class="btn sm" data-act="email">${icon('mail')}Enviar OS por e-mail</button>
+      <span class="inline js-view-only"><button type="button" class="btn sm" data-act="email">${icon('mail')}Enviar OS por e-mail</button>
         <button type="button" class="btn sm" data-act="survey" ${done ? '' : 'disabled title="Disponível depois de concluir"'}>${icon('send')}Enviar pesquisa</button>
         <button type="button" class="btn sm" data-act="link">${icon('link')}Copiar link da OS</button></span></div>
       ${D.sends.length ? `<div class="table-wrap"><table><thead><tr><th>Quando</th><th>O quê</th><th>Para</th><th>Resultado</th><th>Por</th></tr></thead><tbody>
@@ -2928,9 +3014,9 @@ async function viewServiceOrderForm(v, id) {
         : '<p class="muted">Nada enviado ainda. Conforme o tipo de tarefa, a OS e a pesquisa vão por e-mail sozinhas ao concluir.</p>'}</div>
     <div class="card"><h2>Pesquisa de satisfação</h2>
       ${o.survey_at ? `<p><span class="stars-v">${'★'.repeat(+o.survey_rating)}<span class="off">${'★'.repeat(5 - +o.survey_rating)}</span></span> · respondida em ${dt(o.survey_at)}</p>${o.survey_comment ? `<p class="notes">${esc(o.survey_comment)}</p>` : ''}`
-        : `<p class="muted">${done ? 'O cliente ainda não avaliou.' : 'A avaliação fica disponível depois de concluir a ordem.'}</p>${done ? `<button type="button" class="btn sm" data-act="slink">${icon('link')}Copiar link da pesquisa</button>` : ''}`}</div>`;
+        : `<p class="muted">${done ? 'O cliente ainda não avaliou.' : 'A avaliação fica disponível depois de concluir a ordem.'}</p>${done ? `<button type="button" class="btn sm js-view-only" data-act="slink">${icon('link')}Copiar link da pesquisa</button>` : ''}`}</div>`;
 
-  // ---- Ações (cabeçalho e Envios)
+  // ---- Ações (cabeçalho, Orçamentos e Envios)
   const sendModal = (kind) => {
     const m = modal({
       title: kind === 'os' ? 'Enviar OS por e-mail' : 'Enviar pesquisa de satisfação',
@@ -2946,17 +3032,65 @@ async function viewServiceOrderForm(v, id) {
     });
     $('#smok', m.el).onclick = send; f.onsubmit = (e) => { e.preventDefault(); send(); };
   };
+  // Abrir orçamento: novo orçamento (não salvo) com o cliente e os itens de Valores
+  const openQuote = () => {
+    const byId = Object.fromEntries(all.map((p) => [String(p.id), p]));
+    const items = it.rows.filter((r) => r.kind !== 'custo' && r.product_id && byId[String(r.product_id)]).map((r) => {
+      const p = byId[String(r.product_id)];
+      return { product_id: +r.product_id, description: r.description, unit: p.unit, stock: p.stock, product_type: p.type, kind: r.kind, quantity: +r.quantity, unit_price: +r.unit_price, discount_value: 0, discount_type: 'valor' };
+    });
+    const extras = it.rows.filter((r) => r.kind === 'custo').map((r) => ({ description: r.description, amount: +r.total }));
+    sessionStorage.setItem('quoteFromOs', JSON.stringify({
+      service_order_id: o.id,
+      customer: { id: o.customer_id, name: o.customer_name, trade_name: o.customer_trade_name, document: o.customer_document, phone: o.customer_phone, email: o.customer_email },
+      items, extras,
+      notes: `Referente à ordem de serviço #${o.id}${o.task_type_name ? ` (${o.task_type_name})` : ''}.${o.report ? `\n${o.report}` : o.description ? `\n${o.description}` : ''}`,
+    }));
+    toast(items.length || extras.length ? 'Orçamento preenchido com os itens da OS: confira e salve.' : 'Orçamento com o cliente da OS: inclua os itens e salve.');
+    go('orcamento/novo');
+  };
   v.addEventListener('click', (e) => {
     const a = e.target.closest('[data-act]'); if (!a) return;
     if (a.dataset.act === 'link') copyLink(o.public_url);
     if (a.dataset.act === 'slink') copyLink(o.survey_url);
     if (a.dataset.act === 'email') sendModal('os');
     if (a.dataset.act === 'survey') sendModal('pesquisa');
+    if (a.dataset.act === 'quote') openQuote();
     if (a.dataset.act === 'whats') {
       const phone = String(o.customer_phone || '').replace(/\D/g, '');
       const msg = `Olá${cust ? ', ' + cust.split(' ')[0] : ''}! Segue a ordem de serviço #${o.id}: ${done ? o.survey_url : o.public_url}`;
       window.open(`https://wa.me/${phone.length >= 10 ? '55' + phone : ''}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener');
     }
+  });
+
+  // ---- Editar / Salvar / Cancelar (a OS inteira)
+  const setEditing = (on) => {
+    locks.forEach((f) => f(!on));
+    [$('#sohead', v), ...$$('.so-editing, .so-pend', v), pane('orcamentos'), pane('envios')].forEach((root) => {
+      if (!root) return;
+      if (root.matches('.js-view-only')) root.hidden = on;
+      if (root.matches('.js-edit-only')) root.hidden = !on;
+      $$('.js-view-only', root).forEach((el) => (el.hidden = on));
+      $$('.js-edit-only', root).forEach((el) => (el.hidden = !on));
+    });
+  };
+  setEditing(sessionStorage.getItem('soedit') === String(o.id));
+  sessionStorage.removeItem('soedit');
+  $('#soedit', v).onclick = () => setEditing(true);
+  $('#socancelall', v).onclick = () => route();
+  const saveAll = $('#sosaveall', v);
+  saveAll.onclick = () => busy(saveAll, async () => {
+    let total = 0; const done2 = [];
+    for (const [name, fn] of savers) {
+      try { const n = await fn(); if (n) { total += n; done2.push(name); } }
+      catch (err) {
+        // O que já foi salvo fica salvo; a edição continua aberta para corrigir o resto
+        if (done2.length) toast(`Salvo: ${done2.join(', ')}.`);
+        throw new Error(`${name}: ${err.message.replace(new RegExp('^' + name + ': '), '')}`);
+      }
+    }
+    toast(total ? `Ordem salva (${done2.join(', ')})` : 'Nada foi alterado');
+    route();
   });
 
   // ---- Andamento (status)
@@ -2968,7 +3102,6 @@ async function viewServiceOrderForm(v, id) {
       $('#gopend', m.el).onclick = () => { m.close(); showTab('pendencias'); };
       return;
     }
-    if (to === 'faturada' && !(await confirmBox('Marcar esta ordem como faturada? Ela não poderá mais ser alterada.', { ok: 'Marcar como faturada' }))) return;
     if (to === 'pausada') {
       const m = modal({ title: 'Pausar atendimento',
         body: `<form class="form" id="pzf"><label>Motivo da pausa <input name="reason" maxlength="120" list="pzmot" placeholder="Ex.: Almoço, Fim do expediente">
@@ -2983,7 +3116,7 @@ async function viewServiceOrderForm(v, id) {
     }
     busy(b, async () => {
       await api('service_order_status', { body: { id: o.id, status: to } });
-      toast(to === 'concluida' ? 'Ordem concluída' : to === 'em_execucao' ? 'Atendimento iniciado' : 'Status atualizado');
+      toast(to === 'concluida' ? 'Ordem concluída' : to === 'em_execucao' ? 'Atendimento iniciado' : to === 'a_caminho' ? 'Deslocamento iniciado' : 'Status atualizado');
       route();
     });
   }));
@@ -3507,6 +3640,18 @@ async function viewQuestionnaireForm(v, id) {
 
   const box = $('#qlist', v);
   const earlierOf = (list, i) => list.slice(0, i).filter((x) => x.id);
+  // "Apresentar quando" só lista perguntas anteriores do tipo Itens (com opções).
+  const condParents = (list, i) => earlierOf(list, i).filter((x) => x.type === 'itens' && x.options.length);
+  // Condição que perdeu a pergunta de origem (removida, movida ou de outro tipo) ou a opção esperada é limpa.
+  const fixConds = () => {
+    qs = qs.map((x, j) => {
+      if (!x.cond) return x;
+      if (j === 0) return { ...x, cond: null };
+      const pq = condParents(qs, j).find((e) => e.id === x.cond.question);
+      if (!pq) return { ...x, cond: { question: '', op: x.cond.op, value: '' } };
+      return pq.options.includes(x.cond.value) ? x : { ...x, cond: { ...x.cond, value: '' } };
+    });
+  };
 
   // Lê o que está na tela para o estado, antes de qualquer mudança estrutural.
   const readQs = () => {
@@ -3524,8 +3669,8 @@ async function viewQuestionnaireForm(v, id) {
         cond: null,
       };
       if (type === 'foto') item.geo = !!val('geo')?.checked;
-      if (val('hascond') && val('hascond').checked && val('condq')) {
-        item.cond = { question: val('condq').value, value: val('condv').value };
+      if (val('hascond')?.checked) {
+        item.cond = { question: val('condq')?.value || '', op: val('condop')?.value || '', value: val('condv')?.value || '' };
       }
       out.push(item);
     });
@@ -3536,7 +3681,8 @@ async function viewQuestionnaireForm(v, id) {
     const d = locked ? 'disabled' : '';
     box.innerHTML = qs.length ? qs.map((x, i) => {
       const earlier = earlierOf(qs, i);
-      const condQ = x.cond ? earlier.find((e) => e.id === x.cond.question) : null;
+      const parents = condParents(qs, i);
+      const condQ = x.cond ? parents.find((e) => e.id === x.cond.question) : null;
       const hasCond = !!x.cond;
       return `<div class="qe-card" data-qid="${esc(x.id)}">
         <div class="qhead"><span class="qe-num">${i + 1}</span>
@@ -3552,13 +3698,14 @@ async function viewQuestionnaireForm(v, id) {
         <input ${d} data-k="description" maxlength="300" placeholder="Ajuda para o técnico (opcional)" value="${esc(x.description || '')}" class="qe-desc">
         ${Q_OPTION_TYPES.includes(x.type) ? `<label>Opções <textarea ${d} data-k="options" rows="4" placeholder="Uma opção por linha">${esc(x.options.join('\n'))}</textarea></label>` : ''}
         ${x.type === 'foto' ? `<label class="check"><input type="checkbox" ${d} data-k="geo" ${x.geo ? 'checked' : ''}> Registrar a localização da foto</label>` : ''}
-        <div class="qcond">
-          <label class="check"><input type="checkbox" data-k="hascond" ${hasCond ? 'checked' : ''} ${d || (earlier.length ? '' : 'disabled')}> Mostrar só quando a pergunta anterior tiver uma resposta</label>
-          ${hasCond ? `<div class="grid two">
-            <label>Pergunta anterior <select ${d} data-k="condq">${earlier.map((e) => `<option value="${esc(e.id)}" ${x.cond.question === e.id ? 'selected' : ''}>${esc(e.label || '(sem texto)')}</option>`).join('')}</select></label>
-            <label>Resposta que mostra esta pergunta ${condQ && condQ.options.length
-              ? `<select ${d} data-k="condv">${condQ.options.map((o) => `<option value="${esc(o)}" ${x.cond.value === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`
-              : `<input ${d} data-k="condv" maxlength="120" value="${esc(x.cond.value)}">`}</label></div>` : ''}
+        ${i > 0 ? `<div class="qcond">
+          <label class="check"><input type="checkbox" ${d} data-k="hascond" ${hasCond ? 'checked' : ''}> Essa é uma pergunta condicional</label>
+          ${hasCond ? `<div class="grid three">
+            <label>Apresentar quando <select ${d} data-k="condq"><option value="">Selecione a pergunta</option>${parents.map((e) => `<option value="${esc(e.id)}" ${x.cond.question === e.id ? 'selected' : ''}>${esc(e.label || '(sem texto)')}</option>`).join('')}</select></label>
+            <label>Condição <select ${d} data-k="condop"><option value="">Selecione uma condição</option>${[['igual', 'Igual'], ['diferente', 'Diferente']].map(([c, l]) => `<option value="${c}" ${x.cond.op === c ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+            <label>Resposta esperada <select ${d} data-k="condv"><option value="">Selecione</option>${(condQ ? condQ.options : []).map((o) => `<option value="${esc(o)}" ${x.cond.value === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></label>
+          </div>${parents.length ? '' : '<p class="muted small">Adicione antes desta uma pergunta do tipo Itens para usar como condição.</p>'}` : ''}
+        </div>` : ''}
         </div></div>`;
     }).join('') : '<div class="empty">Nenhuma pergunta. Clique em <strong>Adicionar pergunta</strong>.</div>';
   };
@@ -3574,29 +3721,23 @@ async function viewQuestionnaireForm(v, id) {
     if (act === 'up' && i > 0) [qs[i - 1], qs[i]] = [qs[i], qs[i - 1]];
     if (act === 'down' && i < qs.length - 1) [qs[i + 1], qs[i]] = [qs[i], qs[i + 1]];
     if (act === 'dup') qs.splice(i + 1, 0, { ...qs[i], id: newQid(), options: [...qs[i].options] });
-    // Perguntas que dependiam de uma pergunta removida perdem a condição.
-    qs = qs.map((x, j) => (x.cond && !earlierOf(qs, j).some((e) => e.id === x.cond.question) ? { ...x, cond: null } : x));
+    fixConds();
     render();
   };
   box.onchange = (e) => {
     const k = e.target.dataset.k;
     if (!k) return;
     // Trocar o tipo, marcar condição ou escolher pergunta anterior muda a tela: relê e redesenha.
-    if (['type', 'hascond', 'condq'].includes(k)) {
+    if (['type', 'hascond', 'condq', 'options'].includes(k)) {
       readQs();
       const i = $$('.qe-card', box).indexOf(e.target.closest('.qe-card'));
-      if (k === 'hascond') {
-        const first = earlierOf(qs, i)[0];
-        qs[i].cond = e.target.checked && first ? { question: first.id, value: first.options[0] || '' } : null;
-      }
-      if (k === 'condq') {
-        const pq = earlierOf(qs, i).find((x) => x.id === e.target.value);
-        qs[i].cond = { question: e.target.value, value: pq?.options[0] || '' };
-      }
+      if (k === 'hascond') qs[i].cond = e.target.checked ? { question: '', op: '', value: '' } : null;
+      if (k === 'condq') qs[i].cond = { ...qs[i].cond, value: '' };
       if (k === 'type') {
         qs[i].type = e.target.value;
         if (!Q_OPTION_TYPES.includes(qs[i].type)) qs[i].options = [];
       }
+      fixConds();
       render();
     }
   };
@@ -3608,6 +3749,11 @@ async function viewQuestionnaireForm(v, id) {
     readQs();
     const d = formData($('#qform', v));
     if (!d.name.trim()) throw new Error('Informe o nome do questionário');
+    qs.forEach((x, i) => {
+      if (!x.cond) return;
+      const miss = !x.cond.question ? 'Apresentar quando' : !x.cond.op ? 'Condição' : !x.cond.value ? 'Resposta esperada' : '';
+      if (miss) throw new Error(`Pergunta condicional ${i + 1}: preencha "${miss}"`);
+    });
     const body = {
       id: isNew ? undefined : id,
       name: d.name,
@@ -3993,6 +4139,10 @@ async function viewQuoteForm(v, id) {
     const gone = q.items.filter((i) => i.product_deleted).length;
     if (gone) { q.items = q.items.filter((i) => !i.product_deleted); setTimeout(() => toast(`${gone} item(ns) excluído(s) do cadastro ficaram de fora da cópia`), 300); }
   }
+  // "Abrir orçamento" a partir de uma OS: novo orçamento (não salvo) com o cliente e os itens da OS
+  const fromOs = isNew ? JSON.parse(sessionStorage.getItem('quoteFromOs') || 'null') : null;
+  sessionStorage.removeItem('quoteFromOs');
+  if (fromOs) { q.items = fromOs.items || []; q.extras = fromOs.extras || []; if (fromOs.notes) q.notes = fromOs.notes; q.service_order_id = fromOs.service_order_id; }
   // Orçamento salvo abre para visualizar; "Editar" libera os campos (vendido nunca é editável)
   const sold = q.status === 'vendido';
   const editFlag = sessionStorage.getItem('qedit') === String(id); sessionStorage.removeItem('qedit');
@@ -4000,13 +4150,14 @@ async function viewQuoteForm(v, id) {
   const locked = !editing;
   const st = { target: q.customer_id || isNew ? 'cliente' : (q.lead_name ? 'lead' : 'cliente'), customer: q.customer_id ? { id: q.customer_id, name: q.customer_name, trade_name: q.customer_trade_name, document: q.customer_document, phone: q.customer_phone, email: q.customer_email, city: q.customer_city, state: q.customer_state } : null };
   if (isNew) { const pre = JSON.parse(sessionStorage.getItem('quoteCustomer') || 'null'); sessionStorage.removeItem('quoteCustomer'); if (pre) st.customer = pre; }
+  if (fromOs && fromOs.customer) { st.customer = fromOs.customer; st.target = 'cliente'; }
   const lines = q.items.map((i) => ({ p: { id: +i.product_id, name: i.description, unit: i.unit, stock: i.stock, type: i.product_type, deleted: !!i.product_deleted }, kind: i.kind, q: +i.quantity, price: +i.unit_price, dval: +(i.discount_value ?? i.discount), dtype: i.discount_type || 'valor' }));
   const extras = q.extras.map((e) => ({ d: e.description, v: +e.amount }));
   const methods = new Set(String(q.payment_methods || '').split(',').filter(Boolean));
   let qinst = null;
   const editableStatuses = qSelectable(q.status);
 
-  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/orcamentos">← Orçamentos</a></p><h1>${isNew ? (copyOf ? `Novo orçamento <span class="muted small">(cópia do #${copyOf.id})</span>` : 'Novo orçamento') : 'Orçamento #' + q.id}</h1></div>
+  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/orcamentos">← Orçamentos</a></p><h1>${isNew ? (copyOf ? `Novo orçamento <span class="muted small">(cópia do #${copyOf.id})</span>` : fromOs ? `Novo orçamento <span class="muted small">(da OS #${fromOs.service_order_id})</span>` : 'Novo orçamento') : 'Orçamento #' + q.id}</h1></div>
     <div class="actions">${!isNew ? `<a class="btn qbtn-view" href="${esc(q.public_url)}" target="_blank" rel="noopener">${icon('eye')}Visualizar orçamento</a>` : ''}
       ${!isNew && !editing && q.status === 'aprovado' ? `<button class="btn" id="conv" style="border-color:var(--ok);color:var(--ok)">${icon('cart')}Gerar venda</button>` : ''}
       ${editing ? `<button class="btn" id="cancel">${icon('x')}Cancelar</button><button class="btn primary" id="save">Salvar</button>`
@@ -4020,9 +4171,12 @@ async function viewQuoteForm(v, id) {
             ${sold ? '' : `<button type="button" role="menuitem" data-act="sent">${icon('send')}Marcar como enviado</button>
             <button type="button" role="menuitem" data-act="approved">${icon('check')}Marcar como aprovado</button>
             <button type="button" role="menuitem" data-act="refused">${icon('x')}Marcar como recusado</button>`}
+            ${can('ordens') && q.customer_id ? `<button type="button" role="menuitem" data-act="os">${icon('tool')}Gerar ordem de serviço</button>` : ''}
             <button type="button" role="menuitem" data-act="dup">${icon('copy')}Duplicar</button>
             ${sold ? '' : `<button type="button" role="menuitem" data-act="del" class="danger">${icon('trash')}Excluir</button>`}
           </div></div>`}</div></div>
+    ${!isNew && (q.service_orders || []).length ? `<div class="alert info q-os">${icon('tool')}<span>${q.service_orders.map((so) => `${+so.id === +q.service_order_id ? 'Aberto a partir da' : 'Gerou a'} <a href="#/ordem/${so.id}"><strong>OS #${so.id}</strong></a> (${esc(so.status_label)})`).join(' · ')}</span></div>` : ''}
+    ${isNew && fromOs ? `<div class="alert info q-os">${icon('tool')}<span>Orçamento da <a href="#/ordem/${fromOs.service_order_id}"><strong>OS #${fromOs.service_order_id}</strong></a>: confira os itens e salve.</span></div>` : ''}
     ${sold ? `<div class="alert ok">Este orçamento virou a <a href="#/venda/${q.sale_id}"><strong>venda #${q.sale_id}</strong></a> e não pode mais ser alterado. Use <strong>Duplicar</strong> para fazer um parecido.</div>` : ''}
     ${editing && q.client_response ? `<div class="alert ${q.status === 'recusado' ? 'err' : 'ok'}">Resposta do cliente: “${esc(q.client_response)}”</div>` : ''}
     ${editing && !isNew && ['aprovado', 'recusado'].includes(q.status) && q.status_changed_at ? `<p class="muted small" style="margin-top:-8px">${Q_STATUS[q.status].label} em ${dt(q.status_changed_at)}</p>` : ''}
@@ -4209,6 +4363,7 @@ async function viewQuoteForm(v, id) {
     discount_type: $('#dtype', v).value, discount_value: $('#dval', v).value, notes: $('#notes', v).value, internal_notes: $('#internal_notes', v).value,
     items: lines.map((l) => ({ product_id: l.p.id, description: l.p.name, quantity: l.q, unit_price: l.price, discount_type: l.dtype, discount_value: l.dval })),
     extras: extras.map((e) => ({ description: e.d, amount: e.v })),
+    service_order_id: isNew && q.service_order_id ? q.service_order_id : undefined,
   });
   const validate = () => {
     if (st.target === 'cliente' && !st.customer) throw new Error('Selecione o cliente do orçamento (ou marque "Lead" e informe o nome)');
@@ -4252,6 +4407,15 @@ async function viewQuoteForm(v, id) {
         case 'sent': case 'approved': case 'refused': {
           const r = await api('quote_mark', { body: { id: q.id, action: { sent: 'enviado', approved: 'aprovado', refused: 'recusado' }[b.dataset.act] } });
           toast(`Status: ${(Q_STATUS[r.status] || {}).label || r.status}`); route(); break;
+        }
+        case 'os': {
+          // Nova OS (não salva) ligada a este orçamento, com o cliente e o que foi orçado
+          const lines2 = (q.items || []).map((i) => `- ${i.description} (${qty(i.quantity)} ${i.unit || ''})`.trim());
+          (q.extras || []).forEach((e) => lines2.push(`- ${e.description}`));
+          sessionStorage.setItem('soFromQuote', JSON.stringify({ customer_id: q.customer_id, origin: 'orcamento', quote_id: q.id,
+            description: `Atender o orçamento #${q.id}.${lines2.length ? '\n' + lines2.join('\n') : ''}${q.notes ? '\n' + q.notes : ''}`.slice(0, 2000) }));
+          toast('Confira a ordem de serviço e salve.');
+          go('ordem/nova'); break;
         }
         case 'dup': {
           sessionStorage.setItem('quoteCopy', JSON.stringify(q));

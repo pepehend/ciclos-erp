@@ -105,21 +105,21 @@ class Equipments
 class ServiceOrders
 {
     const STATUSES = [
-        'aberta' => 'Aberta', 'agendada' => 'Agendada', 'em_execucao' => 'Em execução',
-        'pausada' => 'Pausada', 'concluida' => 'Concluída', 'faturada' => 'Faturada',
+        'aberta' => 'Aberta', 'agendada' => 'Agendada', 'a_caminho' => 'A caminho', 'em_execucao' => 'Em execução',
+        'pausada' => 'Pausada', 'concluida' => 'Concluída',
     ];
-    /** Andamento permitido: de → para. "faturada" é o fim do fluxo. */
+    /** Andamento permitido: de → para. "concluida" é o fim do fluxo (a OS não fatura; quem fatura é o orçamento). */
     const TRANSITIONS = [
         'aberta' => ['agendada'],
-        'agendada' => ['aberta', 'em_execucao'],
+        'agendada' => ['aberta', 'a_caminho', 'em_execucao'],
+        'a_caminho' => ['agendada', 'em_execucao'],
         'em_execucao' => ['pausada', 'concluida'],
         'pausada' => ['em_execucao'],
-        'concluida' => ['faturada'],
-        'faturada' => [],
+        'concluida' => [],
     ];
     const ORIGINS = ['chamado' => 'Chamado avulso', 'orcamento' => 'Orçamento'];
     /** Abas da lista: "abertas" são as que ainda não foram concluídas. */
-    const OPEN = ['aberta', 'agendada', 'em_execucao', 'pausada'];
+    const OPEN = ['aberta', 'agendada', 'a_caminho', 'em_execucao', 'pausada'];
 
     public static function label(string $code): string
     {
@@ -188,7 +188,6 @@ class ServiceOrders
     public static function save(array $in, int $userId, ?int $id = null): int
     {
         $old = $id ? self::get($id) : null;
-        if ($old && $old['status'] === 'faturada') throw new AppError('Ordem faturada não pode ser alterada');
         $customerId = (int)($in['customer_id'] ?? 0);
         if (!$customerId) throw new AppError('Selecione o cliente');
         Customers::get($customerId);
@@ -321,7 +320,7 @@ class ServiceOrders
         $count = fn(string $sql, array $p = []) => (int)DB::val("SELECT COUNT(*) FROM service_orders o WHERE $sql", $p);
         $counts = [
             'atrasadas' => $count("o.status = 'agendada' AND o.scheduled_at < ?", [now()]),
-            'hoje' => $count("o.status IN ('agendada','em_execucao','pausada') AND o.scheduled_at >= ? AND o.scheduled_at < ?", [$today . ' 00:00:00', $tomorrow . ' 00:00:00']),
+            'hoje' => $count("o.status IN ('agendada','a_caminho','em_execucao','pausada') AND o.scheduled_at >= ? AND o.scheduled_at < ?", [$today . ' 00:00:00', $tomorrow . ' 00:00:00']),
             'em_execucao' => $count("o.status = 'em_execucao'"),
             'pausada' => $count("o.status = 'pausada'"),
             'sem_agendamento' => $count("o.status = 'aberta' AND o.scheduled_at IS NULL"),

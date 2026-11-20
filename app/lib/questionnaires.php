@@ -1,6 +1,6 @@
 <?php
 /**
- * Questionários e tipos de tarefa (como no Auvo).
+ * Questionários e tipos de tarefa.
  * Questionário = perguntas de vários tipos (texto, check, foto, assinatura…) com regras de exibição.
  * Tipo de tarefa = nome, tempos, quais questionários entram e o que é obrigatório no atendimento.
  * Substituem os antigos "modelos de checklist" (que viram questionários na atualização).
@@ -15,6 +15,8 @@ class Questionnaires
     ];
     /** Tipos que pedem a lista de opções. */
     const OPTION_TYPES = ['itens', 'multipla'];
+    /** Condição da pergunta condicional: a resposta da pergunta escolhida é igual ou diferente da esperada. */
+    const COND_OPS = ['igual', 'diferente'];
     const MAX_QUESTIONS = 100;
 
     public static function get(int $id): array
@@ -47,7 +49,8 @@ class Questionnaires
 
     /**
      * Valida e arruma as perguntas. Cada pergunta: id, label, type, required, description,
-     * options (só itens/múltipla), geo (só foto) e cond = {question, value} (condicional a uma pergunta anterior).
+     * options (só itens/múltipla), geo (só foto) e cond = {question, op, value}: "Apresentar quando"
+     * uma pergunta anterior do tipo Itens for Igual/Diferente de uma das opções dela.
      */
     public static function normalizeQuestions($raw): array
     {
@@ -87,9 +90,14 @@ class Questionnaires
             if (!empty($q['cond']) && is_array($q['cond'])) {
                 $cq = (string)($q['cond']['question'] ?? '');
                 $cv = trim((string)($q['cond']['value'] ?? ''));
-                $prev = array_column($out, 'id');
-                if (!in_array($cq, $prev, true) || $cv === '') throw new AppError('A condição ' . $where . ' precisa de uma pergunta anterior e de uma resposta');
-                $item['cond'] = ['question' => $cq, 'value' => mb_substr($cv, 0, 120)];
+                $op = (string)($q['cond']['op'] ?? 'igual');
+                $parent = null;
+                foreach ($out as $p) if ($p['id'] === $cq) $parent = $p;
+                if (!$parent) throw new AppError('Pergunta condicional ' . $where . ': escolha em "Apresentar quando" uma pergunta anterior');
+                if ($parent['type'] !== 'itens') throw new AppError('Pergunta condicional ' . $where . ': "Apresentar quando" precisa ser uma pergunta anterior do tipo Itens');
+                if (!in_array($op, self::COND_OPS, true)) throw new AppError('Pergunta condicional ' . $where . ': escolha a condição (Igual ou Diferente)');
+                if (!in_array($cv, $parent['options'], true)) throw new AppError('Pergunta condicional ' . $where . ': a resposta esperada precisa ser uma das opções de "' . mb_substr($parent['label'], 0, 40) . '"');
+                $item['cond'] = ['question' => $cq, 'op' => $op, 'value' => $cv];
             }
             $out[] = $item;
             if (count($out) > self::MAX_QUESTIONS) throw new AppError('Máximo de ' . self::MAX_QUESTIONS . ' perguntas por questionário');

@@ -819,3 +819,27 @@ tr.sel td { background: var(--accent-soft); }
 .hr-add-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 2fr auto; gap: 10px; align-items: end; }
 .so-kpis + p svg, [data-pane=horas] > p svg { width: 14px; height: 14px; vertical-align: -2px; }
 @media (max-width: 760px) { .hr-add-grid { grid-template-columns: 1fr; } }
+/* Edição única da OS e ligação com orçamento */
+.alert.info { background: var(--accent-soft); color: var(--text); border-color: transparent; }
+.so-editing, .q-os { display: flex; gap: 8px; align-items: center; }
+.so-editing svg, .q-os svg { width: 18px; height: 18px; flex: none; color: var(--accent); }
+.so-photos figure.del img { opacity: .3; }
+.so-photos figure.del figcaption { text-decoration: line-through; }
+#itbody tr.del td { text-decoration: line-through; opacity: .55; }
+#itbody tr.del td:last-child { text-decoration: none; opacity: 1; }
+/* Controle de horas */
+.hr-top { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 10px; }
+.hr-top svg, .hr-hist svg, .hr-el svg, .hr-totals svg, .hr-info svg, .hr-open svg { width: 14px; height: 14px; vertical-align: -2px; }
+.hr-dt { display: inline-flex; gap: 6px; }
+.hr-dt input[type=date] { width: 150px; min-width: 0; }
+.hr-dt input[type=time] { width: 140px; min-width: 0; }
+.hr-table .hr-sel { min-width: 150px; }
+.hr-table .hr-note { min-width: 160px; }
+.hr-web { display: inline-block; font-size: .72rem; padding: 1px 7px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.hr-hist { margin-left: 6px; color: var(--muted); cursor: help; }
+.hr-totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--radius); margin: 14px 0 8px auto; max-width: 620px; }
+.hr-totals > div { padding: 8px 12px; display: grid; gap: 4px; }
+.hr-totals > div + div { border-left: 1px solid var(--line); }
+.hr-totals span { font-size: .8rem; color: var(--muted); }
+.hr-totals b { font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) { .hr-totals { grid-template-columns: 1fr; } .hr-totals > div + div { border-left: 0; border-top: 1px solid var(--line); } }

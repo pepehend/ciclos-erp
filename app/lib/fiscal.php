@@ -2,7 +2,7 @@
 /**
  * Dados fiscais (tributação) do produto: os valores padrão para uma futura emissão de NF-e.
  * Ficam em products.fiscal (JSON). O sistema não emite nota: aqui só se cadastra e valida.
- * Campos inspirados na aba Tributação do Auvo (Simples Nacional: ICMS por CSOSN).
+ * Campos da aba Tributação (Simples Nacional: ICMS por CSOSN).
  */
 
 class Fiscal
