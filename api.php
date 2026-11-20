@@ -563,6 +563,60 @@ try {
             $u = Auth::requirePerm('orcamentos');
             return ['id' => Quotes::duplicate((int)(input()['id'] ?? 0), $u['id'])];
         },
+        // ---- Ordens de serviço ----
+        'GET service_orders' => function () {
+            Auth::requirePerm('ordens');
+            return ['rows' => ServiceOrders::list($_GET), 'statuses' => ServiceOrders::STATUSES, 'types' => ChecklistModels::SERVICE_TYPES];
+        },
+        'GET service_order' => function () {
+            Auth::requirePerm('ordens');
+            return ServiceOrders::get((int)q('id'));
+        },
+        'GET service_order_form' => function () {
+            Auth::requirePerm('ordens');
+            return ServiceOrders::formData((int)q('customer_id', 0));
+        },
+        'POST service_order_save' => function () {
+            $u = Auth::requirePerm('ordens');
+            $in = input();
+            return ['id' => ServiceOrders::save($in, $u['id'], !empty($in['id']) ? (int)$in['id'] : null)];
+        },
+        'POST service_order_status' => function () {
+            Auth::requirePerm('ordens');
+            $in = input();
+            ServiceOrders::setStatus((int)($in['id'] ?? 0), (string)($in['status'] ?? ''));
+            return ['ok' => true];
+        },
+        'GET equipments' => function () {
+            Auth::requirePerm('ordens');
+            return Equipments::list($_GET);
+        },
+        'POST equipment_save' => function () {
+            Auth::requirePerm('ordens');
+            $in = input();
+            return ['id' => Equipments::save($in, !empty($in['id']) ? (int)$in['id'] : null)];
+        },
+        'POST equipment_active' => function () {
+            Auth::requirePerm('ordens');
+            $in = input();
+            Equipments::setActive((int)($in['id'] ?? 0), !empty($in['active']));
+            return ['ok' => true];
+        },
+        'GET checklist_models' => function () {
+            Auth::requirePerm('ordens');
+            return ['rows' => ChecklistModels::list(q('all') === '1'), 'service_types' => ChecklistModels::SERVICE_TYPES];
+        },
+        'POST checklist_model_save' => function () {
+            Auth::requirePerm('ordens');
+            $in = input();
+            return ['id' => ChecklistModels::save($in, !empty($in['id']) ? (int)$in['id'] : null)];
+        },
+        'POST checklist_model_active' => function () {
+            Auth::requirePerm('ordens');
+            $in = input();
+            ChecklistModels::setActive((int)($in['id'] ?? 0), !empty($in['active']));
+            return ['ok' => true];
+        },
         // ---- Ordens de compra ----
         'GET purchases' => function () {
             Auth::requirePerm('compras');

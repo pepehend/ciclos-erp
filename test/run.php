@@ -1235,6 +1235,51 @@ near(Inventory::num('1.250.000'), 1250000, '"1.250.000"');
 near(Inventory::num('1.5'), 1.5, '"1.5"');
 near(Inventory::num('-500,00'), -500, '"-500,00"');
 
+echo "\nOrdens de serviço\n";
+$osCli = Customers::save(['type' => 'pj', 'document' => '04.252.011/0001-10', 'name' => 'Cliente OS Ltda', 'trade_name' => 'Cliente OS']);
+$osOutro = Customers::save(['type' => 'pj', 'document' => '60.746.948/0001-12', 'name' => 'Outro Cliente Ltda']);
+throws(fn() => Equipments::save(['customer_id' => $osCli]), 'nome do equipamento', 'equipamento exige nome');
+$eqA = Equipments::save(['name' => 'Compressor 5HP', 'customer_id' => $osCli, 'brand' => 'Schulz', 'serial' => 'SN-1']);
+$eqB = Equipments::save(['name' => 'Compressor 2HP', 'customer_id' => $osOutro]);
+ok(count(Equipments::list(['customer_id' => $osCli])) === 1, 'lista equipamentos por cliente');
+Equipments::setActive($eqB, false);
+ok(count(Equipments::list(['customer_id' => $osOutro])) === 0 && count(Equipments::list(['customer_id' => $osOutro, 'all' => 1])) === 1, 'inativo some da lista, aparece com "todos"');
+Equipments::setActive($eqB, true);
+
+$ckFull = ChecklistModels::save(['name' => 'Manutenção compressor', 'service_type' => 'preventiva', 'items' => "Trocar óleo\n\nVerificar pressão\nLimpar filtro"]);
+$ck = ChecklistModels::get($ckFull);
+ok(count($ck['items']) === 3 && $ck['items'][0]['label'] === 'Trocar óleo' && $ck['items'][0]['required'] === true, 'checklist: uma linha por item, linhas vazias ignoradas, obrigatório por padrão');
+throws(fn() => ChecklistModels::save(['name' => 'Vazio', 'items' => "\n  \n"]), 'pelo menos um item', 'checklist exige item');
+throws(fn() => ChecklistModels::save(['name' => 'Tipo', 'service_type' => 'xyz', 'items' => ['a']]), 'Tipo de serviço inválido', 'tipo de serviço validado');
+
+throws(fn() => ServiceOrders::save(['customer_id' => $osCli, 'description' => 'Troca de filtro', 'equipment_id' => $eqB], $uid), 'não pertence', 'equipamento de outro cliente recusado');
+throws(fn() => ServiceOrders::save(['customer_id' => $osCli, 'description' => 'Troca de filtro', 'origin' => 'orcamento', 'quote_id' => 999], $uid), 'orçamento deste cliente', 'orçamento precisa ser do cliente');
+throws(fn() => ServiceOrders::save(['customer_id' => $osCli, 'description' => '  '], $uid), 'Descreva', 'descrição obrigatória');
+$osAvulsa = ServiceOrders::save(['customer_id' => $osCli, 'description' => 'Compressor não liga', 'equipment_id' => $eqA, 'origin' => 'chamado', 'service_type' => 'corretiva'], $uid);
+$osA = ServiceOrders::get($osAvulsa);
+ok($osA['status'] === 'aberta' && $osA['origin'] === 'chamado' && $osA['equipment_name'] === 'Compressor 5HP', 'chamado avulso nasce aberta, com equipamento');
+$osAg = ServiceOrders::save(['customer_id' => $osCli, 'description' => 'Preventiva mensal', 'scheduled_at' => date('Y-m-d', strtotime('+2 days')) . 'T08:30', 'technician_id' => $uid, 'checklist_model_id' => $ckFull], $uid);
+$osAgR = ServiceOrders::get($osAg);
+ok($osAgR['status'] === 'agendada' && $osAgR['scheduled_at'] !== null && (int)$osAgR['technician_id'] === $uid, 'com data vira agendada, com técnico e checklist');
+ServiceOrders::save(['customer_id' => $osCli, 'description' => 'Preventiva mensal', 'scheduled_at' => '', 'checklist_model_id' => $ckFull], $uid, $osAg);
+ok(ServiceOrders::get($osAg)['status'] === 'aberta', 'tirar a data volta para aberta');
+ServiceOrders::save(['customer_id' => $osCli, 'description' => 'Preventiva mensal', 'scheduled_at' => date('Y-m-d H:i', strtotime('+2 days'))], $uid, $osAg);
+
+throws(fn() => ServiceOrders::setStatus($osAvulsa, 'em_execucao'), 'Não é possível', 'não pula de aberta para execução');
+ServiceOrders::setStatus($osAvulsa, 'agendada');
+ServiceOrders::setStatus($osAvulsa, 'em_execucao');
+ServiceOrders::setStatus($osAvulsa, 'pausada');
+ServiceOrders::setStatus($osAvulsa, 'em_execucao');
+ServiceOrders::setStatus($osAvulsa, 'concluida');
+ok(ServiceOrders::get($osAvulsa)['finished_at'] !== null, 'concluir grava a data de término');
+ServiceOrders::setStatus($osAvulsa, 'faturada');
+throws(fn() => ServiceOrders::save(['customer_id' => $osCli, 'description' => 'Tarde demais'], $uid, $osAvulsa), 'não pode ser alterada', 'ordem faturada fica travada');
+throws(fn() => ServiceOrders::setStatus($osAvulsa, 'aberta'), 'Não é possível', 'faturada é o fim do fluxo');
+$abertas = array_column(ServiceOrders::list(['status' => 'abertas']), 'id');
+ok(in_array($osAg, $abertas) && !in_array($osAvulsa, $abertas), 'aba "abertas" não mostra faturadas');
+ok(count(ServiceOrders::list(['status' => 'faturada'])) >= 1, 'filtro por status funciona');
+ok(str_contains(Backup::sql(), 'INSERT INTO `service_orders`'), 'backup inclui ordens de serviço');
+
 @unlink($db);
 echo "\n$passes passaram, $fails falharam\n";
 exit($fails ? 1 : 0);

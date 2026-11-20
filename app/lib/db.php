@@ -411,6 +411,46 @@ class DB
                 created_at $dt NOT NULL,
                 updated_at $dt NOT NULL
             )$end",
+            "CREATE TABLE IF NOT EXISTS equipments (
+                id $pk,
+                customer_id $fk NOT NULL,
+                name VARCHAR(120) NOT NULL,
+                brand VARCHAR(80) NULL,
+                model VARCHAR(80) NULL,
+                serial VARCHAR(80) NULL,
+                notes VARCHAR(500) NULL,
+                active TINYINT NOT NULL DEFAULT 1,
+                created_at $dt NOT NULL,
+                updated_at $dt NOT NULL
+            )$end",
+            "CREATE TABLE IF NOT EXISTS checklist_models (
+                id $pk,
+                name VARCHAR(120) NOT NULL,
+                service_type VARCHAR(20) NULL,
+                items $big NOT NULL,
+                active TINYINT NOT NULL DEFAULT 1,
+                created_at $dt NOT NULL,
+                updated_at $dt NOT NULL
+            )$end",
+            "CREATE TABLE IF NOT EXISTS service_orders (
+                id $pk,
+                status VARCHAR(20) NOT NULL DEFAULT 'aberta',
+                origin VARCHAR(12) NOT NULL DEFAULT 'chamado',
+                customer_id $fk NOT NULL,
+                equipment_id $fk NULL,
+                quote_id $fk NULL,
+                service_type VARCHAR(20) NULL,
+                checklist_model_id $fk NULL,
+                technician_id $fk NULL,
+                scheduled_at $dt NULL,
+                due_date DATE NULL,
+                description TEXT NOT NULL,
+                notes VARCHAR(500) NULL,
+                user_id $fk NULL,
+                finished_at $dt NULL,
+                created_at $dt NOT NULL,
+                updated_at $dt NOT NULL
+            )$end",
             "CREATE TABLE IF NOT EXISTS purchase_orders (
                 id $pk,
                 status VARCHAR(20) NOT NULL DEFAULT 'rascunho',
@@ -513,12 +553,22 @@ class DB
             "CREATE INDEX idx_prefs_product ON product_refs (product_id)",
             "CREATE INDEX idx_prefs_code ON product_refs (code_norm)",
             "CREATE INDEX idx_portal_req_customer ON portal_requests (customer_id)",
+            "CREATE INDEX idx_equip_customer ON equipments (customer_id)",
+            "CREATE INDEX idx_so_status ON service_orders (status)",
+            "CREATE INDEX idx_so_customer ON service_orders (customer_id)",
+            "CREATE INDEX idx_so_technician ON service_orders (technician_id)",
         ];
     }
 
     /** Atualiza bancos criados por versões anteriores. */
     public static function upgrade(): void
     {
+        // v1.1.0: ordens de serviço (equipamentos, modelos de checklist e OS)
+        try {
+            self::pdo()->query('SELECT id FROM service_orders LIMIT 1');
+        } catch (PDOException $e) {
+            self::migrate();
+        }
         // v1.25.0: portal do cliente (acesso e pedidos de correção)
         try {
             self::pdo()->query('SELECT id FROM customer_portal LIMIT 1');

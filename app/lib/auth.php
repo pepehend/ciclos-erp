@@ -17,6 +17,7 @@ class Auth
         'relatorios' => 'Relatórios de vendas e valores do painel (faturamento, lucro)',
         'movimentacoes' => 'Movimentações de estoque (ver e lançar entradas, saídas, perdas, contagem)',
         'compras' => 'Ordens de compra (pedidos aos fornecedores)',
+        'ordens' => 'Ordens de serviço (cadastro de equipamentos e checklists, atendimento e agenda)',
         'financeiro' => 'Financeiro (pagamentos, recebimentos e fluxo de caixa)',
         'formas_pagamento' => 'Formas de pagamento (cadastrar e editar)',
     ];
@@ -207,6 +208,7 @@ class Auth
     const USER_REFS = [
         ['sales', 'user_id'], ['sales', 'canceled_by'], ['invoices', 'user_id'], ['quotes', 'user_id'], ['quotes', 'created_by'],
         ['financial_entries', 'user_id'], ['purchase_orders', 'user_id'], ['movements', 'user_id'], ['portal_requests', 'resolved_by'],
+        ['service_orders', 'user_id'], ['service_orders', 'technician_id'],
     ];
     const ADMIN_LOCKED = 'Administradores só podem ser rebaixados, desativados ou excluídos pelo console do servidor.';
 
