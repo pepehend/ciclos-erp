@@ -842,12 +842,12 @@ const NAV = [
   { g: 'operacao', label: 'Operação', icon: 'swap', items: [
     ['vendas', 'Vendas', 'receipt', 'vendas'], ['orcamentos', 'Orçamentos', 'quote', 'orcamentos'],
     ['notas', 'Notas fiscais', 'receipt', 'notas'],
-    ['compras', 'Ordens de compra', 'order', 'compras'], ['ordens', 'Ordens de serviço', 'tool', 'ordens']] },
+    ['compras', 'Ordens de compra', 'order', 'compras'], ['agenda', 'Agenda', 'calendar', 'ordens'], ['ordens', 'Ordens de serviço', 'tool', 'ordens']] },
   { g: 'cadastros', label: 'Cadastros', icon: 'box', items: [
     ['produtos', 'Produtos', 'box', 'produtos'], ['servicos', 'Serviços', 'tool', 'servicos'],
     ['clientes', 'Clientes', 'id', 'clientes'], ['fornecedores', 'Fornecedores', 'truck', 'fornecedores'],
     ['formas-pagamento', 'Formas de pagamento', 'wallet', 'formas_pagamento'], ['condicoes-pagamento', 'Condições de pagamento', 'wallet', 'admin'],
-    ['equipamentos', 'Equipamentos', 'box', 'ordens'], ['checklists', 'Modelos de checklist', 'check', 'ordens']] },
+    ['equipamentos', 'Equipamentos', 'box', 'ordens'], ['tipos-tarefa', 'Tipos de tarefa', 'tool', 'ordens'], ['questionarios', 'Questionários', 'check', 'ordens']] },
   { g: 'financeiro', label: 'Financeiro', icon: 'wallet', items: [
     ['financeiro', 'Pagamentos e recebimentos', 'wallet', 'financeiro'], ['fluxo-caixa', 'Fluxo de caixa', 'flow', 'financeiro']] },
   { g: 'relatorios', label: 'Relatórios', icon: 'chart', items: [
@@ -988,11 +988,15 @@ const ROUTES = [
   [/^formas-pagamento$/, viewPaymentMethods, 'formas_pagamento'],
   [/^compra\/nova$/, (v) => viewPurchaseForm(v, null), 'compras'],
   [/^compra\/(\d+)$/, viewPurchaseForm, 'compras'],
+  [/^agenda$/, viewAgenda, 'ordens'],
   [/^ordens$/, viewServiceOrders, 'ordens'],
   [/^ordem\/nova$/, (v) => viewServiceOrderForm(v, null), 'ordens'],
   [/^ordem\/(\d+)$/, viewServiceOrderForm, 'ordens'],
   [/^equipamentos$/, viewEquipments, 'ordens'],
-  [/^checklists$/, viewChecklists, 'ordens'],
+  [/^tipos-tarefa$/, viewTaskTypes, 'ordens'],
+  [/^questionarios$/, viewQuestionnaires, 'ordens'],
+  [/^questionario\/nova$/, (v) => viewQuestionnaireForm(v, null), 'ordens'],
+  [/^questionario\/(\d+)$/, viewQuestionnaireForm, 'ordens'],
   [/^financeiro$/, viewFinance, 'financeiro'],
   [/^fluxo-caixa$/, viewCashflow, 'financeiro'],
   [/^conta$/, viewAccount],
@@ -1243,7 +1247,25 @@ function readFiscal(root) {
   return o;
 }
 
-async function productForm(p, onSaved) {
+// Registros salvos abrem em visualização: os campos ficam travados até "Editar" (como no orçamento).
+// .js-view-only aparece na visualização; .js-edit-only aparece ao editar; .js-needs-edit (adicionar, remover,
+// buscar) fica travado na visualização; abas e links continuam clicáveis.
+const NEEDS_EDIT = '.js-needs-edit, .sp-del, [data-delref]';
+function editLock(root, form, startLocked, after) {
+  const apply = (locked) => {
+    form.querySelectorAll('input, select, textarea').forEach((el) => (el.disabled = locked));
+    root.querySelectorAll(NEEDS_EDIT).forEach((el) => (el.disabled = locked));
+    root.querySelectorAll('.js-view-only').forEach((el) => (el.hidden = !locked));
+    root.querySelectorAll('.js-edit-only').forEach((el) => (el.hidden = locked));
+    if (after) after(locked);
+  };
+  const ed = root.querySelector('[data-edit]');
+  if (ed) ed.onclick = () => apply(false);
+  apply(startLocked);
+  return apply;
+}
+
+async function productForm(p, onSaved, { editing = false } = {}) {
   if (p && p.type === 'servico') return serviceForm(p, onSaved);
   const isNew = !p || !p.id;
   p = p || { type: 'produto', unit: 'un' };
@@ -1284,11 +1306,11 @@ async function productForm(p, onSaved) {
       <div data-pp="refs" hidden class="form">
         <p class="help" style="margin:0">Códigos equivalentes de outros fabricantes. A busca por código encontra o produto por qualquer um deles (ignorando traços, pontos e espaços).</p>
         <div id="refrows"></div>
-        <div><button type="button" class="btn sm" id="addref">${icon('plus')}Adicionar referência</button></div>
+        <div><button type="button" class="btn sm js-needs-edit" id="addref">${icon('plus')}Adicionar referência</button></div>
       </div>
       <div data-pp="trib" hidden>${fiscalPaneHtml(p.fiscal)}</div>
     </form>`,
-    foot: `<button class="btn" data-close>Cancelar</button><button class="btn primary" id="save">Salvar</button>`,
+    foot: `<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="save">Salvar</button>`,
   });
   const f = $('#pf', m.el);
   const costIni = f.elements.avg_cost.value.trim();
@@ -1342,6 +1364,7 @@ async function productForm(p, onSaved) {
   if (f.elements.avg_cost) f.elements.avg_cost.oninput = pricing;
   pricing();
 
+  editLock(m.el, f, !isNew && !editing);
   $('#save', m.el).onclick = (e) => busy(e.target, async () => {
     const d = formData(f);
     d.type = type;
@@ -1413,7 +1436,7 @@ async function viewProduct(v, id) {
       </tbody></table></div>` : '<p class="muted">Nenhuma movimentação ainda.</p>'}</div>`;
   v.addEventListener('click', (e) => { const r = e.target.closest('[data-go]'); if (r) go(r.dataset.go); });
   $('#allmov', v).onclick = (e) => { e.preventDefault(); sessionStorage.setItem('movProduct', JSON.stringify({ id: p.id, name: p.name })); go('estoque'); };
-  if ($('#edit', v)) $('#edit', v).onclick = () => productForm(p, () => route());
+  if ($('#edit', v)) $('#edit', v).onclick = () => productForm(p, () => route(), { editing: true });
   if ($('#mov', v)) $('#mov', v).onclick = () => movementForm(p, () => route());
   if ($('#del', v)) $('#del', v).onclick = async (e) => {
     try { if (await deleteProduct(p)) go(svc ? 'servicos' : 'produtos'); } catch (err) { fail(err); }
@@ -2051,7 +2074,7 @@ async function renderReview(box, inv, { batch = false } = {}) {
 
 // ============ Clientes ============
 /** Formulário de cliente com busca automática pelo CNPJ e pelo CEP. */
-function customerForm(c, onSaved, { entity = 'customer' } = {}) {
+function customerForm(c, onSaved, { entity = 'customer', editing = false } = {}) {
   const isNew = !c || !c.id;
   const sup = entity === 'supplier';
   c = c || { type: 'pj' };
@@ -2061,7 +2084,7 @@ function customerForm(c, onSaved, { entity = 'customer' } = {}) {
     body: `<form class="form" id="cf" autocomplete="off">
       <div class="seg" id="ctype"><button type="button" data-t="pj">Empresa (CNPJ)</button><button type="button" data-t="pf">Pessoa física (CPF)</button></div>
       <div class="row">
-        <label><span class="doc-label">CNPJ</span> <span class="inline" style="flex-wrap:nowrap"><input name="document" inputmode="numeric" value="${esc(docFmt(c.document))}" style="flex:1"><button type="button" class="btn" id="lookup">${icon('search')}Buscar dados</button></span><span class="help" id="dochelp">Digite o CNPJ: os dados são preenchidos automaticamente.</span></label>
+        <label><span class="doc-label">CNPJ</span> <span class="inline" style="flex-wrap:nowrap"><input name="document" inputmode="numeric" value="${esc(docFmt(c.document))}" style="flex:1"><button type="button" class="btn js-needs-edit" id="lookup">${icon('search')}Buscar dados</button></span><span class="help" id="dochelp">Digite o CNPJ: os dados são preenchidos automaticamente.</span></label>
       </div>
       <div id="cstatus"></div>
       <div class="row">
@@ -2090,7 +2113,7 @@ function customerForm(c, onSaved, { entity = 'customer' } = {}) {
       </fieldset>
       <label>Observações <textarea name="notes" maxlength="500">${v('notes')}</textarea></label>
     </form>`,
-    foot: `<button class="btn" data-close>Cancelar</button><button class="btn primary" id="save">Salvar ${sup ? 'fornecedor' : 'cliente'}</button>`,
+    foot: `<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="save">Salvar ${sup ? 'fornecedor' : 'cliente'}</button>`,
   });
   const f = $('#cf', m.el);
   let type = c.type === 'pf' ? 'pf' : 'pj', lastLookup = '';
@@ -2144,6 +2167,7 @@ function customerForm(c, onSaved, { entity = 'customer' } = {}) {
     try { const d = await api('cep', { params: { cep } }); fill({ street: d.street, district: d.district, city: d.city, state: d.state }); $('#cephelp', m.el).textContent = 'Endereço preenchido. Falta o número.'; f.elements.number.focus(); }
     catch (err) { $('#cephelp', m.el).innerHTML = `<span class="stock-low">${esc(err.message)}</span>`; }
   });
+  editLock(m.el, f, !isNew && !editing);
   $('#save', m.el).onclick = (e) => busy(e.target, async () => {
     const d = formData(f);
     const doc = d.document.replace(/\D/g, '');
@@ -2292,7 +2316,7 @@ const soDate = (s) => (s ? String(s).split('-').reverse().join('/') : '—');
 function soTableHtml(rows, statuses, types, { withEquipment = true } = {}) {
   return `<div class="table-wrap"><table><thead><tr><th>Ordem</th><th>Status</th><th>Tipo</th>${withEquipment ? '<th>Equipamento</th>' : ''}<th>Agenda</th><th>Técnico</th></tr></thead><tbody>
     ${rows.map((o) => `<tr class="click" data-so="${o.id}"><td><strong>#${o.id}</strong><div class="small muted">${esc(o.description || '')}</div></td>
-      <td>${soStatusHtml(o.status, statuses)}</td><td>${esc(types[o.service_type] || 'Qualquer')}</td>
+      <td>${soStatusHtml(o.status, statuses)}</td><td>${esc(types[o.task_type_id] || '—')}</td>
       ${withEquipment ? `<td>${esc(o.equipment_name || '—')}</td>` : ''}
       <td class="nowrap">${o.scheduled_at ? dt(o.scheduled_at) : '—'}</td><td>${esc(o.technician_name || '—')}</td></tr>`).join('')}</tbody></table></div>`;
 }
@@ -2351,7 +2375,7 @@ async function viewCustomer(v, id) {
       ${c.sales.map((s) => `<tr class="click" data-go="venda/${s.id}"><td>${s.id}</td><td class="nowrap">${dt(s.created_at)}</td><td>${esc(payLabel(s.payment_method))}</td><td class="num">${s.items}</td><td class="num">${s.status === 'cancelada' ? `<s class="muted">${money(s.total)}</s> <span class="badge err">cancelada</span>` : money(s.total)}</td><td class="small muted">${esc(s.user_name || '')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nenhuma compra ainda.</p>'}</div>
     <div id="custhist"></div>`;
   v.addEventListener('click', (e) => { const r = e.target.closest('[data-go]'); if (r) go(r.dataset.go); });
-  $('#edit', v).onclick = () => customerForm(c, () => route());
+  $('#edit', v).onclick = () => customerForm(c, () => route(), { editing: true });
   if (c.portal) bindPortalCard(v, c);
   if (can('ordens')) loadCustomerHistory(v, c).catch(fail);
   if ($('#sell', v)) $('#sell', v).onclick = () => { sessionStorage.setItem('saleCustomer', JSON.stringify(c)); go('vendas/nova'); };
@@ -2369,7 +2393,7 @@ function serviceForm(sv, onSaved) {
     title: isNew ? 'Novo serviço' : 'Editar serviço',
     body: `<form class="form" id="svf"><label>Nome do serviço * <input name="name" required maxlength="200" value="${esc(sv?.name)}" placeholder="Ex.: Montagem de mesa de doces"></label>
       <label>Preço (R$) * <input name="sale_price" inputmode="decimal" value="${sv && +sv.sale_price ? qty(sv.sale_price, 2) : ''}" placeholder="0,00"></label></form>`,
-    foot: `${!isNew && isAdmin() ? `<button class="btn danger" id="svdel" style="margin-right:auto">${icon('trash')}Excluir</button>` : ''}<button class="btn" data-close>Cancelar</button><button class="btn primary" id="svsave">Salvar serviço</button>`,
+    foot: `${!isNew && isAdmin() ? `<button class="btn danger" id="svdel" style="margin-right:auto">${icon('trash')}Excluir</button>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="svsave">Salvar serviço</button>`,
   });
   const f = $('#svf', m.el);
   const sd = $('#svdel', m.el);
@@ -2383,6 +2407,7 @@ function serviceForm(sv, onSaved) {
     const r = await api('product_save', { body });
     invalidateProducts(); m.close(); toast('Serviço salvo'); onSaved && onSaved(r.id);
   });
+  editLock(m.el, f, !isNew);
   $('#svsave', m.el).onclick = (e) => save(e.currentTarget);
   f.onsubmit = (e) => { e.preventDefault(); save($('#svsave', m.el)); };
 }
@@ -2442,7 +2467,7 @@ async function viewServiceOrders(v) {
     labels = d.statuses;
     $('#list', v).innerHTML = d.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Nº</th><th>Cliente</th><th>Equipamento</th><th>Tipo</th><th>Técnico</th><th>Agendada</th><th>Status</th></tr></thead><tbody>
       ${d.rows.map((r) => `<tr class="click" data-id="${r.id}"><td class="nowrap">#${r.id}</td><td><strong>${soCustomer(r)}</strong></td><td>${esc(r.equipment_name || '—')}</td>
-        <td>${esc(d.types[r.service_type] || '—')}</td><td>${esc(r.technician_name || '—')}</td><td class="nowrap">${r.scheduled_at ? dt(r.scheduled_at) : '—'}</td>
+        <td>${esc(r.task_type_name || '—')}</td><td>${esc(r.technician_name || '—')}</td><td class="nowrap">${r.scheduled_at ? dt(r.scheduled_at) : '—'}</td>
         <td>${soStatusHtml(r.status, labels)}</td></tr>`).join('')}</tbody></table></div>`
       : '<div class="empty">Nenhuma ordem de serviço aqui. Clique em <strong>Nova ordem</strong>.</div>';
   };
@@ -2463,23 +2488,28 @@ async function viewServiceOrderForm(v, id) {
     $('#qts', v).innerHTML = sel('quote_id', f.quotes, 'id', (q) => `Orçamento #${q.id}${q.lead_name ? ' · ' + q.lead_name : ''} (${dOnly(q.created_at)})`, o.quote_id, 'Selecione um orçamento');
   };
   const orig = o.origin || 'chamado';
+  const taskOpts = (() => {
+    const list = form.task_types.map((t) => ({ id: t.id, name: t.name }));
+    if (o.task_type_id && !list.some((t) => +t.id === +o.task_type_id)) list.push({ id: o.task_type_id, name: `${o.task_type_name || 'Tipo removido'} (inativo)` });
+    return list.map((t) => `<option value="${t.id}" ${+o.task_type_id === +t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
+  })();
   v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/ordens">← Ordens de serviço</a></p><h1>${isNew ? 'Nova ordem de serviço' : 'Ordem de serviço #' + o.id}</h1>
-      ${isNew ? '' : `<p class="muted">${soStatusHtml(o.status, form.statuses)} ${o.origin_label ? `· ${esc(o.origin_label)}` : ''}</p>`}</div></div>
+      ${isNew ? '' : `<p class="muted">${soStatusHtml(o.status, form.statuses)} ${o.origin_label ? `· ${esc(o.origin_label)}` : ''}</p>`}</div>${isNew ? '' : `<div class="actions"><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn js-edit-only" id="socancel">${icon('x')}Cancelar</button></div>`}</div>
     <div class="card"><form class="form" id="soform">
       <label>Cliente * <select name="customer_id" id="cust" required><option value="">Selecione…</option>${customers.rows.map((c) => `<option value="${c.id}" ${+o.customer_id === +c.id ? 'selected' : ''}>${esc(custName(c))}</option>`).join('')}</select></label>
       <div class="grid two"><label>Equipamento <span id="eqs"></span></label>
-        <label>Tipo de serviço <select name="service_type"><option value="">Não definido</option>${Object.entries(form.service_types).map(([k, l]) => `<option value="${k}" ${o.service_type === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
+        <label>Tipo de tarefa <select name="task_type_id" required><option value="">Selecione…</option>${taskOpts}</select></label></div>
       <fieldset class="fset"><legend>Origem</legend>
         <label class="check"><input type="radio" name="origin" value="chamado" ${orig === 'chamado' ? 'checked' : ''}> Chamado avulso</label>
         <label class="check"><input type="radio" name="origin" value="orcamento" ${orig === 'orcamento' ? 'checked' : ''}> Orçamento do cliente</label>
         <div id="qts-wrap" ${orig === 'orcamento' ? '' : 'hidden'}><span id="qts"></span></div></fieldset>
       <label>Descrição do serviço * <textarea name="description" required rows="3" maxlength="2000" placeholder="O que o cliente pediu ou relatou">${esc(o.description)}</textarea></label>
-      <div class="grid two"><label>Checklist <select name="checklist_model_id"><option value="">Sem checklist</option>${form.checklists.map((c) => `<option value="${c.id}" ${+o.checklist_model_id === +c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+      <div class="grid two">
         <label>Técnico <select name="technician_id"><option value="">Sem técnico</option>${form.technicians.map((t) => `<option value="${t.id}" ${+o.technician_id === +t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label></div>
       <div class="grid two"><label>Agendar para <input type="datetime-local" name="scheduled_at" value="${dtLocal(o.scheduled_at)}"></label>
         <label>Prazo <input type="date" name="due_date" value="${esc(o.due_date || '')}"></label></div>
       <label>Observações internas <input name="notes" maxlength="500" value="${esc(o.notes)}"></label>
-      <div class="actions"><a class="btn" href="#/ordens">Cancelar</a><button class="btn primary" type="submit" id="sosave">Salvar ordem</button></div>
+      <div class="actions">${isNew ? '<a class="btn" href="#/ordens">Cancelar</a>' : ''}<button class="btn primary js-edit-only" type="submit" id="sosave">Salvar ordem</button></div>
     </form>${isNew ? '' : `<div class="so-status"><h3>Andamento</h3>
       ${o.transitions.length ? `<div class="actions">${o.transitions.map((s) => `<button class="btn" data-to="${s}">${icon('check')}Mover para "${esc(form.statuses[s])}"</button>`).join('')}</div>` : '<p class="muted">Ordem finalizada: não há mais mudanças de status.</p>'}
     </div>`}</div>`;
@@ -2492,6 +2522,8 @@ async function viewServiceOrderForm(v, id) {
   };
   $('#cust', v).onchange = () => reloadCustomer().catch(fail);
   $$('[name="origin"]', v).forEach((r) => (r.onchange = () => { $('#qts-wrap', v).hidden = r.value !== 'orcamento'; }));
+  editLock(v, $('#soform', v), !isNew);
+  const socancel = $('#socancel', v); if (socancel) socancel.onclick = () => route();
   $('#soform', v).onsubmit = (e) => {
     e.preventDefault();
     busy($('#sosave', v), async () => {
@@ -2555,11 +2587,11 @@ async function equipmentForm(eq, onSaved) {
       <div data-pane="specs" hidden>
         <p class="small muted">Dados técnicos do aparelho, como potência, voltagem ou pressão de trabalho.</p>
         <div id="splist"></div>
-        <button type="button" class="btn ghost" id="spadd">${icon('plus')}Adicionar especificação</button>
+        <button type="button" class="btn ghost js-needs-edit" id="spadd">${icon('plus')}Adicionar especificação</button>
       </div>
       ${isNew ? '' : '<div data-pane="ordens" hidden><div id="eqhist"><p class="muted">Carregando…</p></div></div>'}
     </form>`,
-    foot: `${!isNew ? `<button class="btn ghost" id="eqact" style="margin-right:auto">${+eq.active ? 'Desativar' : 'Reativar'}</button>` : ''}<button class="btn" data-close>Cancelar</button><button class="btn primary" id="eqsave">Salvar equipamento</button>`,
+    foot: `${!isNew ? `<button class="btn ghost" id="eqact" style="margin-right:auto">${+eq.active ? 'Desativar' : 'Reativar'}</button>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="eqsave">Salvar equipamento</button>`,
   });
   const f = $('#eqf', m.el);
   const splist = $('#splist', m.el);
@@ -2601,6 +2633,7 @@ async function equipmentForm(eq, onSaved) {
     await api('equipment_save', { body: { ...d, id: eq?.id, specs: list } });
     m.close(); toast('Equipamento salvo'); onSaved && onSaved();
   });
+  editLock(m.el, f, !isNew);
   $('#eqsave', m.el).onclick = (e) => save(e.currentTarget);
   f.onsubmit = (e) => { e.preventDefault(); save($('#eqsave', m.el)); };
   const act = $('#eqact', m.el);
@@ -2612,59 +2645,548 @@ async function equipmentForm(eq, onSaved) {
   });
 }
 
-async function viewChecklists(v) {
-  const f = { all: false };
-  v.innerHTML = `<div class="page-head"><div><h1>Modelos de checklist</h1><p class="muted">Itens que o técnico confere em cada tipo de atendimento.</p></div>
-      <div class="actions"><button class="btn primary" id="new">${icon('plus')}Novo modelo</button></div></div>
-    <div class="card"><div class="filters"><label class="check"><input type="checkbox" id="all"> Mostrar inativos</label></div><div id="list"></div></div>`;
-  let types = {};
+// ============ Agenda ============
+// Linha do tempo (dia): 08:00 às 19:00. Semana e calendário: grade por dia.
+const AG_START = 8 * 60, AG_SPAN = 11 * 60;
+const AG_WEEK = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const agPad = (n) => String(n).padStart(2, '0');
+const agYmd = (d) => `${d.getFullYear()}-${agPad(d.getMonth() + 1)}-${agPad(d.getDate())}`;
+const agParse = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const agAdd = (s, n) => { const d = agParse(s); d.setDate(d.getDate() + n); return agYmd(d); };
+const agHm = (s) => (s ? String(s).slice(11, 16) : '');
+const agMin = (s) => { const [h, m] = agHm(s).split(':').map(Number); return h * 60 + m; };
+const agMinStr = (m) => `${agPad(Math.floor(m / 60))}:${agPad(m % 60)}`;
+const agDur = (o) => +o.duration_min || 60;
+const agCust = (o) => o.customer_trade_name || o.customer_name || '—';
+const agFmtDay = (s) => s.split('-').reverse().join('/');
+const AG_OPEN = ['aberta', 'agendada'];
+
+async function viewAgenda(v) {
+  const st = { view: prefGet('agendaView', 'lista'), period: prefGet('agendaPeriod', 'semana'), date: agYmd(new Date()),
+    tech: '', task: '', status: '', q: '', unOpen: true, late: false };
+  let data = null, R = null, filled = false;
+  const today = () => agYmd(new Date());
+
+  v.innerHTML = `<div class="page-head"><div><h1>Agenda</h1><p class="muted">Ordens de serviço por dia, semana ou técnico. Arraste uma OS para outro horário, técnico ou dia.</p></div>
+      <div class="actions"><button class="btn primary" id="ag-new">${icon('plus')}Nova OS</button></div></div>
+    <div class="ag-cards" id="ag-cards"></div>
+    <div class="card" id="ag-unbox"></div>
+    <div class="card">
+      <div class="ag-bar">
+        <button class="btn sm" id="ag-prev" aria-label="Anterior">‹</button><button class="btn sm" id="ag-next" aria-label="Próximo">›</button>
+        <button class="btn sm" id="ag-today">Hoje</button><strong id="ag-label" class="ag-label"></strong>
+        <span class="grow"></span>
+        <div class="seg" id="ag-views"><button type="button" data-v="lista">Lista</button><button type="button" data-v="calendario">Calendário</button><button type="button" data-v="linha">Linha do tempo</button></div>
+        <select id="ag-period" aria-label="Período"></select>
+      </div>
+      <div class="ag-bar">
+        <select id="ag-tech" aria-label="Técnico"><option value="">Todos os técnicos</option></select>
+        <select id="ag-task" aria-label="Tipo de tarefa"><option value="">Todos os tipos</option></select>
+        <select id="ag-status" aria-label="Status"><option value="">Todos os status</option></select>
+        <input id="ag-q" type="search" placeholder="Cliente, equipamento ou nº da OS">
+      </div>
+      <div id="ag-body"></div>
+    </div>`;
+
+  const body = $('#ag-body', v);
+  const unbox = $('#ag-unbox', v);
+
+  // Período efetivo: calendário é sempre mês; linha do tempo aceita dia ou semana.
+  const effPeriod = () => (st.view === 'calendario' ? 'mes' : st.view === 'linha' && st.period === 'mes' ? 'semana' : st.period);
+  const range = () => {
+    const eff = effPeriod(), d = agParse(st.date);
+    if (eff === 'dia') return { eff, from: st.date, to: st.date };
+    if (eff === 'mes') {
+      const first = new Date(d.getFullYear(), d.getMonth(), 1);
+      if (st.view === 'calendario') { const start = agAdd(agYmd(first), -first.getDay()); return { eff, from: start, to: agAdd(start, 41) }; }
+      return { eff, from: agYmd(first), to: agYmd(new Date(d.getFullYear(), d.getMonth() + 1, 0)) };
+    }
+    const start = agAdd(st.date, -d.getDay());
+    return { eff, from: start, to: agAdd(start, 6) };
+  };
+  const shift = (n) => {
+    const eff = effPeriod(), d = agParse(st.date);
+    if (eff === 'dia') st.date = agAdd(st.date, n);
+    else if (eff === 'semana') st.date = agAdd(st.date, 7 * n);
+    else { d.setDate(1); d.setMonth(d.getMonth() + n); st.date = agYmd(d); }
+  };
+  const label = () => {
+    if (st.late) return 'OS atrasadas (todas as datas)';
+    const eff = R.eff;
+    if (eff === 'dia') return `${['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'][agParse(st.date).getDay()]}, ${agFmtDay(st.date)}`;
+    if (eff === 'semana') return `${agFmtDay(R.from)} a ${agFmtDay(R.to)}`;
+    const s = agParse(st.date).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  };
+  const tip = (o) => `OS #${o.id}\nStatus: ${o.status_label}\nTipo: ${o.task_type_name || '—'}\nCliente: ${agCust(o)}\nTécnico: ${o.technician_name || '—'}\nDuração: ${agDur(o)} min`;
+  const chip = (o, showTech = true) => `<div class="ag-chip ${o.status}" ${AG_OPEN.includes(o.status) ? 'draggable="true"' : ''} data-id="${o.id}" data-tech="${o.technician_id || ''}" data-hm="${agHm(o.scheduled_at)}" title="${esc(tip(o))}">${o.scheduled_at ? `<b>${agHm(o.scheduled_at)}</b> ` : ''}${esc(agCust(o))}${showTech && o.technician_name ? ` – ${esc(o.technician_name)}` : ''}</div>`;
+
+  // ---- Reagendar (arrastar ou escolher data)
+  const reschedule = async (id, when, tech) => {
+    try {
+      await api('agenda_move', { body: { id: +id, scheduled_at: when, technician_id: tech } });
+      toast('OS reagendada');
+      await load();
+    } catch (e) { fail(e); }
+  };
+  const onDrop = (e, when, techOverride) => {
+    const id = e.dataTransfer.getData('text/plain');
+    if (!id) return;
+    const tech = techOverride !== undefined ? techOverride : (e.dataTransfer.getData('application/x-tech') || null);
+    reschedule(id, when, tech);
+  };
+  const wireDrops = () => body.querySelectorAll('[data-drop]').forEach((el) => {
+    el.ondragover = (e) => { if (e.dataTransfer.types.includes('text/plain')) { e.preventDefault(); el.classList.add('drop'); } };
+    el.ondragleave = () => el.classList.remove('drop');
+    el.ondrop = (e) => {
+      e.preventDefault(); el.classList.remove('drop');
+      if (el.dataset.drop === 'track') {
+        const r = el.getBoundingClientRect();
+        const mins = AG_START + Math.min(AG_SPAN, Math.max(0, Math.round(((e.clientX - r.left) / r.width) * AG_SPAN / 15) * 15));
+        onDrop(e, `${st.date} ${agMinStr(mins)}`, el.dataset.tech || null);
+      } else {
+        const hm = e.dataTransfer.getData('application/x-hm') || '08:00';
+        onDrop(e, `${el.dataset.day} ${hm}`, el.dataset.tech !== undefined ? (el.dataset.tech || null) : undefined);
+      }
+    };
+  });
+
+  // ---- Telas
+  const paintCards = () => {
+    const c = data.counts;
+    const cards = [
+      ['atrasadas', 'Atrasadas', c.atrasadas, 'red'], ['hoje', 'Para hoje', c.hoje, ''], ['em_execucao', 'Em atendimento', c.em_execucao, ''],
+      ['pausada', 'Pausadas', c.pausada, 'amber'], ['sem_agendamento', 'Sem agendamento', c.sem_agendamento, ''], ['concluida', 'Concluídas', c.concluida, 'green'],
+    ];
+    $('#ag-cards', v).innerHTML = cards.map(([k, l, n, cls]) => `<button type="button" class="ag-card ${cls}" data-card="${k}"><b>${n}</b><span>${l}</span></button>`).join('');
+  };
+  const paintUn = () => {
+    const list = data.unscheduled;
+    unbox.innerHTML = `<div class="card-head"><h2>OS sem agendamento <span class="badge">${list.length}</span></h2>
+        <button class="btn sm" id="ag-untog">${st.unOpen ? 'Recolher' : 'Mostrar'}</button></div>` + (!st.unOpen ? '' : list.length
+      ? `<div class="ag-un">${list.map((o) => `<div class="ag-un-item" draggable="true" data-un="${o.id}" data-tech="${o.technician_id || ''}" data-hm="">
+          <div><strong>#${o.id} · ${esc(agCust(o))}</strong><div class="small muted">${esc(o.task_type_name || 'Sem tipo de tarefa')} · ${esc(String(o.description).slice(0, 90))}</div></div>
+          <button class="btn sm" data-sched="${o.id}">Agendar</button></div>`).join('')}</div>`
+      : '<p class="muted small">Nenhuma OS aguardando agendamento. Ordens novas sem data aparecem aqui.</p>');
+  };
+  const paintLista = () => {
+    const rows = data.rows;
+    body.innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Nº</th><th>Data/hora</th><th>Cliente</th><th>Equipamento</th><th>Tipo de tarefa</th><th>Técnico</th><th>Status</th></tr></thead><tbody>
+      ${rows.map((o) => `<tr class="click" data-go="${o.id}"><td class="nowrap">#${o.id}</td><td class="nowrap">${o.scheduled_at ? dt(o.scheduled_at) : '—'}</td>
+        <td><strong>${esc(agCust(o))}</strong></td><td>${esc(o.equipment_name || '—')}</td><td>${esc(o.task_type_name || '—')}</td>
+        <td>${esc(o.technician_name || '—')}</td><td>${soStatusHtml(o.status, data.statuses)}</td></tr>`).join('')}</tbody></table></div>`
+      : `<div class="empty">${st.late ? 'Nenhuma OS atrasada.' : 'Nenhuma OS agendada neste período.'}</div>`;
+  };
+  const paintCal = () => {
+    const byDay = {};
+    data.rows.forEach((o) => { const k = o.scheduled_at.slice(0, 10); (byDay[k] = byDay[k] || []).push(o); });
+    const month = agParse(st.date).getMonth(), now = today();
+    let cells = '';
+    for (let i = 0; i < 42; i++) {
+      const day = agAdd(R.from, i), dd = agParse(day), list = byDay[day] || [];
+      cells += `<div class="ag-day${dd.getMonth() !== month ? ' out' : ''}${day === now ? ' today' : ''}" data-drop="day" data-day="${day}">
+        <div class="dnum">${dd.getDate()}</div>${list.slice(0, 5).map((o) => chip(o)).join('')}
+        ${list.length > 5 ? `<button type="button" class="ag-more" data-goday="${day}">+${list.length - 5} na linha do tempo</button>` : ''}</div>`;
+    }
+    body.innerHTML = `<div class="ag-cal">${AG_WEEK.map((w) => `<div class="ag-wh">${w}</div>`).join('')}${cells}</div>`;
+  };
+  const paintLinha = () => {
+    const techs = [...data.technicians.map((t) => ({ id: String(t.id), name: t.name })), { id: '', name: 'Sem técnico' }];
+    const rowsOf = (t) => data.rows.filter((o) => String(o.technician_id || '') === t.id);
+    if (R.eff === 'dia') {
+      const hours = []; for (let h = 8; h < 19; h++) hours.push(h); // 19:00 é a borda final
+      const head = `<div class="ag-row ag-head" style="grid-template-columns:170px 1fr"><div class="ag-name"></div><div class="ag-hours">${hours.map((h) => `<span style="left:${((h * 60 - AG_START) / AG_SPAN) * 100}%">${agPad(h)}:00</span>`).join('')}</div></div>`;
+      const lines = techs.map((t) => {
+        const lanes = [];
+        const placed = rowsOf(t).map((o) => {
+          const s = agMin(o.scheduled_at), e = s + agDur(o);
+          let lane = 0; while (lanes[lane] !== undefined && lanes[lane] > s) lane++;
+          lanes[lane] = e;
+          return { o, s, e, lane };
+        });
+        const h = Math.max(1, lanes.length) * 38 + 8;
+        const blocks = placed.map(({ o, s, e, lane }) => {
+          const left = (Math.max(0, s - AG_START) / AG_SPAN) * 100;
+          const width = Math.max(0.6, (Math.min(e, AG_START + AG_SPAN) - Math.max(s, AG_START)) / AG_SPAN * 100);
+          return `<div class="ag-block ${o.status}" ${AG_OPEN.includes(o.status) ? 'draggable="true"' : ''} data-id="${o.id}" data-tech="${o.technician_id || ''}" data-hm="${agHm(o.scheduled_at)}" title="${esc(tip(o))}" style="left:${left}%;width:${width}%;top:${lane * 38 + 4}px"><b>${agHm(o.scheduled_at)}</b> ${esc(agCust(o))}</div>`;
+        }).join('');
+        return `<div class="ag-row" style="grid-template-columns:170px 1fr"><div class="ag-name">${esc(t.name)}</div>
+          <div class="ag-track" data-drop="track" data-tech="${t.id}" style="height:${h}px">${blocks}</div></div>`;
+      }).join('');
+      body.innerHTML = `<div class="ag-tl ag-tl-day">${head}${lines}</div>`;
+    } else {
+      const days = Array.from({ length: 7 }, (_, i) => agAdd(R.from, i));
+      const cols = 'grid-template-columns:170px repeat(7, minmax(130px, 1fr))';
+      const head = `<div class="ag-row ag-head" style="${cols}"><div class="ag-name"></div>${days.map((d) => `<div class="ag-dh${d === today() ? ' today' : ''}">${AG_WEEK[agParse(d).getDay()]} ${agFmtDay(d).slice(0, 5)}</div>`).join('')}</div>`;
+      const lines = techs.map((t) => `<div class="ag-row" style="${cols}"><div class="ag-name">${esc(t.name)}</div>${days.map((d) => {
+        const list = rowsOf(t).filter((o) => o.scheduled_at.slice(0, 10) === d);
+        return `<div class="ag-cell" data-drop="cell" data-day="${d}" data-tech="${t.id}">${list.map((o) => chip(o, false)).join('')}</div>`;
+      }).join('')}</div>`).join('');
+      body.innerHTML = `<div class="ag-tl ag-tl-week">${head}${lines}</div>`;
+    }
+  };
+  const paintBody = () => {
+    if (st.view === 'calendario') paintCal();
+    else if (st.view === 'linha') paintLinha();
+    else paintLista();
+    wireDrops();
+  };
+  const paintBar = () => {
+    $('#ag-label', v).textContent = label();
+    $$('#ag-views button', v).forEach((b) => b.classList.toggle('on', b.dataset.v === st.view));
+    const sel = $('#ag-period', v);
+    sel.innerHTML = `<option value="dia">Dia</option><option value="semana">Semana</option>${st.view === 'linha' ? '' : '<option value="mes">Mês</option>'}`;
+    sel.hidden = st.view === 'calendario';
+    sel.value = effPeriod() === 'mes' && st.view === 'linha' ? 'semana' : st.period;
+    if (st.view === 'calendario') sel.value = 'mes';
+    $('#ag-tech', v).value = st.tech; $('#ag-task', v).value = st.task; $('#ag-status', v).value = st.status;
+  };
+  const fill = () => {
+    if (filled) return; filled = true;
+    $('#ag-tech', v).insertAdjacentHTML('beforeend', data.technicians.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join(''));
+    $('#ag-task', v).insertAdjacentHTML('beforeend', data.task_types.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join(''));
+    $('#ag-status', v).insertAdjacentHTML('beforeend', Object.entries(data.statuses).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join(''));
+  };
+  let seq = 0; // descarta respostas de cargas antigas (cliques rápidos em período ou visão)
   const load = async () => {
-    const d = await api('checklist_models', { params: { all: f.all ? 1 : '' } });
-    types = d.service_types;
-    $('#list', v).innerHTML = d.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Modelo</th><th>Tipo de serviço</th><th class="num">Itens</th><th></th></tr></thead><tbody>
-      ${d.rows.map((m) => `<tr class="click" data-id="${m.id}"><td><strong>${esc(m.name)}</strong></td><td>${esc(types[m.service_type] || 'Qualquer')}</td><td class="num">${m.items.length}</td>
-        <td>${+m.active ? '' : '<span class="badge">inativo</span>'}</td></tr>`).join('')}</tbody></table></div>`
-      : '<div class="empty">Nenhum modelo de checklist. Clique em <strong>Novo modelo</strong>.</div>';
-    $('#list', v).dataset.rows = JSON.stringify(d.rows);
+    const my = ++seq;
+    const r = range();
+    const d = await api('agenda', { params: { from: r.from, to: r.to, tech: st.tech, task_type_id: st.task, status: st.status, q: st.q, late: st.late ? 1 : '' } });
+    if (my !== seq) return;
+    R = r; data = d;
+    fill();
+    paintCards(); paintUn(); paintBar(); paintBody();
+  };
+
+  // ---- Controles
+  $('#ag-new', v).onclick = () => go('ordem/nova');
+  $('#ag-prev', v).onclick = () => { st.late = false; shift(-1); load().catch(fail); };
+  $('#ag-next', v).onclick = () => { st.late = false; shift(1); load().catch(fail); };
+  $('#ag-today', v).onclick = () => { st.late = false; st.date = today(); load().catch(fail); };
+  $$('#ag-views button', v).forEach((b) => (b.onclick = () => { st.late = false; st.view = b.dataset.v; prefSet('agendaView', st.view); load().catch(fail); }));
+  $('#ag-period', v).onchange = (e) => { st.late = false; st.period = e.target.value; prefSet('agendaPeriod', st.period); load().catch(fail); };
+  $('#ag-tech', v).onchange = (e) => { st.tech = e.target.value; load().catch(fail); };
+  $('#ag-task', v).onchange = (e) => { st.task = e.target.value; load().catch(fail); };
+  $('#ag-status', v).onchange = (e) => { st.late = false; st.status = e.target.value; load().catch(fail); };
+  $('#ag-q', v).oninput = debounce((e) => { st.q = e.target.value.trim(); load().catch(fail); });
+  $('#ag-cards', v).onclick = (e) => {
+    const b = e.target.closest('[data-card]'); if (!b) return;
+    const k = b.dataset.card;
+    st.late = k === 'atrasadas';
+    if (k === 'hoje') { st.view = 'linha'; st.period = 'dia'; st.date = today(); st.status = ''; }
+    else if (k === 'sem_agendamento') { st.unOpen = true; paintUn(); unbox.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    else { st.view = 'lista'; st.status = { atrasadas: '', em_execucao: 'em_execucao', pausada: 'pausada', concluida: 'concluida' }[k]; }
+    load().catch(fail);
+  };
+  unbox.onclick = (e) => {
+    if (e.target.closest('#ag-untog')) { st.unOpen = !st.unOpen; paintUn(); return; }
+    const s = e.target.closest('[data-sched]');
+    if (s) scheduleModal(data.unscheduled.find((o) => String(o.id) === s.dataset.sched));
+  };
+  unbox.ondragstart = (e) => {
+    const it = e.target.closest('[data-un]'); if (!it) return;
+    e.dataTransfer.setData('text/plain', it.dataset.un);
+    e.dataTransfer.setData('application/x-tech', it.dataset.tech || '');
+    e.dataTransfer.setData('application/x-hm', '');
+  };
+  body.onclick = (e) => {
+    const g = e.target.closest('[data-goday]');
+    if (g) { st.date = g.dataset.goday; st.view = 'linha'; st.period = 'dia'; load().catch(fail); return; }
+    const c = e.target.closest('[data-id], [data-go]');
+    if (c) go('ordem/' + (c.dataset.id || c.dataset.go));
+  };
+  body.ondragstart = (e) => {
+    const c = e.target.closest('[data-id]'); if (!c) return;
+    e.dataTransfer.setData('text/plain', c.dataset.id);
+    e.dataTransfer.setData('application/x-tech', c.dataset.tech || '');
+    e.dataTransfer.setData('application/x-hm', c.dataset.hm || '');
+  };
+
+  // Escolher data e horário (sem arrastar)
+  const scheduleModal = (o) => {
+    if (!o) return;
+    const m = modal({
+      title: `Agendar OS #${o.id}`,
+      body: `<form class="form" id="agf">
+        <p class="small muted">${esc(agCust(o))} · ${esc(o.task_type_name || 'Sem tipo de tarefa')}</p>
+        <div class="grid two"><label>Data <input type="date" name="day" required value="${o.scheduled_at ? o.scheduled_at.slice(0, 10) : st.date}"></label>
+        <label>Horário <input type="time" name="hm" step="900" required value="${o.scheduled_at ? agHm(o.scheduled_at) : '08:00'}"></label></div>
+        <label>Técnico <select name="tech"><option value="">Sem técnico</option>${data.technicians.map((t) => `<option value="${t.id}" ${String(o.technician_id || '') === String(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>
+      </form>`,
+      foot: `<button class="btn" data-close>Cancelar</button><button class="btn primary" id="agok">${icon('check')}Agendar</button>`,
+    });
+    $('#agok', m.el).onclick = (e) => busy(e.currentTarget, async () => {
+      const d = formData($('#agf', m.el));
+      if (!d.day || !d.hm) throw new Error('Informe a data e o horário');
+      await api('agenda_move', { body: { id: o.id, scheduled_at: `${d.day} ${d.hm}`, technician_id: d.tech || null } });
+      m.close(); toast('OS agendada'); await load();
+    });
+  };
+
+  await load();
+}
+
+// ============ Tipos de tarefa ============
+async function viewTaskTypes(v) {
+  const f = { all: false };
+  v.innerHTML = `<div class="page-head"><div><h1>Tipos de tarefa</h1><p class="muted">Cada tipo escolhe os questionários que o técnico responde e o que é obrigatório na ordem.</p></div>
+      <div class="actions"><button class="btn primary" id="new">${icon('plus')}Novo tipo</button></div></div>
+    <div class="card"><div class="filters"><label class="check"><input type="checkbox" id="all"> Mostrar inativos</label></div><div id="list"></div></div>`;
+  let rows = [];
+  let qRows = [];
+  let meta = null;
+  const load = async () => {
+    meta = await api('task_types', { params: { all: f.all ? 1 : '' } });
+    qRows = (await api('questionnaires', { params: { all: 1 } })).rows;
+    rows = meta.rows;
+    const qName = Object.fromEntries(qRows.map((q) => [q.id, q.name]));
+    $('#list', v).innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Tipo de tarefa</th><th>Questionários</th><th>Tolerância</th><th>Duração</th><th></th></tr></thead><tbody>
+      ${rows.map((t) => `<tr class="click" data-id="${t.id}"><td><strong>${esc(t.name)}</strong></td>
+        <td>${t.questionnaire_ids.length ? esc(t.questionnaire_ids.map((id) => qName[id] || '—').join(', ')) : '<span class="muted">Nenhum</span>'}</td>
+        <td>${esc(t.tolerance || '—')}</td><td>${esc(t.duration || '—')}</td><td>${+t.active ? '' : '<span class="badge">inativo</span>'}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">Nenhum tipo de tarefa. Clique em <strong>Novo tipo</strong>.</div>';
   };
   $('#all', v).onchange = (e) => { f.all = e.target.checked; load().catch(fail); };
-  $('#new', v).onclick = () => checklistForm(null, types, load);
+  $('#new', v).onclick = () => taskTypeForm(null, meta, qRows, load);
   $('#list', v).onclick = (e) => {
     const r = e.target.closest('[data-id]');
-    if (!r) return;
-    const m = JSON.parse($('#list', v).dataset.rows || '[]').find((x) => x.id == r.dataset.id);
-    checklistForm(m, types, load);
+    if (r) taskTypeForm(rows.find((x) => x.id == r.dataset.id), meta, qRows, load);
   };
   await load();
 }
 
-function checklistForm(m, types, onSaved) {
-  const isNew = !m;
+function taskTypeForm(t, meta, qRows, onSaved) {
+  const isNew = !t;
+  const chosen = new Set(t?.questionnaire_ids || []);
+  const reqs = new Set(t?.requires || []);
+  // Questionários ativos, mais os inativos que este tipo ainda usa (para não sumirem ao salvar).
+  const qList = qRows.filter((q) => +q.active || chosen.has(+q.id));
   const md = modal({
-    title: isNew ? 'Novo modelo de checklist' : 'Editar modelo de checklist',
-    body: `<form class="form" id="ckf"><label>Nome do modelo * <input name="name" required maxlength="120" value="${esc(m?.name)}" placeholder="Ex.: Manutenção preventiva do compressor"></label>
-      <label>Tipo de serviço <select name="service_type"><option value="">Qualquer tipo</option>${Object.entries(types).map(([k, l]) => `<option value="${k}" ${m?.service_type === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-      <label>Itens * <textarea name="items" required rows="8" placeholder="Um item por linha">${esc((m?.items || []).map((i) => i.label).join('\n'))}</textarea></label>
-      <p class="small muted">Escreva um item por linha. Linhas vazias são ignoradas.</p></form>`,
-    foot: `${!isNew ? `<button class="btn ghost" id="ckact" style="margin-right:auto">${+m.active ? 'Desativar' : 'Reativar'}</button>` : ''}<button class="btn" data-close>Cancelar</button><button class="btn primary" id="cksave">Salvar modelo</button>`,
+    title: isNew ? 'Novo tipo de tarefa' : 'Editar tipo de tarefa',
+    wide: true,
+    body: `<form class="form" id="ttf">
+      <label>Descrição * <input name="name" required maxlength="120" value="${esc(t?.name)}" placeholder="Ex.: Manutenção preventiva"></label>
+      <div class="grid two"><label>Tempo de tolerância <input name="tolerance" value="${esc(t?.tolerance || '')}" placeholder="HH:MM" inputmode="numeric"></label>
+        <label>Tempo estimado de duração <input name="duration" value="${esc(t?.duration || '')}" placeholder="HH:MM" inputmode="numeric"></label></div>
+      <fieldset class="fset"><legend>Questionários deste tipo</legend>
+        ${qList.length ? qList.map((q) => `<label class="check"><input type="checkbox" name="questionnaire_ids" value="${q.id}" ${chosen.has(+q.id) ? 'checked' : ''}> ${esc(q.name)}${+q.active ? '' : ' <span class="badge">inativo</span>'}</label>`).join('')
+          : '<p class="small muted">Nenhum questionário cadastrado. Crie em Cadastros → Questionários.</p>'}</fieldset>
+      <fieldset class="fset"><legend>Obrigatoriedades</legend>
+        ${Object.entries(meta.requires).map(([k, l]) => `<label class="check"><input type="checkbox" name="requires" value="${k}" ${reqs.has(k) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</fieldset>
+      <fieldset class="fset"><legend>Envio ao cliente</legend>
+        <label class="check"><input type="checkbox" name="send_survey" ${t && +t.send_survey ? 'checked' : ''}> Enviar pesquisa de satisfação</label>
+        <label class="check"><input type="checkbox" name="send_os_email" ${t && +t.send_os_email ? 'checked' : ''}> Enviar OS digital por e-mail</label></fieldset>
+    </form>`,
+    foot: `${!isNew ? `<button class="btn ghost" id="ttact" style="margin-right:auto">${+t.active ? 'Desativar' : 'Reativar'}</button>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="ttsave">Salvar tipo</button>`,
   });
-  const f = $('#ckf', md.el);
+  const f = $('#ttf', md.el);
   const save = (btn) => busy(btn, async () => {
     const d = formData(f);
-    if (!d.name.trim()) throw new Error('Informe o nome do modelo');
-    if (!d.items.trim()) throw new Error('Inclua pelo menos um item no checklist');
-    await api('checklist_model_save', { body: { ...d, id: m?.id } });
-    md.close(); toast('Modelo salvo'); onSaved && onSaved();
+    if (!d.name.trim()) throw new Error('Informe a descrição do tipo de tarefa');
+    await api('task_type_save', { body: {
+      id: t?.id,
+      name: d.name,
+      tolerance: d.tolerance,
+      duration: d.duration,
+      send_survey: d.send_survey,
+      send_os_email: d.send_os_email,
+      questionnaire_ids: $$('[name=questionnaire_ids]:checked', f).map((i) => +i.value),
+      requires: $$('[name=requires]:checked', f).map((i) => i.value),
+    } });
+    md.close(); toast('Tipo salvo'); onSaved && onSaved();
   });
-  $('#cksave', md.el).onclick = (e) => save(e.currentTarget);
-  f.onsubmit = (e) => { e.preventDefault(); save($('#cksave', md.el)); };
-  const act = $('#ckact', md.el);
+  editLock(md.el, f, !isNew);
+  $('#ttsave', md.el).onclick = (e) => save(e.currentTarget);
+  f.onsubmit = (e) => { e.preventDefault(); save($('#ttsave', md.el)); };
+  const act = $('#ttact', md.el);
   if (act) act.onclick = () => busy(act, async () => {
-    const to = !+m.active;
-    if (!to && !(await confirmBox(`Desativar o modelo "${m.name}"? Ordens antigas continuam com ele.`, { ok: 'Desativar', danger: true }))) return;
-    await api('checklist_model_active', { body: { id: m.id, active: to } });
-    md.close(); toast(to ? 'Modelo reativado' : 'Modelo desativado'); onSaved && onSaved();
+    const to = !+t.active;
+    if (!to && !(await confirmBox(`Desativar o tipo "${t.name}"? Ordens antigas continuam com ele.`, { ok: 'Desativar', danger: true }))) return;
+    await api('task_type_active', { body: { id: t.id, active: to } });
+    md.close(); toast(to ? 'Tipo reativado' : 'Tipo desativado'); onSaved && onSaved();
   });
+}
+
+// ============ Questionários ============
+async function viewQuestionnaires(v) {
+  const f = { all: false };
+  v.innerHTML = `<div class="page-head"><div><h1>Questionários</h1><p class="muted">Perguntas que o técnico responde na ordem. Um questionário pode ser usado em vários tipos de tarefa.</p></div>
+      <div class="actions"><button class="btn primary" id="new">${icon('plus')}Novo questionário</button></div></div>
+    <div class="card"><div class="filters"><label class="check"><input type="checkbox" id="all"> Mostrar inativos</label></div><div id="list"></div></div>`;
+  const load = async () => {
+    const d = await api('questionnaires', { params: { all: f.all ? 1 : '' } });
+    $('#list', v).innerHTML = d.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Questionário</th><th class="num">Perguntas</th><th>Equipamento</th><th></th></tr></thead><tbody>
+      ${d.rows.map((q) => `<tr class="click" data-id="${q.id}"><td><strong>${esc(q.name)}</strong></td><td class="num">${q.questions_count}</td>
+        <td>${q.allow_equipment ? (q.equipment_required ? 'Obrigatório' : 'Opcional') : '—'}</td>
+        <td>${+q.active ? '' : '<span class="badge">inativo</span>'}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">Nenhum questionário. Clique em <strong>Novo questionário</strong>.</div>';
+  };
+  $('#all', v).onchange = (e) => { f.all = e.target.checked; load().catch(fail); };
+  $('#new', v).onclick = () => go('questionario/nova');
+  $('#list', v).onclick = (e) => { const r = e.target.closest('[data-id]'); if (r) go('questionario/' + r.dataset.id); };
+  await load();
+}
+
+const Q_OPTION_TYPES = ['itens', 'multipla'];
+const newQid = () => 'p' + Math.random().toString(36).slice(2, 9);
+
+async function viewQuestionnaireForm(v, id) {
+  const isNew = !id;
+  const q = isNew
+    ? { name: '', per_line: 1, show_os: 1, pairs: 0, show_unanswered: 0, allow_equipment: 0, equipment_required: 0, active: 1, questions: [] }
+    : await api('questionnaire', { params: { id } });
+  let locked = !isNew;
+  let qs = (q.questions || []).map((x) => ({ ...x, options: x.options || [] }));
+  const typeOpts = (cur) => Object.entries(types).map(([k, l]) => `<option value="${k}" ${cur === k ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  const types = (await api('questionnaires', { params: { all: 1 } })).types; // lista de tipos de resposta
+
+  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/questionarios">← Questionários</a></p><h1>${isNew ? 'Novo questionário' : esc(q.name)}</h1>
+      ${isNew ? '' : `<p class="muted">${+q.active ? '' : '<span class="badge">inativo</span>'} ${q.questions_count} pergunta(s)</p>`}</div>
+      <div class="actions">${isNew ? '' : `<button class="btn ghost" id="qact">${+q.active ? 'Desativar' : 'Reativar'}</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn js-edit-only" id="qcancel">${icon('x')}Cancelar</button>`}<button class="btn primary js-edit-only" id="qsave">${icon('check')}Salvar questionário</button></div></div>
+    <div class="card"><form class="form" id="qform">
+      <label>Nome * <input name="name" required maxlength="120" value="${esc(q.name)}" placeholder="Ex.: Checklist de compressor"></label>
+      <div class="grid two"><label>Perguntas por linha <select name="per_line">${[1, 2, 3, 4].map((n) => `<option value="${n}" ${+q.per_line === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
+      <fieldset class="fset"><legend>Comportamento</legend>
+        <label class="check"><input type="checkbox" name="show_os" ${+q.show_os ? 'checked' : ''}> Mostrar as respostas na OS</label>
+        <label class="check"><input type="checkbox" name="pairs" ${+q.pairs ? 'checked' : ''}> Agrupar perguntas em pares</label>
+        <label class="check"><input type="checkbox" name="show_unanswered" ${+q.show_unanswered ? 'checked' : ''}> Mostrar perguntas sem resposta</label>
+        <label class="check"><input type="checkbox" name="allow_equipment" id="qeq" ${+q.allow_equipment ? 'checked' : ''}> Permitir vincular um equipamento</label>
+        <label class="check"><input type="checkbox" name="equipment_required" id="qeqr" ${+q.equipment_required ? 'checked' : ''} ${+q.allow_equipment ? '' : 'disabled'}> Equipamento obrigatório</label></fieldset>
+    </form></div>
+    <h2 class="qtitle">Perguntas</h2>
+    <div id="qlist"></div>
+    <div class="actions"><button class="btn js-needs-edit" id="qadd">${icon('plus')}Adicionar pergunta</button></div>`;
+
+  const box = $('#qlist', v);
+  const earlierOf = (list, i) => list.slice(0, i).filter((x) => x.id);
+
+  // Lê o que está na tela para o estado, antes de qualquer mudança estrutural.
+  const readQs = () => {
+    const out = [];
+    $$('.qcard', box).forEach((card, i) => {
+      const val = (k) => card.querySelector(`[data-k="${k}"]`);
+      const type = val('type').value;
+      const item = {
+        id: card.dataset.qid,
+        label: val('label').value.trim(),
+        type,
+        required: val('required').checked,
+        description: val('description').value.trim(),
+        options: Q_OPTION_TYPES.includes(type) ? val('options').value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) : [],
+        cond: null,
+      };
+      if (type === 'foto') item.geo = val('geo').checked;
+      if (val('hascond') && val('hascond').checked && val('condq')) {
+        item.cond = { question: val('condq').value, value: val('condv').value };
+      }
+      out.push(item);
+    });
+    qs = out;
+  };
+
+  const render = () => {
+    const d = locked ? 'disabled' : '';
+    box.innerHTML = qs.length ? qs.map((x, i) => {
+      const earlier = earlierOf(qs, i);
+      const condQ = x.cond ? earlier.find((e) => e.id === x.cond.question) : null;
+      const hasCond = !!x.cond;
+      return `<div class="qcard" data-qid="${esc(x.id)}">
+        <div class="qhead"><span class="qnum">${i + 1}</span>
+          <input ${d} data-k="label" maxlength="200" placeholder="Texto da pergunta" value="${esc(x.label)}" class="qlabel">
+          <select ${d} data-k="type" class="qtype">${typeOpts(x.type)}</select>
+          <label class="check"><input type="checkbox" ${d} data-k="required" ${x.required ? 'checked' : ''}> Obrigatória</label>
+          <span class="qtools">
+            <button class="icon-btn" data-act="up" title="Subir" aria-label="Subir" ${d || (i === 0 ? 'disabled' : '')}>▲</button>
+            <button class="icon-btn" data-act="down" title="Descer" aria-label="Descer" ${d || (i === qs.length - 1 ? 'disabled' : '')}>▼</button>
+            <button class="icon-btn" ${d} data-act="dup" title="Duplicar" aria-label="Duplicar">${icon('copy')}</button>
+            <button class="icon-btn" ${d} data-act="del" title="Remover" aria-label="Remover">${icon('trash')}</button>
+          </span></div>
+        <input ${d} data-k="description" maxlength="300" placeholder="Ajuda para o técnico (opcional)" value="${esc(x.description || '')}" class="qdesc">
+        ${Q_OPTION_TYPES.includes(x.type) ? `<label>Opções <textarea ${d} data-k="options" rows="4" placeholder="Uma opção por linha">${esc(x.options.join('\n'))}</textarea></label>` : ''}
+        ${x.type === 'foto' ? `<label class="check"><input type="checkbox" ${d} data-k="geo" ${x.geo ? 'checked' : ''}> Registrar a localização da foto</label>` : ''}
+        <div class="qcond">
+          <label class="check"><input type="checkbox" data-k="hascond" ${hasCond ? 'checked' : ''} ${d || (earlier.length ? '' : 'disabled')}> Mostrar só quando a pergunta anterior tiver uma resposta</label>
+          ${hasCond ? `<div class="grid two">
+            <label>Pergunta anterior <select ${d} data-k="condq">${earlier.map((e) => `<option value="${esc(e.id)}" ${x.cond.question === e.id ? 'selected' : ''}>${esc(e.label || '(sem texto)')}</option>`).join('')}</select></label>
+            <label>Resposta que mostra esta pergunta ${condQ && condQ.options.length
+              ? `<select ${d} data-k="condv">${condQ.options.map((o) => `<option value="${esc(o)}" ${x.cond.value === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`
+              : `<input ${d} data-k="condv" maxlength="120" value="${esc(x.cond.value)}">`}</label></div>` : ''}
+        </div></div>`;
+    }).join('') : '<div class="empty">Nenhuma pergunta. Clique em <strong>Adicionar pergunta</strong>.</div>';
+  };
+
+  // Mudanças de estrutura: lê a tela, muda o estado e redesenha.
+  box.onclick = (e) => {
+    const b = e.target.closest('[data-act]');
+    if (!b) return;
+    readQs();
+    const i = $$('.qcard', box).indexOf(b.closest('.qcard'));
+    const act = b.dataset.act;
+    if (act === 'del') qs.splice(i, 1);
+    if (act === 'up' && i > 0) [qs[i - 1], qs[i]] = [qs[i], qs[i - 1]];
+    if (act === 'down' && i < qs.length - 1) [qs[i + 1], qs[i]] = [qs[i], qs[i + 1]];
+    if (act === 'dup') qs.splice(i + 1, 0, { ...qs[i], id: newQid(), options: [...qs[i].options] });
+    // Perguntas que dependiam de uma pergunta removida perdem a condição.
+    qs = qs.map((x, j) => (x.cond && !earlierOf(qs, j).some((e) => e.id === x.cond.question) ? { ...x, cond: null } : x));
+    render();
+  };
+  box.onchange = (e) => {
+    const k = e.target.dataset.k;
+    if (!k) return;
+    // Trocar o tipo, marcar condição ou escolher pergunta anterior muda a tela: relê e redesenha.
+    if (['type', 'hascond', 'condq'].includes(k)) {
+      readQs();
+      const i = $$('.qcard', box).indexOf(e.target.closest('.qcard'));
+      if (k === 'hascond') {
+        const first = earlierOf(qs, i)[0];
+        qs[i].cond = e.target.checked && first ? { question: first.id, value: first.options[0] || '' } : null;
+      }
+      if (k === 'condq') {
+        const pq = earlierOf(qs, i).find((x) => x.id === e.target.value);
+        qs[i].cond = { question: e.target.value, value: pq?.options[0] || '' };
+      }
+      if (k === 'type') {
+        qs[i].type = e.target.value;
+        if (!Q_OPTION_TYPES.includes(qs[i].type)) qs[i].options = [];
+      }
+      render();
+    }
+  };
+
+  $('#qeq', v).onchange = (e) => { $('#qeqr', v).disabled = !e.target.checked; if (!e.target.checked) $('#qeqr', v).checked = false; };
+  $('#qadd', v).onclick = () => { readQs(); qs.push({ id: newQid(), label: '', type: 'texto', required: false, description: '', options: [], cond: null }); render(); $$('.qlabel', box).at(-1)?.focus(); };
+
+  const save = (btn) => busy(btn, async () => {
+    readQs();
+    const d = formData($('#qform', v));
+    if (!d.name.trim()) throw new Error('Informe o nome do questionário');
+    const body = {
+      id: isNew ? undefined : id,
+      name: d.name,
+      per_line: d.per_line,
+      show_os: d.show_os,
+      pairs: d.pairs,
+      show_unanswered: d.show_unanswered,
+      allow_equipment: d.allow_equipment,
+      equipment_required: d.equipment_required,
+      questions: qs.map((x) => ({ ...x, options: x.options || [] })),
+    };
+    const res = await api('questionnaire_save', { body });
+    toast('Questionário salvo');
+    if (isNew) go('questionario/' + res.id); else route();
+  });
+  $('#qsave', v).onclick = (e) => save(e.currentTarget).catch(fail);
+
+  const act = $('#qact', v);
+  if (act) act.onclick = () => busy(act, async () => {
+    const to = !+q.active;
+    if (!to && !(await confirmBox(`Desativar o questionário "${q.name}"? Tipos de tarefa que o usam deixam de receber ele.`, { ok: 'Desativar', danger: true }))) return;
+    await api('questionnaire_active', { body: { id, active: to } });
+    toast(to ? 'Questionário reativado' : 'Questionário desativado'); route();
+  });
+
+  editLock(v, $('#qform', v), !isNew, (l) => { locked = l; $('#qeqr', v).disabled = l || !$('#qeq', v).checked; render(); });
+  const qc = $('#qcancel', v); if (qc) qc.onclick = () => route();
 }
 
 // ============ Fornecedores ============
@@ -2718,7 +3240,7 @@ async function viewSupplier(v, id) {
     <div class="card"><h2>Notas fiscais</h2>${c.invoices.length ? `<div class="table-wrap"><table><thead><tr><th>Data</th><th>Nota</th><th>Origem</th><th class="num">Itens</th><th class="num">Total</th><th>Por</th></tr></thead><tbody>
       ${c.invoices.map((i) => `<tr class="click" data-go="nota/${i.id}"><td class="nowrap">${dOnly(i.issued_at || i.created_at)}</td><td>${esc(i.number || 's/n')}${i.series ? ' / ' + esc(i.series) : ''}</td><td><span class="badge">${KIND_LABEL[i.kind] || i.kind}</span></td><td class="num">${i.items}</td><td class="num">${money(i.total)}</td><td class="small muted">${esc(i.user_name || '')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nenhuma nota importada deste fornecedor.</p>'}</div>`;
   v.addEventListener('click', (e) => { const r = e.target.closest('[data-go]'); if (r) go(r.dataset.go); });
-  $('#edit', v).onclick = () => customerForm(c, () => route(), { entity: 'supplier' });
+  $('#edit', v).onclick = () => customerForm(c, () => route(), { entity: 'supplier', editing: true });
   if ($('#toggle', v)) $('#toggle', v).onclick = async (e) => {
     if (+c.active && !(await confirmBox(`Desativar "${custName(c)}"? O histórico de notas é mantido.`, { ok: 'Desativar', danger: true }))) return;
     busy(e.target, async () => { await api('supplier_save', { body: { ...c, active: !+c.active } }); toast('Fornecedor atualizado'); route(); });
@@ -4264,7 +4786,7 @@ function financeForm(e, meta, onSaved) {
         <label>${isNew ? 'Vencimento (1ª parcela)' : 'Vencimento'} * <input type="date" name="due_date" value="${esc(e.due_date || today())}" required></label></div>
       <div class="row"><label>Categoria <input name="category" list="fcats" value="${esc(e.category || '')}" maxlength="80" placeholder="Escolha ou digite"><datalist id="fcats">${(meta.categories[e.type] || []).map((c) => `<option value="${esc(c)}">`).join('')}</datalist></label>
         <label>Forma de pagamento <select name="payment_method">${pmOptions(e.payment_method)}</select></label></div>
-      <div><div class="qlabel-f">${rec ? 'Cliente' : 'Fornecedor'} (opcional)</div><div class="inline" style="flex-wrap:nowrap"><div id="party" style="flex:1"></div><button type="button" class="btn sm" id="pickp">${icon('search')}Selecionar</button><button type="button" class="btn sm" id="clrp" title="Remover">${icon('x')}</button></div></div>
+      <div><div class="qlabel-f">${rec ? 'Cliente' : 'Fornecedor'} (opcional)</div><div class="inline" style="flex-wrap:nowrap"><div id="party" style="flex:1"></div><button type="button" class="btn sm js-needs-edit" id="pickp">${icon('search')}Selecionar</button><button type="button" class="btn sm js-needs-edit" id="clrp" title="Remover">${icon('x')}</button></div></div>
       ${isNew ? `<div class="row"><label>Parcelas <input type="number" name="installments" min="1" max="120" value="1"></label>
         <label>Como lançar <select name="installment_mode"><option value="dividir">Dividir o valor nas parcelas</option><option value="repetir">Repetir o valor todo mês</option></select></label></div>
         <p class="help" id="instinfo" style="margin-top:-6px"></p>
@@ -4273,12 +4795,13 @@ function financeForm(e, meta, onSaved) {
       <label>Observação <textarea name="notes" rows="2" maxlength="500">${esc(e.notes || '')}</textarea></label>
     </form>`,
     foot: `${!isNew && !e.sale_id ? `<span style="margin-right:auto" class="inline">${e.status === 'pago' ? '<button class="btn sm" id="reopen">Reabrir</button>' : ''}${e.status === 'aberto' ? '<button class="btn sm danger" id="cancel">Cancelar conta</button>' : ''}${e.status !== 'pago' ? `<button class="btn sm danger" id="del">${icon('trash')}Excluir</button>` : ''}</span>` : ''}
-      <button class="btn" data-close>Fechar</button>${!isNew && e.status === 'aberto' ? `<button class="btn" id="pay">${rec ? 'Receber' : 'Pagar'}</button>` : ''}${locked ? '' : '<button class="btn primary" id="fsave">Salvar</button>'}`,
+      <button class="btn" data-close>Fechar</button>${!isNew && e.status === 'aberto' ? `<button class="btn" id="pay">${rec ? 'Receber' : 'Pagar'}</button>` : ''}${locked ? '' : `${isNew ? '' : `<button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button>`}<button class="btn primary js-edit-only" id="fsave">Salvar</button>`}`,
   });
   const fm = $('#ff', m.el);
   if (locked) $$('input,select,textarea,#pickp,#clrp', fm).forEach((x) => (x.disabled = true));
   const paintParty = () => { $('#party', m.el).innerHTML = party ? `<div class="cust-card" style="padding:8px 12px"><div class="cust-name">${esc(custName(party))}</div></div>` : '<span class="muted small">Nenhum</span>'; $('#clrp', m.el).hidden = !party || locked; };
   paintParty();
+  if (!locked) editLock(m.el, fm, !isNew);
   $('#pickp', m.el).onclick = () => customerBrowser({ entity: rec ? 'customer' : 'supplier', selected: party, onSelect: (c) => { party = c; paintParty(); } });
   $('#clrp', m.el).onclick = () => { party = null; paintParty(); };
   if (isNew) {

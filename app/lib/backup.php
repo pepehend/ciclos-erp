@@ -6,7 +6,7 @@
 class Backup
 {
     const TABLES = ['permission_profiles', 'users', 'customers', 'suppliers', 'products', 'recipe_items', 'sales', 'sale_items', 'invoices',
-        'invoice_items', 'supplier_map', 'movements', 'settings', 'quotes', 'quote_items', 'quote_extras', 'purchase_orders', 'purchase_order_items', 'equipments', 'checklist_models', 'service_orders', 'financial_entries', 'payment_methods', 'payment_terms', 'quote_statuses', 'product_refs', 'customer_portal', 'portal_requests'];
+        'invoice_items', 'supplier_map', 'movements', 'settings', 'quotes', 'quote_items', 'quote_extras', 'purchase_orders', 'purchase_order_items', 'equipments', 'checklist_models', 'questionnaires', 'task_types', 'service_orders', 'financial_entries', 'payment_methods', 'payment_terms', 'quote_statuses', 'product_refs', 'customer_portal', 'portal_requests'];
 
     public static function sql(): string
     {

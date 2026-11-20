@@ -564,9 +564,19 @@ try {
             return ['id' => Quotes::duplicate((int)(input()['id'] ?? 0), $u['id'])];
         },
         // ---- Ordens de serviço ----
+        'GET agenda' => function () {
+            Auth::requirePerm('ordens');
+            return ServiceOrders::agenda(['from' => q('from'), 'to' => q('to'), 'tech' => q('tech'), 'task_type_id' => q('task_type_id'), 'status' => q('status'), 'q' => q('q'), 'late' => q('late') === '1']);
+        },
+        'POST agenda_move' => function () {
+            Auth::requirePerm('ordens');
+            $in = input();
+            ServiceOrders::reschedule((int)($in['id'] ?? 0), (string)($in['scheduled_at'] ?? ''), $in['technician_id'] ?? null);
+            return ['ok' => true];
+        },
         'GET service_orders' => function () {
             Auth::requirePerm('ordens');
-            return ['rows' => ServiceOrders::list($_GET), 'statuses' => ServiceOrders::STATUSES, 'types' => ChecklistModels::SERVICE_TYPES];
+            return ['rows' => ServiceOrders::list($_GET), 'statuses' => ServiceOrders::STATUSES, 'types' => TaskTypes::names()];
         },
         'GET service_order' => function () {
             Auth::requirePerm('ordens');
@@ -602,19 +612,38 @@ try {
             Equipments::setActive((int)($in['id'] ?? 0), !empty($in['active']));
             return ['ok' => true];
         },
-        'GET checklist_models' => function () {
+        'GET questionnaires' => function () {
             Auth::requirePerm('ordens');
-            return ['rows' => ChecklistModels::list(q('all') === '1'), 'service_types' => ChecklistModels::SERVICE_TYPES];
+            return ['rows' => Questionnaires::list(q('all') === '1'), 'types' => Questionnaires::TYPES];
         },
-        'POST checklist_model_save' => function () {
+        'GET questionnaire' => function () {
+            Auth::requirePerm('ordens');
+            return Questionnaires::get((int)q('id'));
+        },
+        'POST questionnaire_save' => function () {
             Auth::requirePerm('ordens');
             $in = input();
-            return ['id' => ChecklistModels::save($in, !empty($in['id']) ? (int)$in['id'] : null)];
+            return ['id' => Questionnaires::save($in, !empty($in['id']) ? (int)$in['id'] : null)];
         },
-        'POST checklist_model_active' => function () {
+        'POST questionnaire_active' => function () {
             Auth::requirePerm('ordens');
             $in = input();
-            ChecklistModels::setActive((int)($in['id'] ?? 0), !empty($in['active']));
+            Questionnaires::setActive((int)($in['id'] ?? 0), !empty($in['active']));
+            return ['ok' => true];
+        },
+        'GET task_types' => function () {
+            Auth::requirePerm('ordens');
+            return ['rows' => TaskTypes::list(q('all') === '1'), 'requires' => TaskTypes::REQUIRES, 'questionnaires' => Questionnaires::options()];
+        },
+        'POST task_type_save' => function () {
+            Auth::requirePerm('ordens');
+            $in = input();
+            return ['id' => TaskTypes::save($in, !empty($in['id']) ? (int)$in['id'] : null)];
+        },
+        'POST task_type_active' => function () {
+            Auth::requirePerm('ordens');
+            $in = input();
+            TaskTypes::setActive((int)($in['id'] ?? 0), !empty($in['active']));
             return ['ok' => true];
         },
         // ---- Ordens de compra ----

@@ -436,6 +436,33 @@ class DB
                 created_at $dt NOT NULL,
                 updated_at $dt NOT NULL
             )$end",
+            "CREATE TABLE IF NOT EXISTS questionnaires (
+                id $pk,
+                name VARCHAR(120) NOT NULL,
+                questions $big NOT NULL,
+                show_os TINYINT NOT NULL DEFAULT 1,
+                per_line TINYINT NOT NULL DEFAULT 1,
+                pairs TINYINT NOT NULL DEFAULT 0,
+                show_unanswered TINYINT NOT NULL DEFAULT 1,
+                allow_equipment TINYINT NOT NULL DEFAULT 0,
+                equipment_required TINYINT NOT NULL DEFAULT 0,
+                active TINYINT NOT NULL DEFAULT 1,
+                created_at $dt NOT NULL,
+                updated_at $dt NOT NULL
+            )$end",
+            "CREATE TABLE IF NOT EXISTS task_types (
+                id $pk,
+                name VARCHAR(120) NOT NULL,
+                tolerance_min INT NULL,
+                duration_min INT NULL,
+                questionnaire_ids $big NULL,
+                requires VARCHAR(500) NULL,
+                send_survey TINYINT NOT NULL DEFAULT 0,
+                send_os_email TINYINT NOT NULL DEFAULT 0,
+                active TINYINT NOT NULL DEFAULT 1,
+                created_at $dt NOT NULL,
+                updated_at $dt NOT NULL
+            )$end",
             "CREATE TABLE IF NOT EXISTS service_orders (
                 id $pk,
                 status VARCHAR(20) NOT NULL DEFAULT 'aberta',
@@ -445,6 +472,7 @@ class DB
                 quote_id $fk NULL,
                 service_type VARCHAR(20) NULL,
                 checklist_model_id $fk NULL,
+                task_type_id $fk NULL,
                 technician_id $fk NULL,
                 scheduled_at $dt NULL,
                 due_date DATE NULL,
@@ -664,6 +692,20 @@ class DB
                 try { self::pdo()->exec($sql); } catch (PDOException $e2) { /* já existe */ }
             }
         }
+        // v1.5.0: tipos de tarefa e questionários (substituem os modelos de checklist)
+        try {
+            self::pdo()->query('SELECT task_type_id FROM service_orders LIMIT 1');
+        } catch (PDOException $e) {
+            $fk = self::$driver === 'mysql' ? 'INT UNSIGNED' : 'INTEGER';
+            try { self::pdo()->exec("ALTER TABLE service_orders ADD COLUMN task_type_id $fk NULL"); } catch (PDOException $e2) { /* tabela ainda não existe */ }
+        }
+        try {
+            self::pdo()->query('SELECT id FROM task_types LIMIT 1');
+        } catch (PDOException $e) {
+            self::migrate();
+        }
+        // Tipos de tarefa ainda não criados (atualização ou instalação nova): cria os padrões e converte os checklists antigos
+        if (!(int)self::val('SELECT COUNT(*) FROM task_types')) TaskTypes::importLegacy();
         // v1.8.5: telefone dos usuários (aparece como contato do responsável no orçamento)
         try {
             self::pdo()->query('SELECT phone FROM users LIMIT 1');

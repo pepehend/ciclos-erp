@@ -17,7 +17,7 @@ class Auth
         'relatorios' => 'Relatórios de vendas e valores do painel (faturamento, lucro)',
         'movimentacoes' => 'Movimentações de estoque (ver e lançar entradas, saídas, perdas, contagem)',
         'compras' => 'Ordens de compra (pedidos aos fornecedores)',
-        'ordens' => 'Ordens de serviço (cadastro de equipamentos e checklists, atendimento e agenda)',
+        'ordens' => 'Ordens de serviço (equipamentos, tipos de tarefa, questionários, atendimento e agenda)',
         'financeiro' => 'Financeiro (pagamentos, recebimentos e fluxo de caixa)',
         'formas_pagamento' => 'Formas de pagamento (cadastrar e editar)',
     ];
