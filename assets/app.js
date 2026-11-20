@@ -35,6 +35,9 @@ const ICONS = {
   palette: '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.9 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="14.5" cy="7" r="1"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3.6 14H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 9.7 3.6V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1.3z"/>',
   tool: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3.5 17.3a1.7 1.7 0 0 0 2.4 2.4l5.8-5.8a4 4 0 0 0 5.2-5.4l-2.5 2.5-2.1-.4-.4-2.1z"/>',
+  history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
   truck: '<path d="M2 6h11v10H2zM13 9h4l3 3.5V16h-7z"/><circle cx="6" cy="17.5" r="1.8"/><circle cx="16.5" cy="17.5" r="1.8"/>',
   lock: '<rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/>',
   chevron: '<path d="M9 6l6 6-6 6"/>',
@@ -2303,7 +2306,7 @@ function bindPortalCard(v, c) {
 }
 
 /** Status em que a ordem ainda não foi concluída (mesma regra de ServiceOrders::OPEN). */
-const SO_OPEN_CODES = ['aberta', 'agendada', 'em_execucao', 'pausada'];
+const SO_OPEN_CODES = ['aberta', 'agendada', 'a_caminho', 'em_execucao', 'pausada'];
 const soDate = (s) => (s ? String(s).split('-').reverse().join('/') : '—');
 
 /** Tabela de ordens (ficha do cliente e histórico do equipamento). */
@@ -2438,9 +2441,9 @@ async function viewServices(v) {
 }
 
 // ============ Ordens de serviço ============
-const SO_TABS = [['abertas', 'Em aberto'], ['aberta', 'Abertas'], ['agendada', 'Agendadas'], ['em_execucao', 'Em execução'], ['pausada', 'Pausadas'], ['concluida', 'Concluídas'], ['faturada', 'Faturadas'], ['todas', 'Todas']];
+const SO_TABS = [['abertas', 'Em aberto'], ['aberta', 'Abertas'], ['agendada', 'Agendadas'], ['a_caminho', 'A caminho'], ['em_execucao', 'Em execução'], ['pausada', 'Pausadas'], ['concluida', 'Concluídas'], ['todas', 'Todas']];
 const soStatusHtml = (code, labels) => {
-  const cls = { concluida: 'ok', faturada: 'ok', pausada: 'warn', em_execucao: 'accent', agendada: 'accent' }[code] || '';
+  const cls = { concluida: 'ok', pausada: 'warn', em_execucao: 'accent', a_caminho: 'accent', agendada: 'accent' }[code] || '';
   return `<span class="badge ${cls}">${esc(labels[code] || code)}</span>`;
 };
 const soCustomer = (r) => esc(r.customer_trade_name || r.customer_name || '');
@@ -2567,7 +2570,7 @@ function qFieldHtml(q, v) {
   }
 }
 
-const SO_ACTION = { aberta: 'Voltar para aberta', agendada: 'Marcar como agendada', pausada: 'Pausar', concluida: 'Concluir (check-out)' };
+const SO_ACTION = { aberta: 'Voltar para aberta', agendada: 'Marcar como agendada', a_caminho: 'A caminho (deslocamento)', pausada: 'Pausar', concluida: 'Concluir (check-out)' };
 const SO_FICHA_TABS = [['detalhes', 'Detalhes'], ['relato', 'Relato'], ['questionarios', 'Questionários'], ['valores', 'Valores'], ['orcamentos', 'Orçamentos'], ['pendencias', 'Pendências'], ['horas', 'Controle de horas'], ['envios', 'Envios']];
 
 async function viewServiceOrderForm(v, id) {
@@ -2641,9 +2644,10 @@ async function viewServiceOrderForm(v, id) {
   const locks = [];   // funções que travam/liberam cada aba (editLock)
   const savers = [];  // [nome, async () => número de alterações]
   const transitions = o.transitions.map((s) => {
-    const label = s === 'em_execucao' ? (o.status === 'pausada' ? 'Retomar atendimento' : 'Iniciar atendimento (check-in)') : SO_ACTION[s] || s;
+    const label = s === 'em_execucao' ? (o.status === 'pausada' ? 'Retomar atendimento' : 'Iniciar atendimento (check-in)')
+      : s === 'agendada' && o.status === 'a_caminho' ? 'Cancelar deslocamento' : SO_ACTION[s] || s;
     const cls = s === 'concluida' || s === 'em_execucao' ? 'btn primary' : 'btn';
-    return `<button class="${cls}" data-to="${s}">${icon(s === 'pausada' ? 'minusc' : 'check')}${esc(label)}</button>`;
+    return `<button class="${cls}" data-to="${s}">${icon(s === 'pausada' ? 'minusc' : s === 'a_caminho' ? 'truck' : 'check')}${esc(label)}</button>`;
   }).join('');
 
   v.innerHTML = `<div class="page-head" id="sohead"><div><p class="small"><a href="#/ordens">← Ordens de serviço</a></p><h1>Ordem de serviço #${o.id}</h1>
@@ -2895,77 +2899,107 @@ async function viewServiceOrderForm(v, id) {
     ${pend.length ? `<ul class="so-pendlist">${pend.map((p) => `<li>${icon('warn')}<span>${esc(p)}</span></li>`).join('')}</ul><p class="small muted">As pendências vêm das obrigatoriedades do tipo de tarefa e das perguntas obrigatórias dos questionários.</p>`
       : `<p class="so-ok">${icon('check')} Nada pendente${o.status === 'concluida' ? '.' : ': a ordem já pode ser concluída.'}</p>`}`;
 
-  // ---- Controle de horas (como no Auvo: ajustar horários, motivo e justificativa; incluir e excluir pausas)
+  // ---- Controle de horas (como no Auvo: atividades, "Adicionar atividade", totais de deslocamento, pausa e trabalho)
   const h = D.hours;
   const hp = pane('horas');
-  const dtl = (x) => String(x || '').replace(' ', 'T').slice(0, 16);
-  const lastPauseOpen = o.status === 'pausada' && h.rows.length && h.rows[h.rows.length - 1].status === 'pausada';
-  const origem = (r) => r.manual ? '<span class="badge">Manual</span>'
-    : r.edited_at ? `<span class="badge" title="Antes: ${esc(dt(r.original_at || r.at))}">Ajustado</span>` : '<span class="badge ok">Sistema</span>';
-  hp.innerHTML = `<div class="card-head"><h2>Controle de horas</h2>${h.rows.length ? `<button type="button" class="btn sm js-edit-only js-needs-edit" id="hradd" hidden>${icon('plus')}Adicionar pausa</button>` : ''}</div>
+  const HR_LABEL = { deslocamento: 'A caminho da tarefa', checkin: 'Check-in', pausa_inicio: 'Início da pausa', pausa_fim: 'Fim da pausa', checkout: 'Check-out' };
+  const HR_ADD = { deslocamento: 'Deslocamento', checkin: 'Check-in', pausa_inicio: 'Início da pausa', pausa_fim: 'Fim da pausa', checkout: 'Check-out' };
+  const HR_REASONS = ['Almoço', 'Fim do expediente', 'Aguardando peça', 'Aguardando cliente', 'Deslocamento', 'Outro'];
+  const hrNext = (last) => ({ '': ['deslocamento', 'checkin'], deslocamento: ['checkin'], checkin: ['pausa_inicio', 'checkout'], pausa_fim: ['pausa_inicio', 'checkout'], pausa_inicio: ['pausa_fim'] }[last || ''] || []);
+  const hrSeqOk = (kinds) => { let last = ''; for (const k of kinds) { if (!hrNext(last).includes(k)) return false; last = k; } return true; };
+  const hms = (s) => { s = Math.max(0, Math.round(+s || 0)); const p2 = (n) => String(n).padStart(2, '0'); return `${p2(Math.floor(s / 3600))}:${p2(Math.floor(s / 60) % 60)}:${p2(s % 60)}`; };
+  const dtSec = (x) => { const d = String(x || ''); return d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)} ${d.slice(11, 19)}` : ''; };
+  const nowParts = () => { const n = new Date(), p2 = (x) => String(x).padStart(2, '0'); return [`${n.getFullYear()}-${p2(n.getMonth() + 1)}-${p2(n.getDate())}`, `${p2(n.getHours())}:${p2(n.getMinutes())}:${p2(n.getSeconds())}`]; };
+  const origemHtml = (r) => `<span class="hr-web">Web</span>${r.edited_at ? `<span class="hr-hist" title="${esc(`${r.manual ? 'Incluída' : 'Ajustada'} por ${r.edited_by_name || '—'} em ${dt(r.edited_at)}${r.original_at ? ` · antes: ${dtSec(r.original_at)}` : ''}`)}">${icon('history')}</span>` : ''}`;
+  const reasonSel = (cur) => `<select data-reason class="hr-sel"><option value="">Selecione…</option>${[...new Set([...HR_REASONS, ...(cur ? [cur] : [])])].map((x) => `<option ${x === cur ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>`;
+  const rowHtml = (r, isNewRow) => {
+    const [d, t] = isNewRow ? nowParts() : [r.at.slice(0, 10), r.at.slice(11, 19)];
+    return `<tr data-row="${isNewRow ? '' : r.id}" data-kind="${r.kind}" ${isNewRow ? 'data-new="1"' : ''}>
+      <td>${esc(isNewRow ? (state.me?.name || '') : (r.user_name || '—'))}</td>
+      <td>${esc(HR_LABEL[r.kind])}<div class="small warn-t hr-open" hidden>${icon('warn')} Sem registro de fim de pausa.</div></td>
+      <td class="nowrap"><span class="js-view-only">${dtSec(r.at)}</span>
+        <span class="hr-dt js-edit-only" ${isNewRow ? '' : 'hidden'}><input type="date" data-d value="${d}" data-orig="${isNewRow ? '' : d}"><input type="time" step="1" data-t value="${t}" data-orig="${isNewRow ? '' : t}"></span></td>
+      <td class="hr-el">${r.elapsed != null ? `${icon('clock')} ${hms(r.elapsed)}` : ''}</td>
+      <td>${r.kind === 'pausa_inicio' ? `<span class="js-view-only">${esc(r.reason || '')}</span><span class="js-edit-only" ${isNewRow ? '' : 'hidden'}>${reasonSel(r.reason || '')}</span>` : ''}</td>
+      <td><span class="js-view-only small">${esc(r.note || '')}</span><input class="js-edit-only hr-note" data-note maxlength="300" value="${esc(r.note || '')}" data-orig="${esc(r.note || '')}" ${isNewRow ? '' : 'hidden'}></td>
+      <td>${isNewRow ? '' : origemHtml(r)}</td>
+      <td class="num"><button type="button" class="icon-btn js-edit-only js-needs-edit" data-hrdel title="Excluir atividade" aria-label="Excluir atividade" ${isNewRow ? '' : 'hidden'}>${icon('trash')}</button></td></tr>`;
+  };
+  hp.innerHTML = `<div class="hr-top">
+      <button type="button" class="btn sm js-view-only" id="hrhist">${icon('history')}Histórico completo</button>
+      <div class="dd js-edit-only" id="hradd" hidden><button type="button" class="btn sm primary dd-btn" aria-haspopup="true" aria-expanded="false">${icon('plus')}Adicionar atividade${icon('chevron')}</button>
+        <div class="dd-menu" role="menu" hidden id="hraddmenu"></div></div></div>
     <form class="form" id="hrf" onsubmit="return false">
-    ${h.rows.length ? `<div class="table-wrap"><table class="hr-table"><thead><tr><th>Colaborador</th><th>Monitoramento</th><th>Horário</th><th>Tempo corrido</th><th>Motivo</th><th>Justificativa</th><th>Origem</th><th></th></tr></thead>
-      <tbody id="hrbody">${h.rows.map((r, i) => {
-        const pause = r.status === 'pausada', open = lastPauseOpen && i === h.rows.length - 1;
-        return `<tr data-row="${r.id}"><td>${esc(r.user_name || '—')}</td><td>${esc(r.label)}${open ? '<div class="small warn-t">Sem registro de fim de pausa</div>' : ''}</td>
-          <td class="nowrap"><span class="js-view-only">${dt(r.at)}</span><input class="js-edit-only" type="datetime-local" step="60" data-at value="${dtl(r.at)}" data-orig="${dtl(r.at)}" hidden></td>
-          <td>${r.elapsed != null ? fmtDur(r.elapsed) : ''}</td>
-          <td>${pause ? `<span class="js-view-only">${esc(r.reason || '')}</span><input class="js-edit-only" data-reason maxlength="120" list="hrmotivos" value="${esc(r.reason || '')}" data-orig="${esc(r.reason || '')}" hidden>` : ''}</td>
-          <td><span class="js-view-only small">${esc(r.note || '')}${r.edited_at ? `<div class="muted">${esc(r.edited_by_name || '—')} em ${dt(r.edited_at)}</div>` : ''}</span>
-            <input class="js-edit-only" data-note maxlength="300" placeholder="Justificativa" hidden></td>
-          <td>${origem(r)}</td>
-          <td>${pause && !open ? `<button type="button" class="icon-btn js-edit-only js-needs-edit" data-hrdel="${r.id}" title="Excluir esta pausa (início e fim)" aria-label="Excluir pausa" hidden>${icon('trash')}</button>` : ''}</td></tr>`;
-      }).join('')}</tbody></table></div>
-      <datalist id="hrmotivos">${['Almoço', 'Fim do expediente', 'Aguardando peça', 'Aguardando cliente', 'Deslocamento'].map((x) => `<option value="${x}">`).join('')}</datalist>
-      <div id="hradds"></div>` : '<p class="muted">Sem registros.</p>'}
+      <div class="table-wrap"><table class="hr-table"><thead><tr><th>Colaborador</th><th>Monitoramento</th><th>Horário</th><th>Tempo corrido</th><th>Motivo</th><th>Justificativa</th><th>Origem</th><th></th></tr></thead>
+        <tbody id="hrbody">${h.rows.map((r) => rowHtml(r, false)).join('')}</tbody></table></div>
     </form>
-    <div class="kpis so-kpis"><div class="kpi"><div class="label">Tempo total de trabalho</div><div class="value">${fmtDur(h.work)}</div></div>
-      <div class="kpi"><div class="label">Tempo total de pausa</div><div class="value">${fmtDur(h.pause)}</div></div></div>
-    ${h.running ? `<p class="small muted">${h.running === 'work' ? 'Atendimento em andamento' : 'Atendimento pausado'}: os tempos contam até agora.</p>` : ''}
-    <p class="small muted">${icon('warn')} O check-in é feito em "Iniciar atendimento" e o check-out em "Concluir". Em Editar dá para corrigir horários e motivos, incluir ou excluir pausas; toda alteração de horário pede justificativa e fica registrada.${h.deleted ? ` ${h.deleted / 2} pausa(s) excluída(s) ficam guardadas no histórico.` : ''}</p>`;
-  if (h.rows.length) {
-    const hform = $('#hrf', hp), adds = $('#hradds', hp);
-    locks.push(editLock(hp, hform, true));
-    $('#hradd', hp).onclick = () => {
-      adds.insertAdjacentHTML('beforeend', `<div class="hr-add"><strong>Nova pausa</strong>
-        <div class="hr-add-grid"><label>Início * <input type="datetime-local" step="60" data-a="start" required></label><label>Fim * <input type="datetime-local" step="60" data-a="end" required></label>
-          <label>Motivo <input data-a="reason" maxlength="120" list="hrmotivos"></label><label>Justificativa * <input data-a="note" maxlength="300" required></label>
-          <button type="button" class="icon-btn" data-hraddrm title="Remover" aria-label="Remover">${icon('x')}</button></div></div>`);
-      adds.lastElementChild.querySelector('input').focus();
-    };
-    adds.onclick = (e) => { const b = e.target.closest('[data-hraddrm]'); if (b) b.closest('.hr-add').remove(); };
-    $('#hrbody', hp).onclick = (e) => {
-      const b = e.target.closest('[data-hrdel]'); if (!b) return;
-      const tr = b.closest('tr'), on = !tr.classList.contains('del'), pair = tr.nextElementSibling;
-      tr.classList.toggle('del', on); if (pair) { pair.classList.toggle('del', on); pair.dataset.pair = on ? '1' : ''; }
-      if (on) { const n = $('[data-note]', tr); n.placeholder = 'Por que excluir esta pausa? *'; n.focus(); }
-    };
-    savers.push(['Controle de horas', async () => {
-      const rows = [], del = [], add = [];
-      const stop = (el, msg) => { showTab('horas'); if (el) el.focus(); throw new Error(msg); };
-      for (const tr of $$('#hrbody tr', hp)) {
-        const id2 = +tr.dataset.row, at = $('[data-at]', tr), rs = $('[data-reason]', tr), note = $('[data-note]', tr).value.trim();
-        const label = tr.children[1].firstChild.textContent;
-        if (tr.dataset.pair === '1') continue;
-        if (tr.classList.contains('del')) {
-          if (note.length < 3) stop($('[data-note]', tr), `Controle de horas: escreva por que a pausa de ${dt(at.dataset.orig.replace('T', ' '))} vai ser excluída`);
-          del.push({ id: id2, note }); continue;
-        }
-        const timeChanged = at.value && at.value !== at.dataset.orig, reasonChanged = rs && rs.value.trim() !== rs.dataset.orig;
-        if (timeChanged && note.length < 3) stop($('[data-note]', tr), `Controle de horas: escreva a justificativa da alteração de "${label}"`);
-        if (timeChanged || reasonChanged) rows.push({ id: id2, ...(timeChanged ? { at: at.value } : {}), ...(rs ? { reason: rs.value } : {}), note });
-      }
-      for (const box of $$('.hr-add', adds)) {
-        const v2 = (k) => $(`[data-a=${k}]`, box).value.trim();
-        if (!v2('start') || !v2('end')) stop(null, 'Controle de horas: informe o início e o fim da pausa incluída');
-        if (v2('note').length < 3) stop($('[data-a=note]', box), 'Controle de horas: escreva a justificativa da pausa incluída');
-        add.push({ start: v2('start'), end: v2('end'), reason: v2('reason'), note: v2('note') });
-      }
-      if (!rows.length && !del.length && !add.length) return 0;
-      const r = await api('so_hours_save', { body: { id: o.id, rows, delete: del, add } });
-      return r.changed;
-    }]);
-  }
+    <div class="hr-totals"><div><span>Tempo total de deslocamento</span><b id="hrtt"></b></div><div><span>Tempo total de pausa</span><b id="hrtp"></b></div><div><span>Tempo total de trabalho</span><b id="hrtw"></b></div></div>
+    <p class="small muted hr-info">${icon('info')} Os valores de tempo exibidos podem ultrapassar 24 horas quando a atividade abrange mais de um dia. O check-in é feito em "Iniciar atendimento" e o check-out em "Concluir"; em Editar dá para ajustar, incluir e excluir atividades.</p>`;
+  const hform = $('#hrf', hp), hbody = $('#hrbody', hp);
+  let hrEditing = false;
+  const hrRows = () => $$('#hrbody tr', hp);
+  const rowAt = (tr) => { const d = $('[data-d]', tr).value, t = $('[data-t]', tr).value; return d && t ? `${d} ${t.length === 5 ? t + ':00' : t}` : ''; };
+  // Totais, tempo corrido, aviso de pausa aberta, lixeiras e opções de "Adicionar atividade"
+  const hrRefresh = () => {
+    const rows = hrRows(), kinds = rows.map((tr) => tr.dataset.kind);
+    const times = rows.map((tr) => rowAt(tr));
+    const tot = { travel: 0, work: 0, pause: 0 }, nowMs = Date.now();
+    rows.forEach((tr, i) => {
+      const k = kinds[i], bucket = k === 'deslocamento' ? 'travel' : k === 'pausa_inicio' ? 'pause' : (k === 'checkin' || k === 'pausa_fim') ? 'work' : null;
+      const a = times[i] ? new Date(times[i].replace(' ', 'T')).getTime() : NaN;
+      const b = i + 1 < rows.length ? new Date((times[i + 1] || '').replace(' ', 'T')).getTime() : nowMs;
+      if (bucket && !isNaN(a) && !isNaN(b)) tot[bucket] += Math.max(0, (b - a) / 1000);
+      if (k === 'pausa_fim' && i > 0) { const p = new Date((times[i - 1] || '').replace(' ', 'T')).getTime(); $('.hr-el', tr).innerHTML = !isNaN(a) && !isNaN(p) ? `${icon('clock')} ${hms((a - p) / 1000)}` : ''; }
+      $('.hr-open', tr).hidden = !(k === 'pausa_inicio' && i === rows.length - 1);
+      const del = $('[data-hrdel]', tr); if (del) del.disabled = !hrEditing || !hrSeqOk(kinds.filter((_, j) => j !== i));
+    });
+    const show = (sel, s) => { $(sel, hp).innerHTML = `${s > 0 ? icon('clock') : ''} ${hms(s)}`; };
+    show('#hrtt', tot.travel); show('#hrtp', tot.pause); show('#hrtw', tot.work);
+    const next = hrNext(kinds[kinds.length - 1]);
+    $('#hraddmenu', hp).innerHTML = next.length ? next.map((k) => `<button type="button" role="menuitem" data-addk="${k}">${HR_ADD[k]}</button>`).join('')
+      : '<span class="muted small" style="padding:8px 12px;display:block">Atendimento finalizado</span>';
+  };
+  hrRefresh();
+  // Atendimento em andamento: os totais correm a cada segundo
+  if (h.running) { const tm = setInterval(() => { if (!document.body.contains(hp)) return clearInterval(tm); hrRefresh(); }, 1000); }
+  locks.push(editLock(hp, hform, true, (l) => { hrEditing = !l; $('#hradd', hp).hidden = l; hrRefresh(); }));
+  hbody.addEventListener('input', hrRefresh); hbody.addEventListener('change', hrRefresh);
+  const deleted = [];
+  hp.addEventListener('click', (e) => {
+    const ak = e.target.closest('[data-addk]');
+    if (ak) {
+      const k = ak.dataset.addk;
+      hbody.insertAdjacentHTML('beforeend', rowHtml({ kind: k }, true));
+      const tr = hbody.lastElementChild; $$('input, select', tr).forEach((el) => (el.disabled = false));
+      $('#hraddmenu', hp).hidden = true; $('#hradd .dd-btn', hp).setAttribute('aria-expanded', 'false');
+      hrRefresh(); return;
+    }
+    const del = e.target.closest('[data-hrdel]');
+    if (del && hrEditing && !del.disabled) { const tr = del.closest('tr'); if (tr.dataset.row) deleted.push(+tr.dataset.row); tr.remove(); hrRefresh(); }
+  });
+  $('#hrhist', hp).onclick = () => modal({
+    title: 'Histórico completo do controle de horas',
+    body: `<div class="table-wrap"><table><thead><tr><th>Registro</th><th>Horário</th><th>Colaborador</th><th>Motivo / justificativa</th><th>Situação</th></tr></thead><tbody>
+      ${h.history.map((x) => `<tr class="${x.deleted_at ? 'muted' : ''}"><td>${esc(x.label)}</td><td class="nowrap">${dtSec(x.at)}${x.original_at ? `<div class="small muted">antes: ${dtSec(x.original_at)}</div>` : ''}</td>
+        <td>${esc(x.user_name || '—')}</td><td class="small">${esc([x.reason, x.note].filter(Boolean).join(' · '))}</td>
+        <td class="small">${x.deleted_at ? `Excluída por ${esc(x.deleted_by_name || '—')} em ${dt(x.deleted_at)}` : x.manual ? `Incluída por ${esc(x.edited_by_name || '—')} em ${dt(x.edited_at)}` : x.edited_at ? `Ajustada por ${esc(x.edited_by_name || '—')} em ${dt(x.edited_at)}` : 'Registrada pelo sistema'}</td></tr>`).join('')}</tbody></table></div>`,
+    foot: '<button class="btn" data-close>Fechar</button>',
+  });
+  savers.push(['Controle de horas', async () => {
+    const rows = [], add = [];
+    for (const tr of hrRows()) {
+      const at = rowAt(tr), rs = $('[data-reason]', tr), note = $('[data-note]', tr).value.trim();
+      if (!at) { showTab('horas'); throw new Error(`Informe a data e o horário de "${HR_LABEL[tr.dataset.kind]}"`); }
+      if (tr.dataset.new) { add.push({ kind: tr.dataset.kind, at, reason: rs ? rs.value : '', note }); continue; }
+      const d = $('[data-d]', tr), t = $('[data-t]', tr);
+      const changed = d.value !== d.dataset.orig || t.value !== t.dataset.orig || note !== $('[data-note]', tr).dataset.orig || (rs && rs.value !== (h.rows.find((r) => r.id === +tr.dataset.row)?.reason || ''));
+      if (changed) rows.push({ id: +tr.dataset.row, at, ...(rs ? { reason: rs.value } : {}), note });
+    }
+    if (!rows.length && !add.length && !deleted.length) return 0;
+    const r = await api('so_hours_save', { body: { id: o.id, rows, delete: deleted.map((id2) => ({ id: id2 })), add } });
+    deleted.length = 0;
+    return r.changed;
+  }]);
 
   // ---- Envios
   const ep = pane('envios');
@@ -3082,7 +3116,7 @@ async function viewServiceOrderForm(v, id) {
     }
     busy(b, async () => {
       await api('service_order_status', { body: { id: o.id, status: to } });
-      toast(to === 'concluida' ? 'Ordem concluída' : to === 'em_execucao' ? 'Atendimento iniciado' : 'Status atualizado');
+      toast(to === 'concluida' ? 'Ordem concluída' : to === 'em_execucao' ? 'Atendimento iniciado' : to === 'a_caminho' ? 'Deslocamento iniciado' : 'Status atualizado');
       route();
     });
   }));
