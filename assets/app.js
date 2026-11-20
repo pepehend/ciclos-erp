@@ -2741,13 +2741,13 @@ async function viewServiceOrderForm(v, id) {
           ${q.answered_at ? `<span class="muted"> · atualizado em ${dt(q.answered_at)}</span>` : ''}${q.linked ? '' : '<span class="muted"> · fora do tipo de tarefa atual</span>'}</div></div>${editBtns('q' + n)}</div>
       <form class="form" onsubmit="return false">
         ${q.allow_equipment ? `<label>Equipamento${q.equipment_required ? ' *' : ''} <select data-eq><option value="">Nenhum</option>${D.equipments.map((e) => `<option value="${e.id}" ${+q.answer_equipment_id === +e.id ? 'selected' : ''}>${esc(e.name)}${e.serial ? ' · ' + esc(e.serial) : ''}</option>`).join('')}</select></label>` : ''}
-        <div class="qgrid" style="--cols:${Math.max(1, +q.per_line || 1)}"></div>
+        <div class="qr-grid" style="--cols:${Math.max(1, +q.per_line || 1)}"></div>
       </form></div>`).join('')
     : '<div class="card"><div class="empty">Esta ordem não tem questionários. Escolha um tipo de tarefa com questionários em Detalhes, ou ligue questionários ao tipo em Cadastros → Tipos de tarefa.</div></div>';
   $$('.qrun', qp).forEach((card) => {
     const q = qs[+card.dataset.qn];
     const ans = JSON.parse(JSON.stringify(q.answers || {}));
-    const grid = $('.qgrid', card);
+    const grid = $('.qr-grid', card);
     let isLocked = true;
     const paint = () => {
       const vis = qVisible(q.questions, ans);
@@ -2839,7 +2839,7 @@ async function viewServiceOrderForm(v, id) {
   pane('pendencias').innerHTML = `<h2>Pendências para concluir</h2>
     ${o.status === 'faturada' ? '<p class="muted">Ordem faturada.</p>'
       : pend.length ? `<ul class="so-pendlist">${pend.map((p) => `<li>${icon('warn')}<span>${esc(p)}</span></li>`).join('')}</ul><p class="small muted">As pendências vêm das obrigatoriedades do tipo de tarefa e das perguntas obrigatórias dos questionários.</p>`
-      : `<p>${icon('check')} Nada pendente${['concluida'].includes(o.status) ? '.' : ': a ordem já pode ser concluída.'}</p>`}`;
+      : `<p class="so-ok">${icon('check')} Nada pendente${['concluida'].includes(o.status) ? '.' : ': a ordem já pode ser concluída.'}</p>`}`;
 
   // ---- Controle de horas
   const h = D.hours;
@@ -3435,7 +3435,7 @@ async function viewQuestionnaireForm(v, id) {
   // Lê o que está na tela para o estado, antes de qualquer mudança estrutural.
   const readQs = () => {
     const out = [];
-    $$('.qcard', box).forEach((card, i) => {
+    $$('.qe-card', box).forEach((card, i) => {
       const val = (k) => card.querySelector(`[data-k="${k}"]`);
       const type = val('type').value;
       const item = {
@@ -3444,10 +3444,10 @@ async function viewQuestionnaireForm(v, id) {
         type,
         required: val('required').checked,
         description: val('description').value.trim(),
-        options: Q_OPTION_TYPES.includes(type) ? val('options').value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) : [],
+        options: Q_OPTION_TYPES.includes(type) ? (val('options')?.value || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean) : [],
         cond: null,
       };
-      if (type === 'foto') item.geo = val('geo').checked;
+      if (type === 'foto') item.geo = !!val('geo')?.checked;
       if (val('hascond') && val('hascond').checked && val('condq')) {
         item.cond = { question: val('condq').value, value: val('condv').value };
       }
@@ -3462,9 +3462,9 @@ async function viewQuestionnaireForm(v, id) {
       const earlier = earlierOf(qs, i);
       const condQ = x.cond ? earlier.find((e) => e.id === x.cond.question) : null;
       const hasCond = !!x.cond;
-      return `<div class="qcard" data-qid="${esc(x.id)}">
-        <div class="qhead"><span class="qnum">${i + 1}</span>
-          <input ${d} data-k="label" maxlength="200" placeholder="Texto da pergunta" value="${esc(x.label)}" class="qlabel">
+      return `<div class="qe-card" data-qid="${esc(x.id)}">
+        <div class="qhead"><span class="qe-num">${i + 1}</span>
+          <input ${d} data-k="label" maxlength="200" placeholder="Texto da pergunta" value="${esc(x.label)}" class="qe-label">
           <select ${d} data-k="type" class="qtype">${typeOpts(x.type)}</select>
           <label class="check"><input type="checkbox" ${d} data-k="required" ${x.required ? 'checked' : ''}> Obrigatória</label>
           <span class="qtools">
@@ -3473,7 +3473,7 @@ async function viewQuestionnaireForm(v, id) {
             <button class="icon-btn" ${d} data-act="dup" title="Duplicar" aria-label="Duplicar">${icon('copy')}</button>
             <button class="icon-btn" ${d} data-act="del" title="Remover" aria-label="Remover">${icon('trash')}</button>
           </span></div>
-        <input ${d} data-k="description" maxlength="300" placeholder="Ajuda para o técnico (opcional)" value="${esc(x.description || '')}" class="qdesc">
+        <input ${d} data-k="description" maxlength="300" placeholder="Ajuda para o técnico (opcional)" value="${esc(x.description || '')}" class="qe-desc">
         ${Q_OPTION_TYPES.includes(x.type) ? `<label>Opções <textarea ${d} data-k="options" rows="4" placeholder="Uma opção por linha">${esc(x.options.join('\n'))}</textarea></label>` : ''}
         ${x.type === 'foto' ? `<label class="check"><input type="checkbox" ${d} data-k="geo" ${x.geo ? 'checked' : ''}> Registrar a localização da foto</label>` : ''}
         <div class="qcond">
@@ -3492,7 +3492,7 @@ async function viewQuestionnaireForm(v, id) {
     const b = e.target.closest('[data-act]');
     if (!b) return;
     readQs();
-    const i = $$('.qcard', box).indexOf(b.closest('.qcard'));
+    const i = $$('.qe-card', box).indexOf(b.closest('.qe-card'));
     const act = b.dataset.act;
     if (act === 'del') qs.splice(i, 1);
     if (act === 'up' && i > 0) [qs[i - 1], qs[i]] = [qs[i], qs[i - 1]];
@@ -3508,7 +3508,7 @@ async function viewQuestionnaireForm(v, id) {
     // Trocar o tipo, marcar condição ou escolher pergunta anterior muda a tela: relê e redesenha.
     if (['type', 'hascond', 'condq'].includes(k)) {
       readQs();
-      const i = $$('.qcard', box).indexOf(e.target.closest('.qcard'));
+      const i = $$('.qe-card', box).indexOf(e.target.closest('.qe-card'));
       if (k === 'hascond') {
         const first = earlierOf(qs, i)[0];
         qs[i].cond = e.target.checked && first ? { question: first.id, value: first.options[0] || '' } : null;
@@ -3526,7 +3526,7 @@ async function viewQuestionnaireForm(v, id) {
   };
 
   $('#qeq', v).onchange = (e) => { $('#qeqr', v).disabled = !e.target.checked; if (!e.target.checked) $('#qeqr', v).checked = false; };
-  $('#qadd', v).onclick = () => { readQs(); qs.push({ id: newQid(), label: '', type: 'texto', required: false, description: '', options: [], cond: null }); render(); $$('.qlabel', box).at(-1)?.focus(); };
+  $('#qadd', v).onclick = () => { readQs(); qs.push({ id: newQid(), label: '', type: 'texto', required: false, description: '', options: [], cond: null }); render(); $$('.qe-label', box).at(-1)?.focus(); };
 
   const save = (btn) => busy(btn, async () => {
     readQs();
