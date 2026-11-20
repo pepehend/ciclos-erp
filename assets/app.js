@@ -816,12 +816,12 @@ window.addEventListener('hashchange', comboClose);
 // ============ Layout e rotas ============
 // Opções do botão "Novo" (menu lateral e painel)
 const NEW_ITEMS = [
+  ['ordem/nova', 'Nova ordem de serviço', 'tool', 'ordens'],
   ['orcamento/novo', 'Novo orçamento', 'quote', 'orcamentos'],
   ['vendas/nova', 'Nova venda', 'cart', 'vendas'],
   ['compra/nova', 'Nova ordem de compra', 'order', 'compras'],
-  ['ordem/nova', 'Nova ordem de serviço', 'tool', 'ordens'],
 ];
-/** Botão "Novo" com menu suspenso (orçamento, venda, ordem de compra). */
+/** Botão "Novo" com menu suspenso (ordem de serviço, orçamento, venda, ordem de compra). */
 function newButton() {
   const items = NEW_ITEMS.filter(([, , , perm]) => can(perm));
   if (!items.length) return '';
@@ -840,13 +840,13 @@ const NAV = [
   { g: 'novo', label: 'Novo', icon: 'plus', cls: 'nav-new', items: NEW_ITEMS },
   ['notas/importar', 'Importar nota', 'upload', 'notas'],
   { g: 'operacao', label: 'Operação', icon: 'swap', items: [
-    ['vendas', 'Vendas', 'receipt', 'vendas'], ['orcamentos', 'Orçamentos', 'quote', 'orcamentos'],
-    ['notas', 'Notas fiscais', 'receipt', 'notas'],
-    ['compras', 'Ordens de compra', 'order', 'compras'], ['agenda', 'Agenda', 'calendar', 'ordens'], ['ordens', 'Ordens de serviço', 'tool', 'ordens']] },
+    ['agenda', 'Agenda', 'calendar', 'ordens'], ['ordens', 'Ordens de serviço', 'tool', 'ordens'],
+    ['orcamentos', 'Orçamentos', 'quote', 'orcamentos'], ['vendas', 'Vendas', 'receipt', 'vendas'],
+    ['notas', 'Notas fiscais', 'receipt', 'notas'], ['compras', 'Ordens de compra', 'order', 'compras']] },
   { g: 'cadastros', label: 'Cadastros', icon: 'box', items: [
     ['produtos', 'Produtos', 'box', 'produtos'], ['servicos', 'Serviços', 'tool', 'servicos'],
     ['clientes', 'Clientes', 'id', 'clientes'], ['fornecedores', 'Fornecedores', 'truck', 'fornecedores'],
-    ['formas-pagamento', 'Formas de pagamento', 'wallet', 'formas_pagamento'], ['condicoes-pagamento', 'Condições de pagamento', 'wallet', 'admin'],
+    ['pagamento', 'Pagamento', 'wallet', 'pagamento'],
     ['equipamentos', 'Equipamentos', 'box', 'ordens'], ['tipos-tarefa', 'Tipos de tarefa', 'tool', 'ordens'], ['questionarios', 'Questionários', 'check', 'ordens']] },
   { g: 'financeiro', label: 'Financeiro', icon: 'wallet', items: [
     ['financeiro', 'Pagamentos e recebimentos', 'wallet', 'financeiro'], ['fluxo-caixa', 'Fluxo de caixa', 'flow', 'financeiro']] },
@@ -859,13 +859,15 @@ const NAV = [
     // Sistema fica sempre por último em Configurações
     { sub: 'Sistema', key: 'sistema', icon: 'monitor', items: [['usuarios', 'Usuários', 'users', 'admin'], ['permissoes', 'Permissões', 'lock', 'admin'], ['backup', 'Backup', 'database', 'admin']] }] },
 ];
-const can = (perm) => !perm || (perm === 'admin' ? isAdmin() : isAdmin() || (state.me?.permissions || []).includes(perm));
+const can = (perm) => !perm || (perm === 'pagamento' ? can('formas_pagamento') || isAdmin()
+  : perm === 'admin' ? isAdmin() : isAdmin() || (state.me?.permissions || []).includes(perm));
 
 /** Qual item do menu fica destacado para cada endereço. */
 function navSection(path) {
-  if (['orcamento/novo', 'vendas/nova', 'notas/importar', 'compra/nova'].includes(path)) return path;
+  if (['ordem/nova', 'orcamento/novo', 'vendas/nova', 'notas/importar', 'compra/nova'].includes(path)) return path;
   if (['orcamento-status', 'orcamento-comportamento'].includes(path)) return 'orcamento-config';
-  const map = [['compra/', 'compras'], ['produto/', 'produtos'], ['venda/', 'vendas'], ['nota/', 'notas'], ['cliente/', 'clientes'], ['fornecedor/', 'fornecedores'], ['orcamento/', 'orcamentos']];
+  if (['formas-pagamento', 'condicoes-pagamento'].includes(path) || path.startsWith('pagamento/')) return 'pagamento';
+  const map = [['ordem/', 'ordens'], ['questionario/', 'questionarios'], ['compra/', 'compras'], ['produto/', 'produtos'], ['venda/', 'vendas'], ['nota/', 'notas'], ['cliente/', 'clientes'], ['fornecedor/', 'fornecedores'], ['orcamento/', 'orcamentos']];
   for (const [pre, sec] of map) if (path.startsWith(pre)) return sec;
   return path;
 }
@@ -930,23 +932,13 @@ function renderShell() {
       <header class="topbar"><button class="icon-btn" id="menu" aria-label="Menu">${icon('menu')}</button><span class="title" id="top-title">Gestão de Serviços</span></header>
       <main class="main" id="view"></main>
     </div></div>`;
-  // Grupos abertos/fechados ficam guardados neste navegador
-  let open = {};
-  try { open = JSON.parse(localStorage.getItem('navOpen') || '{}'); } catch (_) {}
-  $$('.nav-group').forEach((g) => { if (open[g.dataset.g] && g.dataset.g !== 'novo') g.classList.add('open'); });
-  $$('.nav-sub').forEach((g) => { if (open['sub:' + g.dataset.s]) g.classList.add('open'); });
+  // Grupos do menu: abre com clique; ao trocar de tela, só fica aberto o grupo da tela atual (route)
+  try { localStorage.removeItem('navOpen'); } catch (_) {}
   $('.nav').addEventListener('click', (e) => {
     const sh = e.target.closest('.nav-sh');
-    if (sh) {
-      const g = sh.parentElement; g.classList.toggle('open');
-      open['sub:' + g.dataset.s] = g.classList.contains('open');
-      try { localStorage.setItem('navOpen', JSON.stringify(open)); } catch (_) {}
-      return;
-    }
+    if (sh) { sh.parentElement.classList.toggle('open'); return; }
     const h = e.target.closest('.nav-gh'); if (!h) return;
-    const g = h.parentElement; g.classList.toggle('open');
-    open[g.dataset.g] = g.classList.contains('open');
-    try { localStorage.setItem('navOpen', JSON.stringify(open)); } catch (_) {}
+    h.parentElement.classList.toggle('open');
   });
   applyTheme();
   $('#themebtn').onclick = () => { const t = THEME_NEXT[getTheme()] || 'light'; setTheme(t); toast(`Tema: ${THEMES[t]}`); if ($('#tp')) $$('#tp button').forEach((x) => x.classList.toggle('on', x.dataset.t === t)); };
@@ -979,13 +971,15 @@ const ROUTES = [
   [/^cliente\/(\d+)$/, viewCustomer, 'clientes'],
   [/^relatorios$/, viewReports, 'relatorios'],
   [/^usuarios$/, viewUsers, 'admin'],
-  [/^condicoes-pagamento$/, viewPaymentTerms, 'admin'],
+  [/^pagamento$/, (v) => viewPayments(v), 'pagamento'],
+  [/^pagamento\/(formas|condicoes)$/, viewPayments, 'pagamento'],
+  [/^condicoes-pagamento$/, (v) => viewPayments(v, 'condicoes'), 'admin'],
   [/^orcamento-(config|comportamento|status)$/, viewQuoteSettings, 'admin'],
   [/^vendas-comportamento$/, viewSaleBehavior, 'admin'],
   [/^notas-comportamento$/, viewInvoiceBehavior, 'admin'],
   [/^compras-comportamento$/, viewPoBehavior, 'admin'],
   [/^compras$/, viewPurchases, 'compras'],
-  [/^formas-pagamento$/, viewPaymentMethods, 'formas_pagamento'],
+  [/^formas-pagamento$/, (v) => viewPayments(v, 'formas'), 'formas_pagamento'],
   [/^compra\/nova$/, (v) => viewPurchaseForm(v, null), 'compras'],
   [/^compra\/(\d+)$/, viewPurchaseForm, 'compras'],
   [/^agenda$/, viewAgenda, 'ordens'],
@@ -1015,7 +1009,7 @@ async function route() {
   const section = navSection(path);
   $$('.nav a').forEach((a) => a.classList.toggle('active', a.dataset.r === section));
   const active = $('.nav a.active');
-  if (active) { const g = active.closest('.nav-group'); if (g) g.classList.add('open'); const sg = active.closest('.nav-sub'); if (sg) sg.classList.add('open'); }
+  $$('.nav-group, .nav-sub').forEach((g) => g.classList.toggle('open', !!active && g.contains(active)));
   $('#top-title').textContent = active ? active.textContent : 'Gestão de Serviços';
   // Troca o elemento da página para não acumular eventos de telas anteriores
   const old = $('#view'); const view = old.cloneNode(false); old.replaceWith(view);
@@ -4246,6 +4240,24 @@ async function convertQuote(q) {
 }
 
 // ============ Formas de pagamento ============
+// ============ Pagamento (formas e condições numa tela só) ============
+async function viewPayments(v, tab) {
+  const tabs = [['formas', 'Formas de pagamento', 'formas_pagamento'], ['condicoes', 'Condições de pagamento', 'admin']].filter(([, , p]) => can(p));
+  if (!tabs.some(([k]) => k === tab)) tab = prefGet('payTab', tabs[0][0]);
+  if (!tabs.some(([k]) => k === tab)) tab = tabs[0][0];
+  prefSet('payTab', tab);
+  v.innerHTML = `<div class="page-head"><div><h1>Pagamento</h1><p class="muted">Formas e condições de pagamento usadas nas vendas, orçamentos, ordens de compra e no financeiro.</p></div></div>
+    ${tabs.length > 1 ? `<div class="seg" id="paytabs" style="margin-bottom:14px">${tabs.map(([k, l]) => `<button type="button" data-pt="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
+    <div id="paybody"></div>`;
+  const tb = $('#paytabs', v);
+  if (tb) tb.onclick = (e) => { const b = e.target.closest('[data-pt]'); if (b) go('pagamento/' + b.dataset.pt); };
+  const body = $('#paybody', v);
+  const p = tab === 'condicoes' ? viewPaymentTerms(body) : viewPaymentMethods(body);
+  // O título de cada parte vira subtítulo dentro da tela
+  const h = $('.page-head h1', body); if (h) h.outerHTML = `<h2>${h.innerHTML}</h2>`;
+  await p;
+}
+
 async function viewPaymentMethods(v) {
   v.innerHTML = `<div class="page-head"><div><h1>Formas de pagamento</h1><p class="muted">Aparecem nas vendas, nos orçamentos, no financeiro e nas ordens de compra, nesta ordem.</p></div>
       <div class="actions"><button class="btn primary" id="newpm">${icon('plus')}Nova forma de pagamento</button></div></div>
