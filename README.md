@@ -99,22 +99,30 @@ Sistema web de controle de estoque, vendas e lucro, feito para rodar em hospedag
 
 O custo que entra no estoque é o **valor efetivamente pago**: inclui frete, IPI, ICMS-ST e outras despesas e desconta os descontos. No PDF e no cupom, essa diferença é distribuída proporcionalmente entre os itens.
 
-## Instalação numa VM Debian 13 (alternativa ao cPanel)
+## Instalação num servidor próprio: LXC/VM Debian 13 (alternativa ao cPanel)
 
-O mesmo sistema roda num servidor próprio (VM) com Debian 13. Num servidor limpo, como **root**:
+O mesmo sistema roda num container LXC (Proxmox) ou numa VM com Debian 13. Num servidor limpo:
 
 ```bash
-apt-get update && apt-get install -y git
-git clone https://github.com/pepehend/ciclos-erp.git /opt/ciclos-erp
-bash /opt/ciclos-erp/deploy/debian/install.sh --domain sistema.suaempresa.com.br --ssl seu@email.com
+sudo apt-get update && sudo apt-get install -y git
+sudo git clone https://github.com/pepehend/ciclos-erp.git /opt/ciclos-erp
+sudo bash /opt/ciclos-erp/deploy/debian/install.sh
 ```
 
-Não precisa do link "raw" do GitHub: o repositório é público e o script usa o próprio clone. Sem `--domain`, ele pergunta o domínio (Enter usa o IP da VM).
+Não precisa do link "raw" do GitHub nem de chave: o repositório é público. O instalador:
 
-- O script instala Apache, PHP e MariaDB, publica o sistema em `/var/www/ciclos-erp`, cria o banco de dados (usuário e senha aparecem no fim e ficam em `/root/ciclos-erp-banco.txt`) e ativa o HTTPS (Let's Encrypt) quando você passa `--ssl` e o domínio já aponta para a VM. Sem domínio ainda, use o IP da VM em `--domain` e rode sem `--ssl`.
-- Depois abra `https://<domínio>/install.php`, escolha **MySQL**, use os dados do banco e, no fim, apague o instalador: `rm /var/www/ciclos-erp/install.php`.
-- Atualizações: o cron do servidor (`/etc/cron.d/ciclos-erp`) roda o mesmo `deploy/auto-deploy.sh` a cada 5 minutos e publica a `main` aprovada, igual ao cPanel. O backup automático no Google Drive também funciona.
+- instala Apache, PHP e MariaDB, cria o banco e grava o `app/config.php` sozinho (não usa o `install.php`);
+- publica o sistema em `/var/www/ciclos-erp` e, no fim, pede **nome, e-mail e senha do administrador** no próprio terminal;
+- agenda a **atualização automática** (a cada 5 minutos publica a `main` aprovada e roda o backup no Google Drive) e um **backup diário** do banco às 3h em `/var/backups/ciclos-erp` (guarda 30 dias);
+- pode rodar de novo sem problema: o que já existe é mantido.
+
+Depois de instalado (scripts em `/opt/ciclos-erp/deploy/debian/`):
+
+- Acesso pela internet com HTTPS, sem abrir portas (links do orçamento, da OS e portal do cliente): `sudo bash /opt/ciclos-erp/deploy/debian/tunnel.sh` (crie antes o túnel no painel da Cloudflare e cole o token).
+- Usuários pelo console (o único jeito de rebaixar, desativar ou excluir um administrador): `sudo bash /opt/ciclos-erp/deploy/debian/users.sh listar`.
+- Restaurar um backup: `sudo bash /opt/ciclos-erp/deploy/debian/restore.sh /var/backups/ciclos-erp/<arquivo>.sql.gz` (também aceita o `.sql` baixado em Configurações → Sistema → Backup).
 - E-mails (OS digital, pesquisa, convite do portal) saem pela função `mail()` do PHP: instale e configure um envio de e-mail no servidor (ex.: `apt install msmtp-mta`).
+- Registros em `/var/log/ciclos-erp/`.
 
 ## Atualizações (GitHub + cPanel)
 
