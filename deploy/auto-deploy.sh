@@ -16,8 +16,8 @@ main() {
     local REPO; REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
     local BRANCH="main"
     local LOG_DIR="$HOME/logs"
-    local LOG="$LOG_DIR/estoque-deploy.log"
-    local LOCK="$HOME/.estoque-deploy.lock"
+    local LOG="$LOG_DIR/ciclos-erp-deploy.log"
+    local LOCK="$HOME/.ciclos-erp-deploy.lock"
 
     mkdir -p "$LOG_DIR"
     log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"; }
@@ -70,7 +70,7 @@ main() {
 # Tarefas agendadas do sistema (backup automático no Google Drive): roda a cada chamada,
 # mesmo sem versão nova. O próprio sistema decide se chegou a hora.
 tarefas() {
-    local REPO LOG="$HOME/logs/estoque-deploy.log" SITE PHP
+    local REPO LOG="$HOME/logs/ciclos-erp-deploy.log" SITE PHP
     REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
     SITE=$(sed -n 's/^[[:space:]]*- export DEPLOYPATH=//p' "$REPO/.cpanel.yml" 2>/dev/null | head -1)
     SITE=$(eval echo "$SITE")
