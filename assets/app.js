@@ -819,6 +819,7 @@ const NEW_ITEMS = [
   ['orcamento/novo', 'Novo orçamento', 'quote', 'orcamentos'],
   ['vendas/nova', 'Nova venda', 'cart', 'vendas'],
   ['compra/nova', 'Nova ordem de compra', 'order', 'compras'],
+  ['ordem/nova', 'Nova ordem de serviço', 'tool', 'ordens'],
 ];
 /** Botão "Novo" com menu suspenso (orçamento, venda, ordem de compra). */
 function newButton() {
@@ -841,11 +842,12 @@ const NAV = [
   { g: 'operacao', label: 'Operação', icon: 'swap', items: [
     ['vendas', 'Vendas', 'receipt', 'vendas'], ['orcamentos', 'Orçamentos', 'quote', 'orcamentos'],
     ['notas', 'Notas fiscais', 'receipt', 'notas'],
-    ['compras', 'Ordens de compra', 'order', 'compras']] },
+    ['compras', 'Ordens de compra', 'order', 'compras'], ['ordens', 'Ordens de serviço', 'tool', 'ordens']] },
   { g: 'cadastros', label: 'Cadastros', icon: 'box', items: [
     ['produtos', 'Produtos', 'box', 'produtos'], ['servicos', 'Serviços', 'tool', 'servicos'],
     ['clientes', 'Clientes', 'id', 'clientes'], ['fornecedores', 'Fornecedores', 'truck', 'fornecedores'],
-    ['formas-pagamento', 'Formas de pagamento', 'wallet', 'formas_pagamento'], ['condicoes-pagamento', 'Condições de pagamento', 'wallet', 'admin']] },
+    ['formas-pagamento', 'Formas de pagamento', 'wallet', 'formas_pagamento'], ['condicoes-pagamento', 'Condições de pagamento', 'wallet', 'admin'],
+    ['equipamentos', 'Equipamentos', 'box', 'ordens'], ['checklists', 'Modelos de checklist', 'check', 'ordens']] },
   { g: 'financeiro', label: 'Financeiro', icon: 'wallet', items: [
     ['financeiro', 'Pagamentos e recebimentos', 'wallet', 'financeiro'], ['fluxo-caixa', 'Fluxo de caixa', 'flow', 'financeiro']] },
   { g: 'relatorios', label: 'Relatórios', icon: 'chart', items: [
@@ -986,6 +988,11 @@ const ROUTES = [
   [/^formas-pagamento$/, viewPaymentMethods, 'formas_pagamento'],
   [/^compra\/nova$/, (v) => viewPurchaseForm(v, null), 'compras'],
   [/^compra\/(\d+)$/, viewPurchaseForm, 'compras'],
+  [/^ordens$/, viewServiceOrders, 'ordens'],
+  [/^ordem\/nova$/, (v) => viewServiceOrderForm(v, null), 'ordens'],
+  [/^ordem\/(\d+)$/, viewServiceOrderForm, 'ordens'],
+  [/^equipamentos$/, viewEquipments, 'ordens'],
+  [/^checklists$/, viewChecklists, 'ordens'],
   [/^financeiro$/, viewFinance, 'financeiro'],
   [/^fluxo-caixa$/, viewCashflow, 'financeiro'],
   [/^conta$/, viewAccount],
@@ -2370,6 +2377,210 @@ async function viewServices(v) {
     const r = e.target.closest('[data-id]'); if (r) serviceForm(rows.find((x) => x.id == r.dataset.id), load);
   };
   await load();
+}
+
+// ============ Ordens de serviço ============
+const SO_TABS = [['abertas', 'Em aberto'], ['aberta', 'Abertas'], ['agendada', 'Agendadas'], ['em_execucao', 'Em execução'], ['pausada', 'Pausadas'], ['concluida', 'Concluídas'], ['faturada', 'Faturadas'], ['todas', 'Todas']];
+const soStatusHtml = (code, labels) => {
+  const cls = { concluida: 'ok', faturada: 'ok', pausada: 'warn', em_execucao: 'accent', agendada: 'accent' }[code] || '';
+  return `<span class="badge ${cls}">${esc(labels[code] || code)}</span>`;
+};
+const soCustomer = (r) => esc(r.customer_trade_name || r.customer_name || '');
+const dtLocal = (s) => (s ? String(s).replace(' ', 'T').slice(0, 16) : '');
+
+async function viewServiceOrders(v) {
+  const f = { status: prefGet('soStatus', 'abertas'), q: '' };
+  v.innerHTML = `<div class="page-head"><div><h1>Ordens de serviço</h1><p class="muted">Atendimentos aos clientes, de chamados avulsos ou de orçamentos.</p></div>
+      <div class="actions"><a class="btn primary" href="#/ordem/nova">${icon('plus')}Nova ordem</a></div></div>
+    <div class="card"><div class="filters" style="align-items:center">
+      <div class="seg" id="tabs">${SO_TABS.map(([k, l]) => `<button data-s="${k}">${l}</button>`).join('')}</div>
+      <label class="grow">Buscar <input id="q" type="search" placeholder="Nº, cliente, equipamento ou descrição"></label></div>
+      <div id="list"></div></div>`;
+  let labels = {};
+  const load = async () => {
+    $$('#tabs [data-s]', v).forEach((b) => b.classList.toggle('on', b.dataset.s === f.status));
+    const d = await api('service_orders', { params: { status: f.status, q: f.q } });
+    labels = d.statuses;
+    $('#list', v).innerHTML = d.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Nº</th><th>Cliente</th><th>Equipamento</th><th>Tipo</th><th>Técnico</th><th>Agendada</th><th>Status</th></tr></thead><tbody>
+      ${d.rows.map((r) => `<tr class="click" data-id="${r.id}"><td class="nowrap">#${r.id}</td><td><strong>${soCustomer(r)}</strong></td><td>${esc(r.equipment_name || '—')}</td>
+        <td>${esc(d.types[r.service_type] || '—')}</td><td>${esc(r.technician_name || '—')}</td><td class="nowrap">${r.scheduled_at ? dt(r.scheduled_at) : '—'}</td>
+        <td>${soStatusHtml(r.status, labels)}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">Nenhuma ordem de serviço aqui. Clique em <strong>Nova ordem</strong>.</div>';
+  };
+  $$('#tabs [data-s]', v).forEach((b) => (b.onclick = () => { f.status = b.dataset.s; prefSet('soStatus', f.status); load().catch(fail); }));
+  $('#q', v).oninput = debounce((e) => { f.q = e.target.value; load().catch(fail); });
+  $('#list', v).onclick = (e) => { const r = e.target.closest('[data-id]'); if (r) go('ordem/' + r.dataset.id); };
+  await load();
+}
+
+async function viewServiceOrderForm(v, id) {
+  const isNew = !id;
+  const o = isNew ? { status: 'aberta', origin: 'chamado' } : await api('service_order', { params: { id } });
+  const form = await api('service_order_form', { params: { customer_id: o.customer_id || 0 } });
+  const customers = await api('customers', { params: { active: '1', limit: 200, sort: 'asc' } });
+  const fields = (f) => {
+    const sel = (name, list, valueKey, labelFn, cur, empty) => `<select name="${name}">${empty ? `<option value="">${empty}</option>` : ''}${list.map((x) => `<option value="${esc(x[valueKey])}" ${String(cur ?? '') === String(x[valueKey]) ? 'selected' : ''}>${esc(labelFn(x))}</option>`).join('')}</select>`;
+    $('#eqs', v).innerHTML = sel('equipment_id', f.equipments, 'id', (e) => `${e.name}${e.serial ? ' · ' + e.serial : ''}`, o.equipment_id, 'Nenhum equipamento');
+    $('#qts', v).innerHTML = sel('quote_id', f.quotes, 'id', (q) => `Orçamento #${q.id}${q.lead_name ? ' · ' + q.lead_name : ''} (${dOnly(q.created_at)})`, o.quote_id, 'Selecione um orçamento');
+  };
+  const orig = o.origin || 'chamado';
+  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/ordens">← Ordens de serviço</a></p><h1>${isNew ? 'Nova ordem de serviço' : 'Ordem de serviço #' + o.id}</h1>
+      ${isNew ? '' : `<p class="muted">${soStatusHtml(o.status, form.statuses)} ${o.origin_label ? `· ${esc(o.origin_label)}` : ''}</p>`}</div></div>
+    <div class="card"><form class="form" id="soform">
+      <label>Cliente * <select name="customer_id" id="cust" required><option value="">Selecione…</option>${customers.rows.map((c) => `<option value="${c.id}" ${+o.customer_id === +c.id ? 'selected' : ''}>${esc(custName(c))}</option>`).join('')}</select></label>
+      <div class="grid two"><label>Equipamento <span id="eqs"></span></label>
+        <label>Tipo de serviço <select name="service_type"><option value="">Não definido</option>${Object.entries(form.service_types).map(([k, l]) => `<option value="${k}" ${o.service_type === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
+      <fieldset class="fset"><legend>Origem</legend>
+        <label class="check"><input type="radio" name="origin" value="chamado" ${orig === 'chamado' ? 'checked' : ''}> Chamado avulso</label>
+        <label class="check"><input type="radio" name="origin" value="orcamento" ${orig === 'orcamento' ? 'checked' : ''}> Orçamento do cliente</label>
+        <div id="qts-wrap" ${orig === 'orcamento' ? '' : 'hidden'}><span id="qts"></span></div></fieldset>
+      <label>Descrição do serviço * <textarea name="description" required rows="3" maxlength="2000" placeholder="O que o cliente pediu ou relatou">${esc(o.description)}</textarea></label>
+      <div class="grid two"><label>Checklist <select name="checklist_model_id"><option value="">Sem checklist</option>${form.checklists.map((c) => `<option value="${c.id}" ${+o.checklist_model_id === +c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+        <label>Técnico <select name="technician_id"><option value="">Sem técnico</option>${form.technicians.map((t) => `<option value="${t.id}" ${+o.technician_id === +t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label></div>
+      <div class="grid two"><label>Agendar para <input type="datetime-local" name="scheduled_at" value="${dtLocal(o.scheduled_at)}"></label>
+        <label>Prazo <input type="date" name="due_date" value="${esc(o.due_date || '')}"></label></div>
+      <label>Observações internas <input name="notes" maxlength="500" value="${esc(o.notes)}"></label>
+      <div class="actions"><a class="btn" href="#/ordens">Cancelar</a><button class="btn primary" type="submit" id="sosave">Salvar ordem</button></div>
+    </form>${isNew ? '' : `<div class="so-status"><h3>Andamento</h3>
+      ${o.transitions.length ? `<div class="actions">${o.transitions.map((s) => `<button class="btn" data-to="${s}">${icon('check')}Mover para "${esc(form.statuses[s])}"</button>`).join('')}</div>` : '<p class="muted">Ordem finalizada: não há mais mudanças de status.</p>'}
+    </div>`}</div>`;
+  fields(form);
+  const reloadCustomer = async () => {
+    const cid = $('#cust', v).value;
+    const f = await api('service_order_form', { params: { customer_id: cid || 0 } });
+    o.equipment_id = null; o.quote_id = null;
+    fields(f);
+  };
+  $('#cust', v).onchange = () => reloadCustomer().catch(fail);
+  $$('[name="origin"]', v).forEach((r) => (r.onchange = () => { $('#qts-wrap', v).hidden = r.value !== 'orcamento'; }));
+  $('#soform', v).onsubmit = (e) => {
+    e.preventDefault();
+    busy($('#sosave', v), async () => {
+      const d = formData($('#soform', v));
+      if (d.origin === 'orcamento' && !d.quote_id) throw new Error('Selecione o orçamento');
+      const r = await api('service_order_save', { body: { ...d, id: isNew ? undefined : o.id } });
+      toast('Ordem salva');
+      go('ordem/' + r.id);
+    });
+  };
+  $$('[data-to]', v).forEach((b) => (b.onclick = () => busy(b, async () => {
+    const to = b.dataset.to;
+    if (to === 'faturada' && !(await confirmBox('Marcar esta ordem como faturada? Ela não poderá mais ser alterada.', { ok: 'Marcar como faturada' }))) return;
+    await api('service_order_status', { body: { id: o.id, status: to } });
+    toast('Status atualizado');
+    route();
+  })));
+}
+
+async function viewEquipments(v) {
+  const f = { q: '', all: false };
+  v.innerHTML = `<div class="page-head"><div><h1>Equipamentos</h1><p class="muted">Aparelhos dos clientes que recebem manutenção e atendimento.</p></div>
+      <div class="actions"><button class="btn primary" id="new">${icon('plus')}Novo equipamento</button></div></div>
+    <div class="card"><div class="filters"><label class="grow">Buscar <input id="q" type="search" placeholder="Nome, marca, modelo, série ou cliente"></label>
+      <label class="check"><input type="checkbox" id="all"> Mostrar inativos</label></div><div id="list"></div></div>`;
+  const load = async () => {
+    const rows = await api('equipments', { params: { q: f.q, all: f.all ? 1 : '' } });
+    $('#list', v).innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Equipamento</th><th>Cliente</th><th>Nº de série</th><th></th></tr></thead><tbody>
+      ${rows.map((e) => `<tr class="click" data-id="${e.id}"><td><strong>${esc(e.name)}</strong><div class="small muted">${esc([e.brand, e.model].filter(Boolean).join(' '))}</div></td>
+        <td>${esc(e.customer_trade_name || e.customer_name)}</td><td>${esc(e.serial || '—')}</td><td>${+e.active ? '' : '<span class="badge">inativo</span>'}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">Nenhum equipamento cadastrado. Clique em <strong>Novo equipamento</strong>.</div>';
+  };
+  $('#q', v).oninput = debounce((e) => { f.q = e.target.value; load().catch(fail); });
+  $('#all', v).onchange = (e) => { f.all = e.target.checked; load().catch(fail); };
+  $('#new', v).onclick = () => equipmentForm(null, load).catch(fail);
+  $('#list', v).onclick = async (e) => {
+    const r = e.target.closest('[data-id]');
+    if (!r) return;
+    const rows = await api('equipments', { params: { all: 1 } });
+    equipmentForm(rows.find((x) => x.id == r.dataset.id), load).catch(fail);
+  };
+  await load();
+}
+
+async function equipmentForm(eq, onSaved) {
+  const isNew = !eq;
+  const customers = await api('customers', { params: { active: '1', limit: 200, sort: 'asc' } });
+  const m = modal({
+    title: isNew ? 'Novo equipamento' : 'Editar equipamento',
+    body: `<form class="form" id="eqf"><label>Cliente * <select name="customer_id" required><option value="">Selecione…</option>${customers.rows.map((c) => `<option value="${c.id}" ${eq && +eq.customer_id === +c.id ? 'selected' : ''}>${esc(custName(c))}</option>`).join('')}</select></label>
+      <label>Nome do equipamento * <input name="name" required maxlength="120" value="${esc(eq?.name)}" placeholder="Ex.: Compressor de parafuso"></label>
+      <div class="grid two"><label>Marca <input name="brand" maxlength="80" value="${esc(eq?.brand)}"></label><label>Modelo <input name="model" maxlength="80" value="${esc(eq?.model)}"></label></div>
+      <label>Nº de série <input name="serial" maxlength="80" value="${esc(eq?.serial)}"></label>
+      <label>Observações <input name="notes" maxlength="500" value="${esc(eq?.notes)}"></label></form>`,
+    foot: `${!isNew ? `<button class="btn ghost" id="eqact" style="margin-right:auto">${+eq.active ? 'Desativar' : 'Reativar'}</button>` : ''}<button class="btn" data-close>Cancelar</button><button class="btn primary" id="eqsave">Salvar equipamento</button>`,
+  });
+  const f = $('#eqf', m.el);
+  const save = (btn) => busy(btn, async () => {
+    const d = formData(f);
+    if (!d.customer_id) throw new Error('Selecione o cliente');
+    if (!d.name.trim()) throw new Error('Informe o nome do equipamento');
+    await api('equipment_save', { body: { ...d, id: eq?.id } });
+    m.close(); toast('Equipamento salvo'); onSaved && onSaved();
+  });
+  $('#eqsave', m.el).onclick = (e) => save(e.currentTarget);
+  f.onsubmit = (e) => { e.preventDefault(); save($('#eqsave', m.el)); };
+  const act = $('#eqact', m.el);
+  if (act) act.onclick = () => busy(act, async () => {
+    const to = !+eq.active;
+    if (!to && !(await confirmBox(`Desativar o equipamento "${eq.name}"? Ele some das listas, mas continua nas ordens antigas.`, { ok: 'Desativar', danger: true }))) return;
+    await api('equipment_active', { body: { id: eq.id, active: to } });
+    m.close(); toast(to ? 'Equipamento reativado' : 'Equipamento desativado'); onSaved && onSaved();
+  });
+}
+
+async function viewChecklists(v) {
+  const f = { all: false };
+  v.innerHTML = `<div class="page-head"><div><h1>Modelos de checklist</h1><p class="muted">Itens que o técnico confere em cada tipo de atendimento.</p></div>
+      <div class="actions"><button class="btn primary" id="new">${icon('plus')}Novo modelo</button></div></div>
+    <div class="card"><div class="filters"><label class="check"><input type="checkbox" id="all"> Mostrar inativos</label></div><div id="list"></div></div>`;
+  let types = {};
+  const load = async () => {
+    const d = await api('checklist_models', { params: { all: f.all ? 1 : '' } });
+    types = d.service_types;
+    $('#list', v).innerHTML = d.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Modelo</th><th>Tipo de serviço</th><th class="num">Itens</th><th></th></tr></thead><tbody>
+      ${d.rows.map((m) => `<tr class="click" data-id="${m.id}"><td><strong>${esc(m.name)}</strong></td><td>${esc(types[m.service_type] || 'Qualquer')}</td><td class="num">${m.items.length}</td>
+        <td>${+m.active ? '' : '<span class="badge">inativo</span>'}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">Nenhum modelo de checklist. Clique em <strong>Novo modelo</strong>.</div>';
+    $('#list', v).dataset.rows = JSON.stringify(d.rows);
+  };
+  $('#all', v).onchange = (e) => { f.all = e.target.checked; load().catch(fail); };
+  $('#new', v).onclick = () => checklistForm(null, types, load);
+  $('#list', v).onclick = (e) => {
+    const r = e.target.closest('[data-id]');
+    if (!r) return;
+    const m = JSON.parse($('#list', v).dataset.rows || '[]').find((x) => x.id == r.dataset.id);
+    checklistForm(m, types, load);
+  };
+  await load();
+}
+
+function checklistForm(m, types, onSaved) {
+  const isNew = !m;
+  const md = modal({
+    title: isNew ? 'Novo modelo de checklist' : 'Editar modelo de checklist',
+    body: `<form class="form" id="ckf"><label>Nome do modelo * <input name="name" required maxlength="120" value="${esc(m?.name)}" placeholder="Ex.: Manutenção preventiva do compressor"></label>
+      <label>Tipo de serviço <select name="service_type"><option value="">Qualquer tipo</option>${Object.entries(types).map(([k, l]) => `<option value="${k}" ${m?.service_type === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label>Itens * <textarea name="items" required rows="8" placeholder="Um item por linha">${esc((m?.items || []).map((i) => i.label).join('\n'))}</textarea></label>
+      <p class="small muted">Escreva um item por linha. Linhas vazias são ignoradas.</p></form>`,
+    foot: `${!isNew ? `<button class="btn ghost" id="ckact" style="margin-right:auto">${+m.active ? 'Desativar' : 'Reativar'}</button>` : ''}<button class="btn" data-close>Cancelar</button><button class="btn primary" id="cksave">Salvar modelo</button>`,
+  });
+  const f = $('#ckf', md.el);
+  const save = (btn) => busy(btn, async () => {
+    const d = formData(f);
+    if (!d.name.trim()) throw new Error('Informe o nome do modelo');
+    if (!d.items.trim()) throw new Error('Inclua pelo menos um item no checklist');
+    await api('checklist_model_save', { body: { ...d, id: m?.id } });
+    md.close(); toast('Modelo salvo'); onSaved && onSaved();
+  });
+  $('#cksave', md.el).onclick = (e) => save(e.currentTarget);
+  f.onsubmit = (e) => { e.preventDefault(); save($('#cksave', md.el)); };
+  const act = $('#ckact', md.el);
+  if (act) act.onclick = () => busy(act, async () => {
+    const to = !+m.active;
+    if (!to && !(await confirmBox(`Desativar o modelo "${m.name}"? Ordens antigas continuam com ele.`, { ok: 'Desativar', danger: true }))) return;
+    await api('checklist_model_active', { body: { id: m.id, active: to } });
+    md.close(); toast(to ? 'Modelo reativado' : 'Modelo desativado'); onSaved && onSaved();
+  });
 }
 
 // ============ Fornecedores ============
