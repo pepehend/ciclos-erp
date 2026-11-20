@@ -1,9 +1,13 @@
 #!/bin/bash
 # Instala o sistema numa VM Debian 13 (trixie) limpa: Apache + PHP + MariaDB + Git + Cron.
 #
-# Uso (como root):
-#   bash install.sh --domain sistema.exemplo.com.br [--repo URL] [--branch main] [--site /var/www/ciclos-erp]
-#                   [--repo-dir /opt/ciclos-erp] [--db mysql|sqlite] [--ssl email@exemplo.com]
+# Uso (como root), sem precisar do link "raw" do GitHub:
+#   apt-get install -y git && git clone https://github.com/pepehend/ciclos-erp.git /opt/ciclos-erp
+#   bash /opt/ciclos-erp/deploy/debian/install.sh
+# Sem --domain, o script pergunta (Enter = IP da VM). Opções:
+#   --domain sistema.exemplo.com.br  --ssl email@exemplo.com  --db mysql|sqlite  --branch main
+#   --site /var/www/ciclos-erp  --repo-dir /opt/ciclos-erp  --repo URL
+# Rodado de dentro de um clone, usa esse mesmo clone (não baixa de novo).
 #
 # Depois de rodar, abra http(s)://<domínio>/install.php no navegador e use os dados do banco que
 # o script mostra no fim (ficam também em /root/ciclos-erp-banco.txt).
@@ -12,11 +16,14 @@
 # (publica a branch main quando o Pedro aprova o PR) e roda as tarefas do sistema (backup no Google Drive).
 set -euo pipefail
 
+# Tudo numa função: o bash lê o script inteiro antes de rodar, então o git pode atualizar
+# este arquivo (no clone que o próprio script usa) sem quebrar a instalação no meio.
+main() {
 DOMAIN=""
 REPO_URL="https://github.com/pepehend/ciclos-erp.git"
 BRANCH="main"
 SITE="/var/www/ciclos-erp"
-REPO_DIR="/opt/ciclos-erp"
+REPO_DIR=""
 DB="mysql"
 SSL_EMAIL=""
 
@@ -29,20 +36,40 @@ while [ $# -gt 0 ]; do
         --repo-dir) REPO_DIR="${2%/}"; shift 2 ;;
         --db) DB="$2"; shift 2 ;;
         --ssl) SSL_EMAIL="$2"; shift 2 ;;
-        -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,19p' "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "Veja o README (Instalação numa VM Debian 13)."; exit 0 ;;
         *) echo "Opção desconhecida: $1" >&2; exit 1 ;;
     esac
 done
 
 [ "$(id -u)" = "0" ] || { echo "Rode como root (sudo bash install.sh ...)" >&2; exit 1; }
+
+# Clone onde este script está (rodado de dentro do repositório): usa ele mesmo
+if [ -z "$REPO_DIR" ]; then
+    local SELF=""
+    if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+        SELF=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd || true)
+    fi
+    if [ -n "$SELF" ] && [ -d "$SELF/.git" ] && [ -f "$SELF/.cpanel.yml" ]; then REPO_DIR="$SELF"; else REPO_DIR="/opt/ciclos-erp"; fi
+fi
+
+# Domínio: pergunta se não veio na linha de comando (Enter = IP da VM)
+if [ -z "$DOMAIN" ]; then
+    local IP; IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+    [ -n "$IP" ] || IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' || true)
+    [ -n "$IP" ] || IP=$(hostname -i 2>/dev/null | awk '{print $1}' || true)
+    if [ -r /dev/tty ]; then
+        { read -r -p "Domínio do sistema (Enter para usar o IP ${IP:-da VM}): " DOMAIN < /dev/tty; } 2>/dev/null || true
+    fi
+    DOMAIN="${DOMAIN:-$IP}"
+fi
 [ -n "$DOMAIN" ] || { echo "Informe o domínio: --domain sistema.exemplo.com.br (ou o IP da VM)" >&2; exit 1; }
+echo "Instalando em http${SSL_EMAIL:+s}://$DOMAIN (repositório em $REPO_DIR, site em $SITE)"
 case "$DB" in mysql|sqlite) ;; *) echo "--db precisa ser mysql ou sqlite" >&2; exit 1 ;; esac
 if [ -r /etc/os-release ]; then
     . /etc/os-release
     [ "${ID:-}" = "debian" ] || echo "Aviso: feito para Debian 13; este sistema é ${PRETTY_NAME:-desconhecido}."
 fi
 
-passo() { echo; echo "==> $*"; }
 
 passo "Instalando pacotes (Apache, PHP, MariaDB, Git, Cron)"
 export DEBIAN_FRONTEND=noninteractive
@@ -55,13 +82,13 @@ apt-get install -y -q $PKGS
 
 passo "Baixando o sistema do GitHub em $REPO_DIR"
 if [ -d "$REPO_DIR/.git" ]; then
+    git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
     git -C "$REPO_DIR" fetch -q origin "$BRANCH"
     git -C "$REPO_DIR" checkout -q "$BRANCH"
     git -C "$REPO_DIR" reset -q --hard "origin/$BRANCH"
 else
     git clone -q --branch "$BRANCH" "$REPO_URL" "$REPO_DIR" || {
-        echo "Não consegui clonar $REPO_URL. Se o repositório for privado, use uma chave de implantação (deploy key)" >&2
-        echo "ou um token: --repo https://<token>@github.com/pepehend/ciclos-erp.git" >&2
+        echo "Não consegui baixar $REPO_URL (confira a internet da VM e o endereço do repositório)." >&2
         exit 1
     }
 fi
@@ -180,3 +207,8 @@ echo " E-mails (OS digital, pesquisa, convites do portal) usam a função mail()
 echo " instale e configure um envio de e-mail (ex.: apt install msmtp-mta) para eles saírem."
 echo " Registro das publicações: /root/logs/ciclos-erp-deploy.log"
 echo "============================================================"
+}
+
+passo() { echo; echo "==> $*"; }
+
+main "$@"

@@ -68,8 +68,13 @@ Sistema web de controle de estoque, vendas e lucro, feito para rodar em hospedag
    - crie um usuário com uma senha forte;
    - adicione o usuário ao banco marcando **TODOS OS PRIVILÉGIOS**.
    - Anote o nome do banco, o usuário e a senha.
-2. **Envie os arquivos.** No **Gerenciador de arquivos**, entre em `public_html`, envie o `.zip` e clique em **Extrair**. Isso cria a pasta `sistema-gestao-main` (pode renomear, por exemplo para `estoque`). Se preferir que o sistema abra direto no domínio ou num subdomínio, mova o conteúdo da pasta para a raiz correspondente.
-3. **Instale.** No navegador, abra `https://seudominio.com.br/sistema-gestao-main/install.php` (ajuste o endereço para o seu) e preencha:
+2. **Baixe o sistema pelo Git do cPanel** (o repositório é público, não precisa de senha nem chave):
+   - cPanel → **Git™ Version Control** → **Criar**;
+   - URL do clone: `https://github.com/pepehend/ciclos-erp.git`;
+   - Caminho do repositório: `repositories/ciclos-erp`; nome: `ciclos-erp`; clique em **Criar**;
+   - em **Gerenciar → Extrair ou implantar**, clique em **Implantar commit HEAD**. Os arquivos vão para `public_html/sistema` (para outra pasta, mude o `DEPLOYPATH` no `.cpanel.yml`). Na primeira vez o `install.php` vai junto.
+   - Sem Git no cPanel: baixe o `.zip` em github.com/pepehend/ciclos-erp (**Code → Download ZIP**), envie para `public_html` pelo Gerenciador de arquivos e extraia.
+3. **Instale.** No navegador, abra `https://seudominio.com.br/sistema/install.php` (ajuste o endereço para o seu) e preencha:
    - Servidor: normalmente `localhost`
    - nome do banco, usuário e senha anotados no passo 1
    - seu nome, e-mail e senha de administrador
@@ -104,20 +109,21 @@ git clone https://github.com/pepehend/ciclos-erp.git /opt/ciclos-erp
 bash /opt/ciclos-erp/deploy/debian/install.sh --domain sistema.suaempresa.com.br --ssl seu@email.com
 ```
 
+Não precisa do link "raw" do GitHub: o repositório é público e o script usa o próprio clone. Sem `--domain`, ele pergunta o domínio (Enter usa o IP da VM).
+
 - O script instala Apache, PHP e MariaDB, publica o sistema em `/var/www/ciclos-erp`, cria o banco de dados (usuário e senha aparecem no fim e ficam em `/root/ciclos-erp-banco.txt`) e ativa o HTTPS (Let's Encrypt) quando você passa `--ssl` e o domínio já aponta para a VM. Sem domínio ainda, use o IP da VM em `--domain` e rode sem `--ssl`.
 - Depois abra `https://<domínio>/install.php`, escolha **MySQL**, use os dados do banco e, no fim, apague o instalador: `rm /var/www/ciclos-erp/install.php`.
-- Repositório privado: clone com uma *deploy key* ou um token e passe a mesma URL em `--repo`.
 - Atualizações: o cron do servidor (`/etc/cron.d/ciclos-erp`) roda o mesmo `deploy/auto-deploy.sh` a cada 5 minutos e publica a `main` aprovada, igual ao cPanel. O backup automático no Google Drive também funciona.
 - E-mails (OS digital, pesquisa, convite do portal) saem pela função `mail()` do PHP: instale e configure um envio de e-mail no servidor (ex.: `apt install msmtp-mta`).
 
 ## Atualizações (GitHub + cPanel)
 
-O código fica no repositório privado `pepehend/ciclos-erp`. Toda alteração chega como *pull request*; ao aprovar (**Merge**), ela vai para a branch `main`.
+O código fica no repositório público `pepehend/ciclos-erp`. Toda alteração chega como *pull request*; ao aprovar (**Merge**), ela vai para a branch `main`.
 
 **Publicação automática** (configurar uma vez): no cPanel → **Cron Jobs** → adicione:
 
 - Configuração comum: **A cada 15 minutos** (`*/15 * * * *`). A hospedagem não aceita intervalos menores: se você puser menos, ela troca sozinha por 15 minutos ou um pouco mais (`*/16`, `*/17`), o que é normal.
-- Comando: `/bin/bash $HOME/repositories/sistema-gestao/deploy/auto-deploy.sh >/dev/null 2>&1` (troque `sistema-gestao` pelo nome da pasta do repositório no cPanel, se for outro)
+- Comando: `/bin/bash $HOME/repositories/ciclos-erp/deploy/auto-deploy.sh >/dev/null 2>&1` (troque `ciclos-erp` pelo nome da pasta do repositório no cPanel; na instalação antiga é `sistema-gestao`)
 
 A cada 15 minutos (mais ou menos) o script confere o GitHub; se houver versão nova aprovada, atualiza o repositório e publica em `public_html/sistema` (usando o `.cpanel.yml`). O `config.php`, os dados e o `install.php` nunca são sobrescritos. O registro fica em `logs/ciclos-erp-deploy.log` na sua pasta pessoal (só quando publica ou dá erro).
 

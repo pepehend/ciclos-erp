@@ -75,8 +75,9 @@ Sistema de estoque, vendas e lucro em PHP 8 + MySQL, feito para hospedagem compa
 - Servidor local: `php -S 127.0.0.1:8088` e depois abrir `install.php` e escolher SQLite.
 
 ## Instalação híbrida (cPanel ou VM Debian 13)
-- cPanel: `.cpanel.yml` + `deploy/auto-deploy.sh` (Cron a cada 15 minutos), como antes.
-- VM Debian 13: `deploy/debian/install.sh --domain ...` (root) instala Apache + PHP + MariaDB, clona em `/opt/ciclos-erp`, publica em `/var/www/ciclos-erp`, cria o banco (dados em `/root/ciclos-erp-banco.txt`) e o `/etc/cron.d/ciclos-erp` (a cada 5 minutos). Grava `deploy/servidor.conf` (fora do Git: `MODE=vm`, `DEPLOYPATH`, `OWNER`), que o `auto-deploy.sh` lê para pular o `uapi`, copiar para a pasta certa, acertar o dono e rodar o `app/cron.php` como `www-data`. Arquivo novo que vai para o site entra no `.cpanel.yml` (vale para os dois).
+- Repositório público: instalação sem token nem link "raw" (clone por `https://github.com/pepehend/ciclos-erp.git`).
+- cPanel: Git Version Control clona o repositório; `.cpanel.yml` publica (o `install.php` só vai enquanto não existe `app/config.php`) + `deploy/auto-deploy.sh` (Cron a cada 15 minutos).
+- VM Debian 13: `deploy/debian/install.sh [--domain ...]` (root; rodado de dentro de um clone usa esse clone; sem `--domain` pergunta, Enter = IP) instala Apache + PHP + MariaDB, clona em `/opt/ciclos-erp`, publica em `/var/www/ciclos-erp`, cria o banco (dados em `/root/ciclos-erp-banco.txt`) e o `/etc/cron.d/ciclos-erp` (a cada 5 minutos). Grava `deploy/servidor.conf` (fora do Git: `MODE=vm`, `DEPLOYPATH`, `OWNER`), que o `auto-deploy.sh` lê para pular o `uapi`, copiar para a pasta certa, acertar o dono e rodar o `app/cron.php` como `www-data`. Arquivo novo que vai para o site entra no `.cpanel.yml` (vale para os dois).
 
 ## Fluxo de trabalho (Git)
 - Branch fixa de trabalho: **`development`** (antes era `desenvolvimento`, que travou no GitHub). Não crie outras branches.
