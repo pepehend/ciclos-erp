@@ -573,6 +573,10 @@ class DB
             if ($p) self::update('permission_profiles', (int)$p['id'], ['permissions' => implode(',', array_keys(Auth::PERMS))]);
             Auth::seedProfiles();
         }
+        // Perfis de exemplo novos (ex.: "Técnico") entram também em instalações que já têm as ordens de serviço
+        try {
+            Auth::seedProfiles();
+        } catch (PDOException $e) { /* tabela ainda não existe */ }
         // v1.25.0: portal do cliente (acesso e pedidos de correção)
         try {
             self::pdo()->query('SELECT id FROM customer_portal LIMIT 1');
