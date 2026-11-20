@@ -149,7 +149,7 @@ class ServiceOrders
     public static function list(array $f): array
     {
         $w = ['1=1']; $p = [];
-        $status = (string)($f['status'] ?? 'abertas');
+        $status = (string)($f['status'] ?? 'todas');
         if ($status === 'abertas') { $w[] = 'o.status IN (' . implode(',', array_fill(0, count(self::OPEN), '?')) . ')'; array_push($p, ...self::OPEN); }
         elseif ($status !== '' && $status !== 'todas') {
             if (!isset(self::STATUSES[$status])) throw new AppError('Status inválido');

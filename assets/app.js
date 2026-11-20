@@ -2447,7 +2447,7 @@ async function viewServices(v) {
 }
 
 // ============ Ordens de serviço ============
-const SO_TABS = [['abertas', 'Em aberto'], ['aberta', 'Abertas'], ['agendada', 'Agendadas'], ['a_caminho', 'A caminho'], ['em_execucao', 'Em execução'], ['pausada', 'Pausadas'], ['concluida', 'Concluídas'], ['todas', 'Todas']];
+const SO_TABS = [['todas', 'Todas'], ['abertas', 'Em aberto'], ['aberta', 'Abertas'], ['agendada', 'Agendadas'], ['a_caminho', 'A caminho'], ['em_execucao', 'Em execução'], ['pausada', 'Pausadas'], ['concluida', 'Concluídas']];
 const soStatusHtml = (code, labels) => {
   const cls = { concluida: 'ok', pausada: 'warn', em_execucao: 'accent', a_caminho: 'accent', agendada: 'accent' }[code] || '';
   return `<span class="badge ${cls}">${esc(labels[code] || code)}</span>`;
@@ -2456,7 +2456,7 @@ const soCustomer = (r) => esc(r.customer_trade_name || r.customer_name || '');
 const dtLocal = (s) => (s ? String(s).replace(' ', 'T').slice(0, 16) : '');
 
 async function viewServiceOrders(v) {
-  const f = { status: prefGet('soStatus', 'abertas'), q: '' };
+  const f = { status: 'todas', q: '' }; // a lista sempre abre em "Todas"
   v.innerHTML = `<div class="page-head"><div><h1>Ordens de serviço</h1><p class="muted">Atendimentos aos clientes, de chamados avulsos ou de orçamentos.</p></div>
       <div class="actions"><a class="btn primary" href="#/ordem/nova">${icon('plus')}Nova ordem</a></div></div>
     <div class="card"><div class="filters" style="align-items:center">
@@ -2474,7 +2474,7 @@ async function viewServiceOrders(v) {
         <td>${soStatusHtml(r.status, labels)}</td></tr>`).join('')}</tbody></table></div>`
       : '<div class="empty">Nenhuma ordem de serviço aqui. Clique em <strong>Nova ordem</strong>.</div>';
   };
-  $$('#tabs [data-s]', v).forEach((b) => (b.onclick = () => { f.status = b.dataset.s; prefSet('soStatus', f.status); load().catch(fail); }));
+  $$('#tabs [data-s]', v).forEach((b) => (b.onclick = () => { f.status = b.dataset.s; load().catch(fail); }));
   $('#q', v).oninput = debounce((e) => { f.q = e.target.value; load().catch(fail); });
   $('#list', v).onclick = (e) => { const r = e.target.closest('[data-id]'); if (r) go('ordem/' + r.dataset.id); };
   await load();
