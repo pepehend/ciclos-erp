@@ -2284,6 +2284,43 @@ function bindPortalCard(v, c) {
   });
 }
 
+/** Status em que a ordem ainda não foi concluída (mesma regra de ServiceOrders::OPEN). */
+const SO_OPEN_CODES = ['aberta', 'agendada', 'em_execucao', 'pausada'];
+const soDate = (s) => (s ? String(s).split('-').reverse().join('/') : '—');
+
+/** Tabela de ordens (ficha do cliente e histórico do equipamento). */
+function soTableHtml(rows, statuses, types, { withEquipment = true } = {}) {
+  return `<div class="table-wrap"><table><thead><tr><th>Ordem</th><th>Status</th><th>Tipo</th>${withEquipment ? '<th>Equipamento</th>' : ''}<th>Agenda</th><th>Técnico</th></tr></thead><tbody>
+    ${rows.map((o) => `<tr class="click" data-so="${o.id}"><td><strong>#${o.id}</strong><div class="small muted">${esc(o.description || '')}</div></td>
+      <td>${soStatusHtml(o.status, statuses)}</td><td>${esc(types[o.service_type] || 'Qualquer')}</td>
+      ${withEquipment ? `<td>${esc(o.equipment_name || '—')}</td>` : ''}
+      <td class="nowrap">${o.scheduled_at ? dt(o.scheduled_at) : '—'}</td><td>${esc(o.technician_name || '—')}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+/** Cards de equipamentos e ordens na ficha do cliente. */
+async function loadCustomerHistory(v, c) {
+  const box = $('#custhist', v);
+  if (!box) return;
+  const [eqs, os] = await Promise.all([
+    api('equipments', { params: { customer_id: c.id, all: 1 } }),
+    api('service_orders', { params: { customer_id: c.id, status: 'todas' } }),
+  ]);
+  const abertas = os.rows.filter((o) => SO_OPEN_CODES.includes(o.status)).length;
+  box.innerHTML = `<div class="card"><h2>Equipamentos <span class="muted small">(${eqs.length})</span></h2>${eqs.length
+    ? `<div class="table-wrap"><table><thead><tr><th>Equipamento</th><th>Identificador</th><th>Garantia até</th><th>Situação</th></tr></thead><tbody>
+      ${eqs.map((e) => `<tr class="click" data-eq="${e.id}"><td><strong>${esc(e.name)}</strong><div class="small muted">${esc([e.brand, e.model, e.category].filter(Boolean).join(' · '))}</div></td>
+        <td>${esc(e.serial || '—')}</td><td>${soDate(e.warranty_until)}</td><td>${+e.active ? '' : '<span class="badge">inativo</span>'}</td></tr>`).join('')}</tbody></table></div>`
+    : '<p class="muted">Nenhum equipamento cadastrado para este cliente.</p>'}</div>
+    <div class="card"><h2>Ordens de serviço <span class="muted small">(${os.rows.length} no total · ${abertas} em aberto)</span></h2>${os.rows.length
+    ? soTableHtml(os.rows, os.statuses, os.types) : '<p class="muted">Nenhuma ordem de serviço para este cliente.</p>'}</div>`;
+  box.onclick = (e) => {
+    const eqRow = e.target.closest('[data-eq]');
+    if (eqRow) { equipmentForm(eqs.find((x) => x.id == eqRow.dataset.eq), () => route()).catch(fail); return; }
+    const soRow = e.target.closest('[data-so]');
+    if (soRow) go('ordem/' + soRow.dataset.so);
+  };
+}
+
 async function viewCustomer(v, id) {
   const c = await api('customer', { params: { id } });
   const st = c.stats || {};
@@ -2311,10 +2348,12 @@ async function viewCustomer(v, id) {
     </div>
     ${c.portal ? portalCardHtml(c) : ''}
     <div class="card"><h2>Compras</h2>${c.sales.length ? `<div class="table-wrap"><table><thead><tr><th>#</th><th>Data</th><th>Pagamento</th><th class="num">Itens</th><th class="num">Total</th><th>Vendedor</th></tr></thead><tbody>
-      ${c.sales.map((s) => `<tr class="click" data-go="venda/${s.id}"><td>${s.id}</td><td class="nowrap">${dt(s.created_at)}</td><td>${esc(payLabel(s.payment_method))}</td><td class="num">${s.items}</td><td class="num">${s.status === 'cancelada' ? `<s class="muted">${money(s.total)}</s> <span class="badge err">cancelada</span>` : money(s.total)}</td><td class="small muted">${esc(s.user_name || '')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nenhuma compra ainda.</p>'}</div>`;
+      ${c.sales.map((s) => `<tr class="click" data-go="venda/${s.id}"><td>${s.id}</td><td class="nowrap">${dt(s.created_at)}</td><td>${esc(payLabel(s.payment_method))}</td><td class="num">${s.items}</td><td class="num">${s.status === 'cancelada' ? `<s class="muted">${money(s.total)}</s> <span class="badge err">cancelada</span>` : money(s.total)}</td><td class="small muted">${esc(s.user_name || '')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nenhuma compra ainda.</p>'}</div>
+    <div id="custhist"></div>`;
   v.addEventListener('click', (e) => { const r = e.target.closest('[data-go]'); if (r) go(r.dataset.go); });
   $('#edit', v).onclick = () => customerForm(c, () => route());
   if (c.portal) bindPortalCard(v, c);
+  if (can('ordens')) loadCustomerHistory(v, c).catch(fail);
   if ($('#sell', v)) $('#sell', v).onclick = () => { sessionStorage.setItem('saleCustomer', JSON.stringify(c)); go('vendas/nova'); };
   if ($('#toggle', v)) $('#toggle', v).onclick = async (e) => {
     if (+c.active && !(await confirmBox(`Desativar "${custName(c)}"? Ele some da seleção de clientes, mas o histórico de compras é mantido.`, { ok: 'Desativar', danger: true }))) return;
@@ -2503,7 +2542,7 @@ async function equipmentForm(eq, onSaved) {
   const specs = (eq?.specs || []);
   const m = modal({
     title: isNew ? 'Novo equipamento' : 'Editar equipamento',
-    body: `<div class="seg" id="eqtabs"><button type="button" data-et="geral" class="on">Geral</button><button type="button" data-et="specs">Especificações</button></div>
+    body: `<div class="seg" id="eqtabs"><button type="button" data-et="geral" class="on">Geral</button><button type="button" data-et="specs">Especificações</button>${isNew ? '' : '<button type="button" data-et="ordens">Ordens</button>'}</div>
     <form class="form" id="eqf">
       <div data-pane="geral">
         <label>Cliente * <select name="customer_id" required><option value="">Selecione…</option>${customers.rows.map((c) => `<option value="${c.id}" ${eq && +eq.customer_id === +c.id ? 'selected' : ''}>${esc(custName(c))}</option>`).join('')}</select></label>
@@ -2518,6 +2557,7 @@ async function equipmentForm(eq, onSaved) {
         <div id="splist"></div>
         <button type="button" class="btn ghost" id="spadd">${icon('plus')}Adicionar especificação</button>
       </div>
+      ${isNew ? '' : '<div data-pane="ordens" hidden><div id="eqhist"><p class="muted">Carregando…</p></div></div>'}
     </form>`,
     foot: `${!isNew ? `<button class="btn ghost" id="eqact" style="margin-right:auto">${+eq.active ? 'Desativar' : 'Reativar'}</button>` : ''}<button class="btn" data-close>Cancelar</button><button class="btn primary" id="eqsave">Salvar equipamento</button>`,
   });
@@ -2533,10 +2573,24 @@ async function equipmentForm(eq, onSaved) {
   };
   specs.forEach((sp) => specRow(sp));
   $('#spadd', m.el).onclick = () => { specRow(); splist.lastElementChild.querySelector('.sp-l').focus(); };
+  // Histórico de ordens do equipamento: carrega só ao abrir a aba
+  let histLoaded = false;
+  const loadHist = async () => {
+    if (histLoaded || isNew) return;
+    histLoaded = true;
+    const box = $('#eqhist', m.el);
+    try {
+      const d = await api('service_orders', { params: { equipment_id: eq.id, status: 'todas' } });
+      const abertas = d.rows.filter((o) => SO_OPEN_CODES.includes(o.status)).length;
+      box.innerHTML = `<p class="small"><strong>${abertas}</strong> em aberto · ${d.rows.length} no total</p>`
+        + (d.rows.length ? soTableHtml(d.rows, d.statuses, d.types, { withEquipment: false }) : '<p class="muted">Este equipamento ainda não tem ordens de serviço.</p>');
+      box.onclick = (e) => { const r = e.target.closest('[data-so]'); if (r) { m.close(); go('ordem/' + r.dataset.so); } };
+    } catch (err) { histLoaded = false; fail(err); }
+  };
   $$('#eqtabs button', m.el).forEach((b) => (b.onclick = () => {
     $$('#eqtabs button', m.el).forEach((x) => x.classList.toggle('on', x === b));
-    $('[data-pane="geral"]', m.el).hidden = b.dataset.et !== 'geral';
-    $('[data-pane="specs"]', m.el).hidden = b.dataset.et !== 'specs';
+    $$('[data-pane]', m.el).forEach((p) => (p.hidden = p.dataset.pane !== b.dataset.et));
+    if (b.dataset.et === 'ordens') loadHist();
   }));
   const save = (btn) => busy(btn, async () => {
     const d = formData(f);

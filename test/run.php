@@ -1291,6 +1291,13 @@ throws(fn() => ServiceOrders::setStatus($osAvulsa, 'aberta'), 'Não é possível
 $abertas = array_column(ServiceOrders::list(['status' => 'abertas']), 'id');
 ok(in_array($osAg, $abertas) && !in_array($osAvulsa, $abertas), 'aba "abertas" não mostra faturadas');
 ok(count(ServiceOrders::list(['status' => 'faturada'])) >= 1, 'filtro por status funciona');
+$todasCli = ServiceOrders::list(['customer_id' => $osCli, 'status' => 'todas']);
+ok(count($todasCli) >= 2 && count(array_filter($todasCli, fn($r) => (int)$r['customer_id'] !== (int)$osCli)) === 0, 'histórico do cliente traz todas as ordens dele, inclusive faturadas');
+ok(count(ServiceOrders::list(['customer_id' => $osOutro, 'status' => 'todas'])) === 0, 'cliente sem ordens não traz nada');
+$histEq = ServiceOrders::list(['equipment_id' => $eqA, 'status' => 'todas']);
+ok(in_array($osAvulsa, array_column($histEq, 'id')), 'histórico do equipamento traz as ordens dele');
+ok(count(array_filter($histEq, fn($r) => (int)$r['equipment_id'] !== (int)$eqA)) === 0, 'histórico do equipamento não traz ordens de outro equipamento');
+ok(array_key_exists('description', $todasCli[0]), 'lista de ordens traz a descrição');
 ok(str_contains(Backup::sql(), 'INSERT INTO `service_orders`'), 'backup inclui ordens de serviço');
 $tecProfile = DB::one("SELECT permissions FROM permission_profiles WHERE name = 'Técnico'");
 ok($tecProfile && $tecProfile['permissions'] === 'ordens', 'perfil Técnico só tem ordens de serviço');
