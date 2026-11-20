@@ -48,7 +48,7 @@ class OrderExec
 
     private static function editable(array $o): void
     {
-        if ($o['status'] === 'faturada') throw new AppError('Ordem faturada não pode ser alterada');
+        ServiceOrders::assertChangeable($o);
     }
 
     /** Valida uma imagem em data URL (PNG, JPEG ou WebP). */
@@ -323,7 +323,7 @@ class OrderExec
     /** Área de cadastro que revisa o item novo: peça → produtos, serviço → serviços. */
     public static function reviewPerm(array $item): string
     {
-        return $item['kind'] === 'servico' ? 'servicos' : 'produtos';
+        return $item['kind'] === 'servico' ? 'servicos.review' : 'produtos.review';
     }
 
     /**

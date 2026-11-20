@@ -6,7 +6,33 @@
 #   /bin/bash $HOME/repositories/<pasta do repositório>/deploy/auto-deploy.sh >/dev/null 2>&1
 # (na instalação atual a pasta é sistema-gestao)
 #
-# O registro fica em ~/logs/estoque-deploy.log (só quando algo é publicado ou dá erro).
+# Na VM Debian (deploy/debian/install.sh), o cron do root chama este mesmo script; o arquivo
+# deploy/servidor.conf (criado pelo instalador, fora do Git) diz a pasta do site e o dono dos arquivos.
+#
+# O registro fica em ~/logs/ciclos-erp-deploy.log (só quando algo é publicado ou dá erro).
+
+# Lê deploy/servidor.conf (VM): MODE=vm, DEPLOYPATH=/var/www/..., OWNER=www-data
+servidor_conf() {
+    local REPO="$1"
+    MODE="cpanel"; OWNER=""; CONF_DEPLOYPATH=""
+    if [ -f "$REPO/deploy/servidor.conf" ]; then
+        # shellcheck disable=SC1091
+        . "$REPO/deploy/servidor.conf"
+        CONF_DEPLOYPATH="${DEPLOYPATH:-}"
+    fi
+}
+
+# Copia os arquivos para o site, com as mesmas tarefas do .cpanel.yml.
+# Na VM troca a pasta do site pela do servidor.conf e acerta o dono dos arquivos.
+copiar() {
+    local TASKS
+    TASKS=$(sed -n 's/^[[:space:]]*- \(.*\)$/\1/p' .cpanel.yml)
+    if [ -n "$CONF_DEPLOYPATH" ]; then
+        TASKS=$(printf '%s\n' "$TASKS" | sed "s#^export DEPLOYPATH=.*#export DEPLOYPATH=${CONF_DEPLOYPATH%/}/#")
+    fi
+    (set -e; eval "$TASKS") || return 1
+    if [ -n "$OWNER" ] && [ -n "$CONF_DEPLOYPATH" ]; then chown -R "$OWNER:$OWNER" "$CONF_DEPLOYPATH"; fi
+}
 
 # Tudo dentro de uma função: o bash lê o script inteiro antes de rodar,
 # então ele pode ser atualizado pelo próprio git sem quebrar a execução.
@@ -29,6 +55,7 @@ main() {
     fi
 
     cd "$REPO" || { log "ERRO: pasta $REPO não encontrada"; return 1; }
+    servidor_conf "$REPO"
 
     if ! git fetch -q origin "$BRANCH" 2>>"$LOG"; then
         log "ERRO: não consegui consultar o GitHub (veja a mensagem acima)"
@@ -47,19 +74,17 @@ main() {
         return 1
     fi
 
-    # 1ª opção: a própria implantação do cPanel (aparece no histórico do Git Version Control)
+    # 1ª opção (só no cPanel): a própria implantação do cPanel (aparece no histórico do Git Version Control)
     local UAPI
     UAPI=$(command -v uapi || echo /usr/local/cpanel/bin/uapi)
-    if [ -x "$UAPI" ] && "$UAPI" VersionControlDeployment create repository_root="$REPO" 2>>"$LOG" | grep -q "status: 1"; then
+    if [ "$MODE" != "vm" ] && [ -x "$UAPI" ] && "$UAPI" VersionControlDeployment create repository_root="$REPO" 2>>"$LOG" | grep -q "status: 1"; then
         log "Publicado pelo cPanel (Deploy HEAD Commit)."
         return 0
     fi
 
-    # 2ª opção: executa as mesmas tarefas do .cpanel.yml diretamente
-    log "Implantação do cPanel indisponível; executando as tarefas do .cpanel.yml."
-    local TASKS
-    TASKS=$(sed -n 's/^[[:space:]]*- \(.*\)$/\1/p' .cpanel.yml)
-    if (set -e; eval "$TASKS") >>"$LOG" 2>&1; then
+    # 2ª opção (e a única na VM): executa as mesmas tarefas do .cpanel.yml diretamente
+    [ "$MODE" = "vm" ] || log "Implantação do cPanel indisponível; executando as tarefas do .cpanel.yml."
+    if copiar >>"$LOG" 2>&1; then
         log "Publicado com sucesso."
     else
         log "ERRO: falha ao copiar os arquivos para o site"
@@ -72,12 +97,22 @@ main() {
 tarefas() {
     local REPO LOG="$HOME/logs/ciclos-erp-deploy.log" SITE PHP
     REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-    SITE=$(sed -n 's/^[[:space:]]*- export DEPLOYPATH=//p' "$REPO/.cpanel.yml" 2>/dev/null | head -1)
-    SITE=$(eval echo "$SITE")
+    servidor_conf "$REPO"
+    if [ -n "$CONF_DEPLOYPATH" ]; then
+        SITE="$CONF_DEPLOYPATH"
+    else
+        SITE=$(sed -n 's/^[[:space:]]*- export DEPLOYPATH=//p' "$REPO/.cpanel.yml" 2>/dev/null | head -1)
+        SITE=$(eval echo "$SITE")
+    fi
     [ -n "$SITE" ] && [ -f "${SITE%/}/app/cron.php" ] && [ -f "${SITE%/}/app/config.php" ] || return 0
     PHP=$(command -v php || echo /usr/local/bin/php)
     [ -x "$PHP" ] || return 0
-    "$PHP" "${SITE%/}/app/cron.php" >> "$LOG" 2>&1
+    # Na VM o cron roda como root: as tarefas do sistema rodam como o dono do site (www-data)
+    if [ -n "$OWNER" ] && [ "$(id -u)" = "0" ] && command -v runuser >/dev/null 2>&1; then
+        runuser -u "$OWNER" -- "$PHP" "${SITE%/}/app/cron.php" >> "$LOG" 2>&1
+    else
+        "$PHP" "${SITE%/}/app/cron.php" >> "$LOG" 2>&1
+    fi
 }
 
 main "$@"

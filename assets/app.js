@@ -873,10 +873,10 @@ window.addEventListener('hashchange', comboClose);
 // ============ Layout e rotas ============
 // Opções do botão "Novo" (menu lateral e painel)
 const NEW_ITEMS = [
-  ['ordem/nova', 'Nova ordem de serviço', 'tool', 'ordens'],
-  ['orcamento/novo', 'Novo orçamento', 'quote', 'orcamentos'],
-  ['vendas/nova', 'Nova venda', 'cart', 'vendas'],
-  ['compra/nova', 'Nova ordem de compra', 'order', 'compras'],
+  ['ordem/nova', 'Nova ordem de serviço', 'tool', 'ordens.add'],
+  ['orcamento/novo', 'Novo orçamento', 'quote', 'orcamentos.add'],
+  ['vendas/nova', 'Nova venda', 'cart', 'vendas.add'],
+  ['compra/nova', 'Nova ordem de compra', 'order', 'compras.add'],
 ];
 /** Botão "Novo" com menu suspenso (ordem de serviço, orçamento, venda, ordem de compra). */
 function newButton() {
@@ -895,7 +895,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $$('.dd-me
 const NAV = [
   ['painel', 'Painel', 'home'],
   { g: 'novo', label: 'Novo', icon: 'plus', cls: 'nav-new', items: NEW_ITEMS },
-  ['notas/importar', 'Importar nota', 'upload', 'notas'],
+  ['notas/importar', 'Importar nota', 'upload', 'notas.import'],
   { g: 'operacao', label: 'Operação', icon: 'swap', items: [
     ['agenda', 'Agenda', 'calendar', 'ordens'], ['ordens', 'Ordens de serviço', 'tool', 'ordens'],
     ['orcamentos', 'Orçamentos', 'quote', 'orcamentos'], ['vendas', 'Vendas', 'receipt', 'vendas'],
@@ -904,7 +904,7 @@ const NAV = [
     ['produtos', 'Produtos', 'box', 'produtos'], ['servicos', 'Serviços', 'tool', 'servicos'],
     ['clientes', 'Clientes', 'id', 'clientes'], ['fornecedores', 'Fornecedores', 'truck', 'fornecedores'],
     ['pagamento', 'Pagamento', 'wallet', 'pagamento'],
-    ['equipamentos', 'Equipamentos', 'box', 'ordens'], ['tipos-tarefa', 'Tipos de tarefa', 'tool', 'ordens'], ['questionarios', 'Questionários', 'check', 'ordens'],
+    ['equipamentos', 'Equipamentos', 'box', 'equipamentos'], ['tipos-tarefa', 'Tipos de tarefa', 'tool', 'tipos_tarefa'], ['questionarios', 'Questionários', 'check', 'questionarios'],
     ['revisao-itens', 'Itens para revisar', 'check', 'revisao']] },
   { g: 'financeiro', label: 'Financeiro', icon: 'wallet', items: [
     ['financeiro', 'Pagamentos e recebimentos', 'wallet', 'financeiro'], ['fluxo-caixa', 'Fluxo de caixa', 'flow', 'financeiro']] },
@@ -918,7 +918,7 @@ const NAV = [
     { sub: 'Sistema', key: 'sistema', icon: 'monitor', items: [['usuarios', 'Usuários', 'users', 'admin'], ['permissoes', 'Permissões', 'lock', 'admin'], ['backup', 'Backup', 'database', 'admin']] }] },
 ];
 const can = (perm) => !perm || (perm === 'pagamento' ? can('formas_pagamento') || isAdmin()
-  : perm === 'revisao' ? can('produtos') || can('servicos')
+  : perm === 'revisao' ? can('produtos.review') || can('servicos.review')
   : perm === 'admin' ? isAdmin() : isAdmin() || (state.me?.permissions || []).includes(perm));
 
 /** Qual item do menu fica destacado para cada endereço. */
@@ -985,7 +985,7 @@ function renderShell() {
       <nav class="nav">${html}</nav>
       <div class="foot"><div class="foot-row"><a href="#/conta" class="foot-user" title="Minha conta">${avatarHtml(state.me, 'sm')}<strong>${esc(state.me.name)}</strong></a><button type="button" class="theme-btn" id="themebtn" aria-label="Alternar tema: claro, escuro ou automático"></button></div>
         <div class="actions" style="margin-top:6px"><a href="#/conta">Minha conta</a> · <a href="#" id="logout">Sair</a></div>
-        ${can('ordens') ? `<a href="#/m" class="tk-applink">${icon('phone')}App do técnico</a>` : ''}
+        ${TK_MOBILE() && can('ordens') && can('app.switch') ? `<a href="#/m" class="tk-applink">${icon('phone')}App do técnico</a>` : ''}
         ${state.version ? `<div class="ver" title="Versão do sistema">Versão ${esc(state.version)}</div>` : ''}</div>
     </aside>
     <div>
@@ -1014,13 +1014,13 @@ const ROUTES = [
   [/^produto\/(\d+)$/, viewProduct],
   [/^estoque$/, viewMovements, 'movimentacoes'],
   [/^notas$/, viewInvoices, 'notas'],
-  [/^notas\/importar$/, viewImport, 'notas'],
+  [/^notas\/importar$/, viewImport, 'notas.import'],
   [/^nota\/(\d+)$/, viewInvoice, 'notas'],
   [/^vendas$/, viewSales, 'vendas'],
-  [/^vendas\/nova$/, viewNewSale, 'vendas'],
+  [/^vendas\/nova$/, viewNewSale, 'vendas.add'],
   [/^venda\/(\d+)$/, viewSale],
   [/^orcamentos$/, viewQuotes, 'orcamentos'],
-  [/^orcamento\/novo$/, (v) => viewQuoteForm(v, null), 'orcamentos'],
+  [/^orcamento\/novo$/, (v) => viewQuoteForm(v, null), 'orcamentos.add'],
   [/^orcamento\/(\d+)$/, viewQuoteForm, 'orcamentos'],
   [/^empresa$/, viewSettings, 'admin'],
   [/^servicos$/, viewServices, 'servicos'],
@@ -1040,17 +1040,17 @@ const ROUTES = [
   [/^compras-comportamento$/, viewPoBehavior, 'admin'],
   [/^compras$/, viewPurchases, 'compras'],
   [/^formas-pagamento$/, (v) => viewPayments(v, 'formas'), 'formas_pagamento'],
-  [/^compra\/nova$/, (v) => viewPurchaseForm(v, null), 'compras'],
+  [/^compra\/nova$/, (v) => viewPurchaseForm(v, null), 'compras.add'],
   [/^compra\/(\d+)$/, viewPurchaseForm, 'compras'],
   [/^agenda$/, viewAgenda, 'ordens'],
   [/^ordens$/, viewServiceOrders, 'ordens'],
-  [/^ordem\/nova$/, (v) => viewServiceOrderForm(v, null), 'ordens'],
+  [/^ordem\/nova$/, (v) => viewServiceOrderForm(v, null), 'ordens.add'],
   [/^ordem\/(\d+)$/, viewServiceOrderForm, 'ordens'],
-  [/^equipamentos$/, viewEquipments, 'ordens'],
-  [/^tipos-tarefa$/, viewTaskTypes, 'ordens'],
-  [/^questionarios$/, viewQuestionnaires, 'ordens'],
-  [/^questionario\/nova$/, (v) => viewQuestionnaireForm(v, null), 'ordens'],
-  [/^questionario\/(\d+)$/, viewQuestionnaireForm, 'ordens'],
+  [/^equipamentos$/, viewEquipments, 'equipamentos'],
+  [/^tipos-tarefa$/, viewTaskTypes, 'tipos_tarefa'],
+  [/^questionarios$/, viewQuestionnaires, 'questionarios'],
+  [/^questionario\/nova$/, (v) => viewQuestionnaireForm(v, null), 'questionarios.add'],
+  [/^questionario\/(\d+)$/, viewQuestionnaireForm, 'questionarios'],
   [/^revisao-itens$/, viewItemsReview, 'revisao'],
   [/^financeiro$/, viewFinance, 'financeiro'],
   [/^fluxo-caixa$/, viewCashflow, 'financeiro'],
@@ -1064,6 +1064,7 @@ async function route() {
   if (!state.me) return renderLogin();
   const mpath = (location.hash.replace(/^#\/?/, '') || '').split('?')[0];
   if (/^m(\/|$)/.test(mpath)) return tkRoute(mpath);
+  if (tkOn()) return tkHost(mpath);
   if (!$('.shell')) renderShell();
   $('.shell').classList.remove('menu-open');
   const path = (location.hash.replace(/^#\/?/, '') || 'painel').split('?')[0];
@@ -1136,7 +1137,7 @@ function renderLogin() {
       try {
         const d = await api('login', { body: formData(f) });
         state.me = d.user; state.csrf = d.csrf; state.meta = null; invalidateProducts(); applyAccent(state.me?.accent_color);
-        if (TK_MOBILE() && tkMode() !== 'off' && can('ordens')) { $('#app').innerHTML = ''; if (location.hash === '#/m') route(); else location.hash = '#/m'; return; }
+        if (tkOn()) { $('#app').innerHTML = ''; if (location.hash === '#/m') route(); else location.hash = '#/m'; return; }
         renderShell(); route();
       } catch (err) { $('#login-err').innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
     });
@@ -1175,7 +1176,7 @@ function dashOrdersHtml(d) {
 async function viewDashboard(v) {
   const d = await api('dashboard');
   v.innerHTML = `<div class="page-head"><div><h1>Olá, ${esc(state.me.name.split(' ')[0])}</h1><p class="muted">${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</p></div>
-    <div class="actions">${can('notas') ? `<a class="btn" href="#/notas/importar">${icon('upload')}Importar nota</a>` : ''}${newButton()}</div></div>
+    <div class="actions">${can('notas.import') ? `<a class="btn" href="#/notas/importar">${icon('upload')}Importar nota</a>` : ''}${newButton()}</div></div>
     ${dashOrdersHtml(d)}
     ${d.today ? `<div class="kpis">
       <div class="kpi"><div class="label">Vendas hoje</div><div class="value">${money(d.today.revenue)}</div><div class="sub">${d.today.sales} venda(s)</div></div>
@@ -1193,7 +1194,7 @@ async function viewDashboard(v) {
     </div>` : ''}
     ${d.month_days ? `<div class="card"><div class="card-head"><h2>Este mês</h2></div>${barChart(d.month_days)}</div>` : ''}
     <div class="grid two">
-      <div class="card"><div class="card-head"><h2>Precisa repor</h2>${can('compras') && d.low_stock.length ? `<a href="#/compra/nova" class="small" data-lowpo>gerar ordem de compra</a>` : ''}</div>
+      <div class="card"><div class="card-head"><h2>Precisa repor</h2>${can('compras.add') && d.low_stock.length ? `<a href="#/compra/nova" class="small" data-lowpo>gerar ordem de compra</a>` : ''}</div>
         ${d.low_stock.length ? `<div class="table-wrap"><table><thead><tr><th>Produto</th><th class="num">Estoque</th><th class="num">Mínimo</th></tr></thead><tbody>
         ${d.low_stock.map((p) => `<tr class="click" data-go="produto/${p.id}"><td>${esc(p.name)}</td><td class="num stock-low">${qty(p.stock)} ${esc(p.unit)}</td><td class="num">${qty(p.min_stock)}</td></tr>`).join('')}</tbody></table></div>`
         : '<p class="muted">Tudo em ordem. Nenhum produto abaixo do estoque mínimo.</p>'}</div>
@@ -1212,7 +1213,7 @@ async function viewProducts(v) {
   const f = { q: '', low: sessionStorage.getItem('prodLow') === '1', active: '1' };
   sessionStorage.removeItem('prodLow');
   v.innerHTML = `<div class="page-head"><div><h1>Produtos</h1><p class="muted">Produtos que você vende e controla no estoque.</p></div>
-    <div class="actions">${can('produtos') ? `<button class="btn" id="imp">${icon('upload')}Importar planilha</button><button class="btn primary" id="new">${icon('plus')}Novo produto</button>` : ''}</div></div>
+    <div class="actions">${can('produtos.add') ? `<button class="btn" id="imp">${icon('upload')}Importar planilha</button><button class="btn primary" id="new">${icon('plus')}Novo produto</button>` : ''}</div></div>
     <div class="card">
       <div class="filters">
         <label class="grow">Buscar <input id="q" placeholder="Nome, marca, código (SKU, fabricante ou referência), código de barras ou localização"></label>
@@ -1239,7 +1240,7 @@ async function viewProducts(v) {
   $('#low', v).onchange = (e) => { f.low = e.target.checked; load(); };
   $('#inactive', v).onchange = (e) => { f.active = e.target.checked ? 'all' : '1'; load(); };
   $('#list', v).onclick = (e) => { const r = e.target.closest('[data-id]'); if (r) go('produto/' + r.dataset.id); };
-  if ($('#new', v)) $('#new', v).onclick = () => productForm(null, (id) => go('produto/' + id));
+  if ($('#new', v)) ($('#new', v) || {}).onclick = () => productForm(null, (id) => go('produto/' + id));
   if ($('#imp', v)) $('#imp', v).onclick = () => importProductsDialog(() => { invalidateProducts(); route(); });
   await load();
 }
@@ -1501,8 +1502,8 @@ async function viewProduct(v, id) {
       <p class="muted">${(svc ? 'Serviço' : 'Produto')}${p.brand ? ' · <strong>' + esc(p.brand) + '</strong>' + (p.mfr_code ? ' ' + esc(p.mfr_code) : '') : p.mfr_code ? ' · Cód. fabricante ' + esc(p.mfr_code) : ''}${p.category ? ' · ' + esc(p.category) : ''}${p.sku ? ' · SKU ' + esc(p.sku) : ''}${p.barcode ? ' · ' + esc(p.barcode) : ''}${p.location && !svc ? ' · Localização: <strong>' + esc(p.location) + '</strong>' : ''}</p></div>
     <div class="actions">
       ${del ? '' : `${!onDemand && can('movimentacoes') ? `<button class="btn" id="mov">${icon('swap')}Movimentar</button>` : ''}
-      ${can(svc ? 'servicos' : 'produtos') ? '<button class="btn primary" id="edit">Editar</button>' : ''}
-      ${isAdmin() ? `<button class="btn ${+p.active ? 'danger' : ''}" id="toggle">${+p.active ? 'Desativar' : 'Reativar'}</button><button class="btn danger" id="del">${icon('trash')}Excluir</button>` : ''}`}
+      ${can(svc ? 'servicos.edit' : 'produtos.edit') ? '<button class="btn primary" id="edit">Editar</button>' : ''}
+      ${isAdmin() ? `<button class="btn ${+p.active ? 'danger' : ''}" id="toggle">${+p.active ? 'Desativar' : 'Reativar'}</button>` : ''}${can(p.type === 'servico' ? 'servicos.delete' : 'produtos.delete') ? `<button class="btn danger" id="del">${icon('trash')}Excluir</button>` : ''}`}
     </div></div>
     ${del ? `<div class="alert err">Este item foi excluído em ${dt(p.deleted_at)}. Ele fica guardado só para o histórico de vendas, orçamentos e notas.</div>` : ''}
     <div class="kpis">
@@ -1588,7 +1589,7 @@ async function viewMovements(v) {
   const pre = JSON.parse(sessionStorage.getItem('movProduct') || 'null'); sessionStorage.removeItem('movProduct');
   const f = { product_id: pre?.id || '', type: '', from: '', to: '', page: 1 };
   v.innerHTML = `<div class="page-head"><div><h1>Movimentações</h1><p class="muted">Tudo o que entrou e saiu do estoque.</p></div>
-    <div class="actions"><button class="btn primary" id="new">${icon('plus')}Nova movimentação</button></div></div>
+    <div class="actions">${can('movimentacoes.add') ? `<button class="btn primary" id="new">${icon('plus')}Nova movimentação</button>` : ''}</div></div>
     <div class="card"><div class="filters">
       <label class="grow">Produto <input id="fp" placeholder="Todos" value="${esc(pre?.name || '')}"></label>
       <label>Tipo <select id="ft"><option value="">Todos</option>${Object.entries(state.meta.movement_labels).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></label>
@@ -1607,7 +1608,7 @@ async function viewMovements(v) {
   $('#ft', v).onchange = (e) => { f.type = e.target.value; f.page = 1; load(); };
   $('#ff', v).onchange = (e) => { f.from = e.target.value; f.page = 1; load(); };
   $('#fto', v).onchange = (e) => { f.to = e.target.value; f.page = 1; load(); };
-  $('#new', v).onclick = () => movementForm(null, load);
+  ($('#new', v) || {}).onclick = () => movementForm(null, load);
   await load();
 }
 
@@ -1632,7 +1633,7 @@ async function viewNewSale(v) {
       <div>
       <div class="card"><div class="card-head"><h2>Cliente</h2><span class="actions">${can('clientes') ? `<button type="button" class="btn" id="newcust">${icon('plus')}Cadastrar cliente</button>` : ''}<button type="button" class="btn primary" id="pickcust">${icon('search')}Selecionar cliente</button></span></div>
         <div id="custbox"></div></div>
-      <div class="card"><div class="card-head"><h2>Produtos</h2><span class="actions">${can('produtos') ? `<button type="button" class="btn" id="newprod">${icon('plus')}Cadastrar produto</button>` : ''}<button type="button" class="btn primary" id="add">${icon('plus')}Incluir produto</button></span></div>
+      <div class="card"><div class="card-head"><h2>Produtos</h2><span class="actions">${can('produtos.add') ? `<button type="button" class="btn" id="newprod">${icon('plus')}Cadastrar produto</button>` : ''}<button type="button" class="btn primary" id="add">${icon('plus')}Incluir produto</button></span></div>
         <div id="cart" data-kind="produto"></div></div>
       <div class="card"><div class="card-head"><h2>Serviços</h2><span class="actions">${can('servicos') ? `<button type="button" class="btn" id="newserv">${icon('plus')}Cadastrar serviço</button>` : ''}<button type="button" class="btn primary" id="addserv">${icon('plus')}Incluir serviço</button></span></div>
         <div id="cartserv" data-kind="servico"></div></div>
@@ -1817,7 +1818,7 @@ async function viewSales(v) {
   const def = { from: shiftDate(today(), -29), to: today() };
   const f = { ...def, customer: '', status: '', min: '', max: '', user_id: '', page: 1 };
   const team = await api('team');
-  v.innerHTML = `<div class="page-head"><div><h1>Vendas</h1></div><div class="actions"><a class="btn primary" href="#/vendas/nova">${icon('plus')}Nova venda</a></div></div>
+  v.innerHTML = `<div class="page-head"><div><h1>Vendas</h1></div><div class="actions">${can('vendas.add') ? `<a class="btn primary" href="#/vendas/nova">${icon('plus')}Nova venda</a>` : ''}</div></div>
     <div class="card">${filterPanelHtml({ statuses: [['ok', 'Concluídas'], ['cancelada', 'Canceladas']], team, f, userLabel: 'Vendedor', customerHint: 'Nome, fantasia ou CNPJ/CPF' })}
       <div class="inline" style="justify-content:space-between;margin:4px 0 10px"><strong id="totals"></strong></div><div id="list"></div></div>`;
   const load = async () => {
@@ -1840,7 +1841,7 @@ async function viewSale(v, id) {
   const profit = s.total - s.cost_total;
   v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/vendas">← Vendas</a></p><h1>Venda #${s.id} ${s.status === 'cancelada' ? '<span class="badge err">cancelada</span>' : ''}</h1>${s.quote_id ? `<p class="small" style="margin:0">Gerada a partir do <a href="#/orcamento/${s.quote_id}">orçamento #${s.quote_id}</a></p>` : ''}
     <p class="muted">${dt(s.created_at)} · ${esc(payLabel(s.payment_method))}${+s.installments > 1 || +s.installment_entry ? ' · ' + esc(instText(s.installments, s.installment_days, s.installment_entry)) : ''}${s.payment_terms ? ' · ' + esc(s.payment_terms) : ''} · por ${esc(s.user_name || '—')}</p></div>
-    <div class="actions"><a class="btn" href="#/vendas/nova">Nova venda</a>${canCancelSale(s) ? '<button class="btn danger" id="cancel">Cancelar venda</button>' : ''}</div></div>
+    <div class="actions">${can('vendas.add') ? '<a class="btn" href="#/vendas/nova">Nova venda</a>' : ''}${canCancelSale(s) ? '<button class="btn danger" id="cancel">Cancelar venda</button>' : ''}</div></div>
     ${s.status === 'cancelada' ? `<div class="alert err">Cancelada em ${dt(s.canceled_at)} por ${esc(s.canceled_by_name || '—')}. Os itens voltaram para o estoque.</div>` : ''}
     <div class="kpis"><div class="kpi"><div class="label">Total</div><div class="value">${money(s.total)}</div>${+s.discount ? `<div class="sub">desconto ${money(s.discount)}</div>` : ''}</div>
       <div class="kpi"><div class="label">Custo</div><div class="value">${money(s.cost_total)}</div></div>
@@ -1861,7 +1862,7 @@ const KIND_LABEL = { nfe: 'NF-e (XML)', nfce: 'NFC-e', danfe: 'DANFE (PDF)', man
 async function viewInvoices(v) {
   let page = 1;
   v.innerHTML = `<div class="page-head"><div><h1>Notas fiscais</h1><p class="muted">Notas de compra que deram entrada no estoque.</p></div>
-    <div class="actions"><a class="btn primary" href="#/notas/importar">${icon('upload')}Importar nota</a></div></div><div class="card" id="list"></div>`;
+    <div class="actions">${can('notas.import') ? `<a class="btn primary" href="#/notas/importar">${icon('upload')}Importar nota</a>` : ''}</div></div><div class="card" id="list"></div>`;
   const load = async () => {
     const d = await api('invoices', { params: { page, limit: 50 } });
     const list = $('#list', v);
@@ -1878,7 +1879,7 @@ async function viewInvoice(v, id) {
   const i = await api('invoice', { params: { id } });
   v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/notas">← Notas fiscais</a></p><h1>Nota ${esc(i.number || 's/n')} · ${esc(i.supplier_name || 'Fornecedor')}</h1>
     <p class="muted">${KIND_LABEL[i.kind] || ''} · importada em ${dt(i.created_at)} por ${esc(i.user_name || '—')}</p></div>
-    <div class="actions">${isAdmin() ? '<button class="btn danger" id="rev">Desfazer entrada</button>' : ''}</div></div>
+    <div class="actions">${can('notas.revert') ? '<button class="btn danger" id="rev">Desfazer entrada</button>' : ''}</div></div>
     <div class="card"><dl class="dl">
       <dt>Fornecedor</dt><dd>${i.supplier_id && can('fornecedores') ? `<a href="#/fornecedor/${i.supplier_id}">${esc(i.supplier_name || 'ver fornecedor')}</a>` : esc(i.supplier_name || '—')}</dd><dt>CNPJ</dt><dd>${cnpjFmt(i.supplier_cnpj) || '—'}</dd>
       <dt>Número / série</dt><dd>${esc(i.number || '—')} / ${esc(i.series || '—')}</dd><dt>Emissão</dt><dd>${dt(i.issued_at) || '—'}</dd>
@@ -2323,7 +2324,7 @@ function customerBrowser({ selected, onSelect, entity = 'customer' }) {
 async function viewCustomers(v) {
   const f = { q: '', active: '1', page: 1 };
   v.innerHTML = `<div class="page-head"><div><h1>Clientes</h1><p class="muted">Cadastre pelo CNPJ e os dados vêm da Receita Federal.</p></div>
-    <div class="actions"><button class="btn primary" id="new">${icon('plus')}Novo cliente</button></div></div>
+    <div class="actions">${can('clientes.add') ? `<button class="btn primary" id="new">${icon('plus')}Novo cliente</button>` : ''}</div></div>
     <div class="card"><div class="filters"><label class="grow">Buscar <input id="q" placeholder="Nome, CNPJ/CPF, cidade, telefone ou e-mail"></label>
       <label class="check"><input type="checkbox" id="inactive"> Mostrar inativos</label></div><div id="list"></div></div>`;
   const load = async () => {
@@ -2339,7 +2340,7 @@ async function viewCustomers(v) {
   $('#q', v).oninput = debounce((e) => { f.q = e.target.value; f.page = 1; load(); });
   $('#inactive', v).onchange = (e) => { f.active = e.target.checked ? 'all' : '1'; f.page = 1; load(); };
   $('#list', v).onclick = (e) => { const r = e.target.closest('[data-id]'); if (r) go('cliente/' + r.dataset.id); };
-  $('#new', v).onclick = () => customerForm(null, (id) => go('cliente/' + id));
+  ($('#new', v) || {}).onclick = () => customerForm(null, (id) => go('cliente/' + id));
   await load();
 }
 
@@ -2459,8 +2460,8 @@ async function viewCustomer(v, id) {
   const del = !!c.deleted_at;
   v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/clientes">← Clientes</a></p><h1>${esc(custName(c))} ${del ? '<span class="badge err">excluído</span>' : +c.active ? '' : '<span class="badge">inativo</span>'}</h1>
       <p class="muted">${c.trade_name ? esc(c.name) + ' · ' : ''}${c.type === 'pj' ? 'Empresa' : 'Pessoa física'}${c.document ? ' · ' + docFmt(c.document) : ''}</p></div>
-    <div class="actions">${del ? '' : `${+c.active ? `<button class="btn primary" id="sell">${icon('cart')}Nova venda</button>` : ''}<button class="btn" id="edit">Editar</button>
-      ${isAdmin() ? `<button class="btn ${+c.active ? 'danger' : ''}" id="toggle">${+c.active ? 'Desativar' : 'Reativar'}</button><button class="btn danger" id="cdel">${icon('trash')}Excluir</button>` : ''}`}</div></div>
+    <div class="actions">${del ? '' : `${+c.active && can('vendas.add') ? `<button class="btn primary" id="sell">${icon('cart')}Nova venda</button>` : ''}${can('clientes.edit') ? '<button class="btn" id="edit">Editar</button>' : ''}
+      ${isAdmin() ? `<button class="btn ${+c.active ? 'danger' : ''}" id="toggle">${+c.active ? 'Desativar' : 'Reativar'}</button>` : ''}${can('clientes.delete') ? `<button class="btn danger" id="cdel">${icon('trash')}Excluir</button>` : ''}`}</div></div>
     ${del ? deletedBanner('Este cliente') : ''}
     <div class="kpis">
       <div class="kpi"><div class="label">Total comprado</div><div class="value">${money(st.total)}</div><div class="sub">${st.n || 0} compra(s)</div></div>
@@ -2503,7 +2504,7 @@ function serviceForm(sv, onSaved) {
     title: isNew ? 'Novo serviço' : 'Editar serviço',
     body: `<form class="form" id="svf"><label>Nome do serviço * <input name="name" required maxlength="200" value="${esc(sv?.name)}" placeholder="Ex.: Montagem de mesa de doces"></label>
       <label>Preço (R$) * <input name="sale_price" data-num="money" inputmode="decimal" value="${sv && +sv.sale_price ? qty(sv.sale_price, 2) : ''}" placeholder="0,00"></label></form>`,
-    foot: `${!isNew && isAdmin() ? `<button class="btn danger" id="svdel" style="margin-right:auto">${icon('trash')}Excluir</button>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="svsave">Salvar serviço</button>`,
+    foot: `${!isNew && can('servicos.delete') ? `<button class="btn danger" id="svdel" style="margin-right:auto">${icon('trash')}Excluir</button>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="svsave">Salvar serviço</button>`,
   });
   const f = $('#svf', m.el);
   const sd = $('#svdel', m.el);
@@ -2525,19 +2526,19 @@ function serviceForm(sv, onSaved) {
 async function viewServices(v) {
   const f = { q: '', active: '1' };
   v.innerHTML = `<div class="page-head"><div><h1>Serviços</h1><p class="muted">Serviços que você oferece nos orçamentos e vendas.</p></div>
-    <div class="actions"><button class="btn primary" id="new">${icon('plus')}Novo serviço</button></div></div>
+    <div class="actions">${can('servicos.add') ? `<button class="btn primary" id="new">${icon('plus')}Novo serviço</button>` : ''}</div></div>
     <div class="card"><div class="filters"><label class="grow">Buscar <input id="q" placeholder="Nome do serviço"></label>
       <label class="check"><input type="checkbox" id="inactive"> Mostrar inativos</label></div><div id="list"></div></div>`;
   const load = async () => {
     const rows = await api('products', { params: { type: 'servico', q: f.q, active: f.active } });
     $('#list', v).innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Serviço</th><th class="num">Preço</th><th></th></tr></thead><tbody>
       ${rows.map((p) => `<tr class="click" data-id="${p.id}"><td><strong>${esc(p.name)}</strong> ${+p.active ? '' : '<span class="badge">inativo</span>'}</td><td class="num">${money(p.sale_price)}</td>
-        <td class="num nowrap">${isAdmin() ? `<button class="btn sm ghost" data-toggle="${p.id}">${+p.active ? 'Desativar' : 'Reativar'}</button><button class="btn sm ghost danger" data-del="${p.id}" title="Excluir" aria-label="Excluir ${esc(p.name)}">${icon('trash')}</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
+        <td class="num nowrap">${isAdmin() ? `<button class="btn sm ghost" data-toggle="${p.id}">${+p.active ? 'Desativar' : 'Reativar'}</button>` : ''}${can('servicos.delete') ? `<button class="btn sm ghost danger" data-del="${p.id}" title="Excluir" aria-label="Excluir ${esc(p.name)}">${icon('trash')}</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
       : '<div class="empty">Nenhum serviço cadastrado. Clique em <strong>Novo serviço</strong>.</div>';
   };
   $('#q', v).oninput = debounce((e) => { f.q = e.target.value; load(); });
   $('#inactive', v).onchange = (e) => { f.active = e.target.checked ? 'all' : '1'; load(); };
-  $('#new', v).onclick = () => serviceForm(null, load);
+  ($('#new', v) || {}).onclick = () => serviceForm(null, load);
   $('#list', v).onclick = async (e) => {
     const t = e.target.closest('[data-toggle]');
     const rows = await api('products', { params: { type: 'servico', active: 'all' } });
@@ -2565,7 +2566,7 @@ const dtLocal = (s) => (s ? String(s).replace(' ', 'T').slice(0, 16) : '');
 async function viewServiceOrders(v) {
   const f = { status: 'todas', q: '' }; // a lista sempre abre em "Todas"
   v.innerHTML = `<div class="page-head"><div><h1>Ordens de serviço</h1><p class="muted">Atendimentos aos clientes, de chamados avulsos ou de orçamentos.</p></div>
-      <div class="actions"><a class="btn primary" href="#/ordem/nova">${icon('plus')}Nova ordem</a></div></div>
+      <div class="actions">${can('ordens.add') ? `<a class="btn primary" href="#/ordem/nova">${icon('plus')}Nova ordem</a>` : ''}</div></div>
     <div class="card"><div class="filters" style="align-items:center">
       <div class="seg" id="tabs">${SO_TABS.map(([k, l]) => `<button data-s="${k}">${l}</button>`).join('')}</div>
       <label class="grow">Buscar <input id="q" type="search" placeholder="Nº, cliente, equipamento ou descrição"></label></div>
@@ -2841,7 +2842,13 @@ async function viewServiceOrderForm(v, id) {
   const cust = o.customer_trade_name || o.customer_name;
   const locks = [];   // funções que travam/liberam cada aba (editLock)
   const savers = [];  // [nome, async () => número de alterações]
-  const transitions = o.transitions.map((s) => {
+  // Permissões: cada aba só libera com a permissão dela; OS concluída só com "Editar OS depois do check-out"
+  const soFrozen = o.status === 'concluida' && !can('ordens.after_checkout');
+  const soPerm = { detalhes: can('ordens.edit'), exec: can('ordens.execute') || can('ordens.edit'), horas: can('ordens.hours') };
+  const soCanEdit = !soFrozen && (soPerm.detalhes || soPerm.exec || soPerm.horas);
+  /** Aba sem permissão fica sempre travada, mesmo com a OS em edição. */
+  const permLock = (ok, f) => (ok && !soFrozen ? f : () => f(true));
+  const transitions = (can('ordens.execute') ? o.transitions : []).map((s) => {
     const label = s === 'em_execucao' ? (o.status === 'pausada' ? 'Retomar atendimento' : 'Iniciar atendimento (check-in)')
       : s === 'agendada' && o.status === 'a_caminho' ? 'Cancelar deslocamento' : SO_ACTION[s] || s;
     const cls = s === 'concluida' || s === 'em_execucao' ? 'btn primary' : 'btn';
@@ -2852,14 +2859,14 @@ async function viewServiceOrderForm(v, id) {
       <p class="muted">${soStatusHtml(o.status, form.statuses)} · ${esc(cust)}${o.task_type_name ? ` · ${esc(o.task_type_name)}` : ''}${o.scheduled_at ? ` · ${dt(o.scheduled_at)}` : ''}</p></div>
     <div class="actions">
       <span class="inline js-view-only">${transitions}
-        <button class="btn" id="soedit">${icon('pencil')}Editar</button>
+        ${soCanEdit ? `<button class="btn" id="soedit">${icon('pencil')}Editar</button>` : ''}
         <div class="dd"><button type="button" class="btn dd-btn" aria-haspopup="true" aria-expanded="false">${icon('menu')}Mais ações${icon('chevron')}</button>
           <div class="dd-menu" role="menu" hidden>
             <a role="menuitem" href="${esc(o.public_url)}" target="_blank" rel="noopener">${icon('eye')}Ver OS digital</a>
             <button type="button" role="menuitem" data-act="link">${icon('link')}Copiar link da OS</button>
-            <button type="button" role="menuitem" data-act="email">${icon('mail')}Enviar OS por e-mail</button>
+            ${can('ordens.send') ? `<button type="button" role="menuitem" data-act="email">${icon('mail')}Enviar OS por e-mail</button>` : ''}
             <button type="button" role="menuitem" data-act="whats">${icon('whats')}Enviar pelo WhatsApp</button>
-            ${can('orcamentos') ? `<button type="button" role="menuitem" data-act="quote">${icon('quote')}Abrir orçamento</button>` : ''}
+            ${can('orcamentos.add') ? `<button type="button" role="menuitem" data-act="quote">${icon('quote')}Abrir orçamento</button>` : ''}
           </div></div></span>
       <span class="inline js-edit-only" hidden><button class="btn" id="socancelall">${icon('x')}Cancelar</button><button class="btn primary" id="sosaveall">${icon('check')}Salvar</button></span>
     </div></div>
@@ -2891,7 +2898,7 @@ async function viewServiceOrderForm(v, id) {
   bindDetails(pane('detalhes'));
   const sof = $('#soform', v);
   const detSnap = JSON.stringify(formData(sof));
-  locks.push(editLock(pane('detalhes'), sof, true));
+  locks.push(permLock(soPerm.detalhes, editLock(pane('detalhes'), sof, true)));
   savers.push(['Detalhes', async () => {
     if (JSON.stringify(formData(sof)) === detSnap) return 0;
     if (!sof.reportValidity()) { showTab('detalhes'); throw new Error('Confira os campos obrigatórios em Detalhes'); }
@@ -2935,7 +2942,7 @@ async function viewServiceOrderForm(v, id) {
   const rpf = $('#rpf', rp);
   const rpSnap = JSON.stringify(formData(rpf));
   let rpLocked = true;
-  locks.push(editLock(rp, rpf, true, (l) => { rpLocked = l; $$('#rpsig button', rp).forEach((b) => (b.disabled = l)); }));
+  locks.push(permLock(soPerm.exec, editLock(rp, rpf, true, (l) => { rpLocked = l; $$('#rpsig button', rp).forEach((b) => (b.disabled = l)); })));
   rp.addEventListener('click', async (e) => {
     if (rpLocked) return;
     if (e.target.closest('#sgnew')) { const s = await signaturePad('Assinatura do cliente'); if (s) { sig = s; paintSig(); } }
@@ -3016,7 +3023,7 @@ async function viewServiceOrderForm(v, id) {
       if (sgd) { ans[sgd.dataset.sigdel] = ''; dirty = true; paint(); }
     });
     paint();
-    locks.push(editLock(card, $('form', card), true, (l) => { isLocked = l; paint(); }));
+    locks.push(permLock(soPerm.exec, editLock(card, $('form', card), true, (l) => { isLocked = l; paint(); })));
     savers.push([`Questionário "${q.name}"`, async () => {
       if (!dirty) return 0;
       const vis = qVisible(q.questions, ans);
@@ -3076,7 +3083,7 @@ async function viewServiceOrderForm(v, id) {
       <td class="num">${money(numBr(n.unit_price))}</td><td class="num">${money((numBr(n.quantity) || 1) * numBr(n.unit_price))}</td>
       <td class="num"><button type="button" class="icon-btn" data-itnewdel="${i}" title="Tirar" aria-label="Tirar">${icon('x')}</button></td></tr>`).join('');
   };
-  locks.push(editLock(vp, itf, true, (l) => { $('#itadd', vp).disabled = l; if (!l) fillProducts(); }));
+  locks.push(permLock(soPerm.exec, editLock(vp, itf, true, (l) => { $('#itadd', vp).disabled = l; if (!l) fillProducts(); })));
   $('#itadd', vp).onclick = () => {
     const k = kindSel.value, isNew = k !== 'custo' && newCk.checked;
     const p2 = k !== 'custo' && !isNew ? findPick() : null;
@@ -3103,7 +3110,7 @@ async function viewServiceOrderForm(v, id) {
 
   // ---- Orçamentos ligados (o de origem e os abertos a partir desta OS)
   pane('orcamentos').innerHTML = `<div class="card"><div class="card-head"><h2>Orçamentos</h2>
-      ${can('orcamentos') ? `<button type="button" class="btn sm js-view-only" data-act="quote">${icon('plus')}Abrir orçamento</button>` : ''}</div>
+      ${can('orcamentos.add') ? `<button type="button" class="btn sm js-view-only" data-act="quote">${icon('plus')}Abrir orçamento</button>` : ''}</div>
     <p class="small muted">A OS não gera cobrança. Para cobrar o serviço executado, abra um orçamento: ele já vem com o cliente e com os produtos, serviços e custos lançados em Valores.</p>
     ${D.quotes.length ? `<div class="table-wrap"><table><thead><tr><th>Orçamento</th><th>Ligação</th><th>Status</th><th class="num">Total</th><th>Criado em</th></tr></thead><tbody>
       ${D.quotes.map((q) => `<tr class="click" data-goq="${q.id}"><td><strong>#${q.id}</strong></td><td>${esc(q.relation)}</td><td>${qBadge(q.status)}</td><td class="num">${money(q.total)}</td><td>${dOnly(q.created_at)}</td></tr>`).join('')}</tbody></table></div>`
@@ -3178,7 +3185,7 @@ async function viewServiceOrderForm(v, id) {
   hrRefresh();
   // Atendimento em andamento: os totais correm a cada segundo
   if (h.running) { const tm = setInterval(() => { if (!document.body.contains(hp)) return clearInterval(tm); hrRefresh(); }, 1000); }
-  locks.push(editLock(hp, hform, true, (l) => { hrEditing = !l; $('#hradd', hp).hidden = l; hrRefresh(); }));
+  locks.push(permLock(soPerm.horas, editLock(hp, hform, true, (l) => { hrEditing = !l; $('#hradd', hp).hidden = l; hrRefresh(); })));
   hbody.addEventListener('input', hrRefresh); hbody.addEventListener('change', hrRefresh);
   const deleted = [];
   hp.addEventListener('click', (e) => {
@@ -3221,8 +3228,8 @@ async function viewServiceOrderForm(v, id) {
   const ep = pane('envios');
   const done = o.status === 'concluida';
   ep.innerHTML = `<div class="card"><div class="card-head"><h2>Envios ao cliente</h2>
-      <span class="inline js-view-only"><button type="button" class="btn sm" data-act="email">${icon('mail')}Enviar OS por e-mail</button>
-        <button type="button" class="btn sm" data-act="survey" ${done ? '' : 'disabled title="Disponível depois de concluir"'}>${icon('send')}Enviar pesquisa</button>
+      <span class="inline js-view-only">${can('ordens.send') ? `<button type="button" class="btn sm" data-act="email">${icon('mail')}Enviar OS por e-mail</button>
+        <button type="button" class="btn sm" data-act="survey" ${done ? '' : 'disabled title="Disponível depois de concluir"'}>${icon('send')}Enviar pesquisa</button>` : ''}
         <button type="button" class="btn sm" data-act="link">${icon('link')}Copiar link da OS</button></span></div>
       ${D.sends.length ? `<div class="table-wrap"><table><thead><tr><th>Quando</th><th>O quê</th><th>Para</th><th>Resultado</th><th>Por</th></tr></thead><tbody>
         ${D.sends.map((s) => `<tr><td class="nowrap">${dt(s.created_at)}</td><td>${s.kind === 'os' ? 'OS digital' : 'Pesquisa de satisfação'}</td><td>${esc(s.recipient)}</td>
@@ -3291,9 +3298,9 @@ async function viewServiceOrderForm(v, id) {
       $$('.js-edit-only', root).forEach((el) => (el.hidden = !on));
     });
   };
-  setEditing(sessionStorage.getItem('soedit') === String(o.id));
+  setEditing(soCanEdit && sessionStorage.getItem('soedit') === String(o.id));
   sessionStorage.removeItem('soedit');
-  $('#soedit', v).onclick = () => setEditing(true);
+  if ($('#soedit', v)) $('#soedit', v).onclick = () => setEditing(true);
   $('#socancelall', v).onclick = () => route();
   const saveAll = $('#sosaveall', v);
   saveAll.onclick = () => busy(saveAll, async () => {
@@ -3344,7 +3351,7 @@ async function viewServiceOrderForm(v, id) {
 async function viewEquipments(v) {
   const f = { q: '', all: false };
   v.innerHTML = `<div class="page-head"><div><h1>Equipamentos</h1><p class="muted">Aparelhos dos clientes que recebem manutenção e atendimento.</p></div>
-      <div class="actions"><button class="btn primary" id="new">${icon('plus')}Novo equipamento</button></div></div>
+      <div class="actions">${can('equipamentos.add') ? `<button class="btn primary" id="new">${icon('plus')}Novo equipamento</button>` : ''}</div></div>
     <div class="card"><div class="filters"><label class="grow">Buscar <input id="q" type="search" placeholder="Nome, marca, modelo, identificador ou cliente"></label>
       <label class="check"><input type="checkbox" id="all"> Mostrar inativos</label></div><div id="list"></div></div>`;
   const load = async () => {
@@ -3356,7 +3363,7 @@ async function viewEquipments(v) {
   };
   $('#q', v).oninput = debounce((e) => { f.q = e.target.value; load().catch(fail); });
   $('#all', v).onchange = (e) => { f.all = e.target.checked; load().catch(fail); };
-  $('#new', v).onclick = () => equipmentForm(null, load).catch(fail);
+  ($('#new', v) || {}).onclick = () => equipmentForm(null, load).catch(fail);
   $('#list', v).onclick = async (e) => {
     const r = e.target.closest('[data-id]');
     if (!r) return;
@@ -3396,7 +3403,7 @@ async function equipmentForm(eq, onSaved) {
       </div>
       ${isNew ? '' : '<div data-pane="ordens" hidden><div id="eqhist"><p class="muted">Carregando…</p></div></div>'}
     </form>`,
-    foot: `${!isNew ? `<span class="inline" style="margin-right:auto"><button class="btn ghost" id="eqact">${+eq.active ? 'Desativar' : 'Reativar'}</button>${isAdmin() ? `<button class="btn danger" id="eqdel">${icon('trash')}Excluir</button>` : ''}</span>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="eqsave">Salvar equipamento</button>`,
+    foot: `${!isNew ? `<span class="inline" style="margin-right:auto">${can('equipamentos.edit') ? `<button class="btn ghost" id="eqact">${+eq.active ? 'Desativar' : 'Reativar'}</button>` : ''}${can('equipamentos.delete') ? `<button class="btn danger" id="eqdel">${icon('trash')}Excluir</button>` : ''}</span>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="eqsave">Salvar equipamento</button>`,
   });
   const f = $('#eqf', m.el);
   const splist = $('#splist', m.el);
@@ -3526,7 +3533,7 @@ async function viewAgenda(v) {
     return s.charAt(0).toUpperCase() + s.slice(1);
   };
   const tip = (o) => `OS #${o.id}\nStatus: ${o.status_label}\nTipo: ${o.task_type_name || '—'}\nCliente: ${agCust(o)}\nTécnico: ${o.technician_name || '—'}\nDuração: ${agDur(o)} min`;
-  const chip = (o, showTech = true) => `<div class="ag-chip ${o.status}" ${AG_OPEN.includes(o.status) ? 'draggable="true"' : ''} data-id="${o.id}" data-tech="${o.technician_id || ''}" data-hm="${agHm(o.scheduled_at)}" title="${esc(tip(o))}">${o.scheduled_at ? `<b>${agHm(o.scheduled_at)}</b> ` : ''}${esc(agCust(o))}${showTech && o.technician_name ? ` – ${esc(o.technician_name)}` : ''}</div>`;
+  const chip = (o, showTech = true) => `<div class="ag-chip ${o.status}" ${AG_OPEN.includes(o.status) && can('ordens.reschedule') ? 'draggable="true"' : ''} data-id="${o.id}" data-tech="${o.technician_id || ''}" data-hm="${agHm(o.scheduled_at)}" title="${esc(tip(o))}">${o.scheduled_at ? `<b>${agHm(o.scheduled_at)}</b> ` : ''}${esc(agCust(o))}${showTech && o.technician_name ? ` – ${esc(o.technician_name)}` : ''}</div>`;
 
   // ---- Reagendar (arrastar ou escolher data)
   const reschedule = async (id, when, tech) => {
@@ -3750,7 +3757,7 @@ async function viewItemsReview(v) {
 async function viewTaskTypes(v) {
   const f = { all: false };
   v.innerHTML = `<div class="page-head"><div><h1>Tipos de tarefa</h1><p class="muted">Cada tipo escolhe os questionários que o técnico responde e o que é obrigatório na ordem.</p></div>
-      <div class="actions"><button class="btn primary" id="new">${icon('plus')}Novo tipo</button></div></div>
+      <div class="actions">${can('tipos_tarefa.add') ? `<button class="btn primary" id="new">${icon('plus')}Novo tipo</button>` : ''}</div></div>
     <div class="card"><div class="filters"><label class="check"><input type="checkbox" id="all"> Mostrar inativos</label></div><div id="list"></div></div>`;
   let rows = [];
   let qRows = [];
@@ -3767,7 +3774,7 @@ async function viewTaskTypes(v) {
       : '<div class="empty">Nenhum tipo de tarefa. Clique em <strong>Novo tipo</strong>.</div>';
   };
   $('#all', v).onchange = (e) => { f.all = e.target.checked; load().catch(fail); };
-  $('#new', v).onclick = () => taskTypeForm(null, meta, qRows, load);
+  ($('#new', v) || {}).onclick = () => taskTypeForm(null, meta, qRows, load);
   $('#list', v).onclick = (e) => {
     const r = e.target.closest('[data-id]');
     if (r) taskTypeForm(rows.find((x) => x.id == r.dataset.id), meta, qRows, load);
@@ -3799,7 +3806,7 @@ function taskTypeForm(t, meta, qRows, onSaved) {
         <label class="check"><input type="checkbox" name="send_survey" ${t && +t.send_survey ? 'checked' : ''}> Enviar pesquisa de satisfação</label>
         <label class="check"><input type="checkbox" name="send_os_email" ${t && +t.send_os_email ? 'checked' : ''}> Enviar OS digital por e-mail</label></fieldset>
     </form>`,
-    foot: `${!isNew ? `<span class="inline" style="margin-right:auto"><button class="btn ghost" id="ttact">${+t.active ? 'Desativar' : 'Reativar'}</button>${isAdmin() ? `<button class="btn danger" id="ttdel">${icon('trash')}Excluir</button>` : ''}</span>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="ttsave">Salvar tipo</button>`,
+    foot: `${!isNew ? `<span class="inline" style="margin-right:auto">${can('tipos_tarefa.edit') ? `<button class="btn ghost" id="ttact">${+t.active ? 'Desativar' : 'Reativar'}</button>` : ''}${can('tipos_tarefa.delete') ? `<button class="btn danger" id="ttdel">${icon('trash')}Excluir</button>` : ''}</span>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="ttsave">Salvar tipo</button>`,
   });
   const f = $('#ttf', md.el);
   // Questionários escolhidos, na ordem em que aparecem na OS
@@ -3862,7 +3869,7 @@ function taskTypeForm(t, meta, qRows, onSaved) {
 async function viewQuestionnaires(v) {
   const f = { all: false };
   v.innerHTML = `<div class="page-head"><div><h1>Questionários</h1><p class="muted">Perguntas que o técnico responde na ordem. Um questionário pode ser usado em vários tipos de tarefa.</p></div>
-      <div class="actions"><button class="btn primary" id="new">${icon('plus')}Novo questionário</button></div></div>
+      <div class="actions">${can('questionarios.add') ? `<button class="btn primary" id="new">${icon('plus')}Novo questionário</button>` : ''}</div></div>
     <div class="card"><div class="filters"><label class="check"><input type="checkbox" id="all"> Mostrar inativos</label></div><div id="list"></div></div>`;
   const load = async () => {
     const d = await api('questionnaires', { params: { all: f.all ? 1 : '' } });
@@ -3872,7 +3879,7 @@ async function viewQuestionnaires(v) {
       : '<div class="empty">Nenhum questionário. Clique em <strong>Novo questionário</strong>.</div>';
   };
   $('#all', v).onchange = (e) => { f.all = e.target.checked; load().catch(fail); };
-  $('#new', v).onclick = () => go('questionario/nova');
+  ($('#new', v) || {}).onclick = () => go('questionario/nova');
   $('#list', v).onclick = (e) => { const r = e.target.closest('[data-id]'); if (r) go('questionario/' + r.dataset.id); };
   await load();
 }
@@ -3892,7 +3899,7 @@ async function viewQuestionnaireForm(v, id) {
 
   v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/questionarios">← Questionários</a></p><h1>${isNew ? 'Novo questionário' : esc(q.name)}</h1>
       ${isNew ? '' : `<p class="muted">${+q.active ? '' : '<span class="badge">inativo</span>'} ${q.questions_count} pergunta(s)</p>`}</div>
-      <div class="actions">${isNew ? '' : `<button class="btn ghost" id="qact">${+q.active ? 'Desativar' : 'Reativar'}</button>${isAdmin() ? `<button class="btn danger js-view-only" id="qdel">${icon('trash')}Excluir</button>` : ''}<button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn js-edit-only" id="qcancel">${icon('x')}Cancelar</button>`}<button class="btn primary js-edit-only" id="qsave">${icon('check')}Salvar questionário</button></div></div>
+      <div class="actions">${isNew ? '' : `${can('questionarios.edit') ? `<button class="btn ghost" id="qact">${+q.active ? 'Desativar' : 'Reativar'}</button>` : ''}${can('questionarios.delete') ? `<button class="btn danger js-view-only" id="qdel">${icon('trash')}Excluir</button>` : ''}<button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn js-edit-only" id="qcancel">${icon('x')}Cancelar</button>`}<button class="btn primary js-edit-only" id="qsave">${icon('check')}Salvar questionário</button></div></div>
     <div class="card"><form class="form" id="qform">
       <label>Nome * <input name="name" required maxlength="120" value="${esc(q.name)}" placeholder="Ex.: Checklist de compressor"></label>
       <div class="grid two"><label>Perguntas por linha <select name="per_line">${[1, 2, 3, 4].map((n) => `<option value="${n}" ${+q.per_line === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
@@ -4125,7 +4132,7 @@ async function viewQuestionnaireForm(v, id) {
 async function viewSuppliers(v) {
   const f = { q: '', active: '1', page: 1 };
   v.innerHTML = `<div class="page-head"><div><h1>Fornecedores</h1><p class="muted">Cadastre pelo CNPJ. As notas importadas também cadastram o fornecedor sozinhas.</p></div>
-    <div class="actions"><button class="btn primary" id="new">${icon('plus')}Novo fornecedor</button></div></div>
+    <div class="actions">${can('fornecedores.add') ? `<button class="btn primary" id="new">${icon('plus')}Novo fornecedor</button>` : ''}</div></div>
     <div class="card"><div class="filters"><label class="grow">Buscar <input id="q" placeholder="Nome, CNPJ, cidade ou e-mail"></label>
       <label class="check"><input type="checkbox" id="inactive"> Mostrar inativos</label></div><div id="list"></div></div>`;
   const load = async () => {
@@ -4141,7 +4148,7 @@ async function viewSuppliers(v) {
   $('#q', v).oninput = debounce((e) => { f.q = e.target.value; f.page = 1; load(); });
   $('#inactive', v).onchange = (e) => { f.active = e.target.checked ? 'all' : '1'; f.page = 1; load(); };
   $('#list', v).onclick = (e) => { const r = e.target.closest('[data-id]'); if (r) go('fornecedor/' + r.dataset.id); };
-  $('#new', v).onclick = () => customerForm(null, (id) => go('fornecedor/' + id), { entity: 'supplier' });
+  ($('#new', v) || {}).onclick = () => customerForm(null, (id) => go('fornecedor/' + id), { entity: 'supplier' });
   await load();
 }
 
@@ -4153,8 +4160,8 @@ async function viewSupplier(v, id) {
   const del = !!c.deleted_at;
   v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/fornecedores">← Fornecedores</a></p><h1>${esc(custName(c))} ${del ? '<span class="badge err">excluído</span>' : +c.active ? '' : '<span class="badge">inativo</span>'}</h1>
       <p class="muted">${c.trade_name ? esc(c.name) + ' · ' : ''}${c.type === 'pj' ? 'Empresa' : 'Pessoa física'}${c.document ? ' · ' + docFmt(c.document) : ''}</p></div>
-    <div class="actions">${del ? '' : `${can('notas') ? `<a class="btn" href="#/notas/importar">${icon('upload')}Importar nota</a>` : ''}<button class="btn primary" id="edit">Editar</button>
-      ${isAdmin() ? `<button class="btn ${+c.active ? 'danger' : ''}" id="toggle">${+c.active ? 'Desativar' : 'Reativar'}</button><button class="btn danger" id="sdel">${icon('trash')}Excluir</button>` : ''}`}</div></div>
+    <div class="actions">${del ? '' : `${can('notas.import') ? `<a class="btn" href="#/notas/importar">${icon('upload')}Importar nota</a>` : ''}${can('fornecedores.edit') ? '<button class="btn primary" id="edit">Editar</button>' : ''}
+      ${isAdmin() ? `<button class="btn ${+c.active ? 'danger' : ''}" id="toggle">${+c.active ? 'Desativar' : 'Reativar'}</button>` : ''}${can('fornecedores.delete') ? `<button class="btn danger" id="sdel">${icon('trash')}Excluir</button>` : ''}`}</div></div>
     ${del ? deletedBanner('Este fornecedor') : ''}
     <div class="kpis">
       <div class="kpi"><div class="label">Total comprado</div><div class="value">${money(st.total)}</div><div class="sub">${st.n || 0} nota(s)</div></div>
@@ -4184,22 +4191,60 @@ async function viewSupplier(v, id) {
 
 // ============ Permissões ============
 /** Criar ou editar um perfil de permissão. */
-function profileForm(pr, perms, onSaved) {
+/** Módulos que um conjunto de permissões alcança (para resumir na lista). */
+const permSummary = (mods, list) => {
+  const has = new Set(list);
+  const total = mods.reduce((n, m) => n + m.items.length, 0);
+  const on = mods.reduce((n, m) => n + m.items.filter((i) => has.has(i.code)).length, 0);
+  return { total, on, mods: mods.filter((m) => m.items.some((i) => has.has(i.code))).map((m) => m.label) };
+};
+
+/** Cadastro de perfil de permissão: módulos em sanfona, cada um com Visualizar e as ações dele. */
+function profileForm(pr, mods, onSaved) {
   const isNew = !pr;
   const has = new Set(pr ? pr.permissions : []);
+  const item = (m, i) => `<label class="check perm-it ${i.view ? 'is-view' : ''}"><input type="checkbox" value="${esc(i.code)}" data-m="${esc(m.code)}" ${i.view ? 'data-view="1"' : ''} ${has.has(i.code) ? 'checked' : ''}> ${esc(i.view ? 'Visualizar' : i.label)}${i.view ? ` <span class="help">${esc(i.label)}</span>` : ''}</label>`;
   const m = modal({
-    title: isNew ? 'Novo perfil de permissão' : `Editar perfil "${pr.name}"`,
-    body: `<form class="form" id="prf"><label>Nome do perfil * <input name="name" maxlength="80" required value="${esc(pr?.name)}" placeholder="Ex.: Vendedor, Estoquista, Gerente"></label>
-      <div><div class="inline" style="justify-content:space-between"><div class="qlabel-f">O que este perfil pode acessar</div><span><button type="button" class="btn sm ghost" id="all">Tudo</button><button type="button" class="btn sm ghost" id="none">Nada</button></span></div>
-      <div class="perm-list">${Object.entries(perms).map(([k, l]) => `<label class="check"><input type="checkbox" value="${k}" ${has.has(k) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</div></div></form>`,
-    foot: `<button class="btn" data-close>Cancelar</button><button class="btn primary" id="prsave">Salvar perfil</button>`,
+    wide: true,
+    title: isNew ? 'Cadastro de permissão' : `Permissão "${pr.name}"`,
+    body: `<form class="form" id="prf"><label>Nome * <input name="name" maxlength="80" required value="${esc(pr?.name)}" placeholder="Ex.: Técnico, Vendedor, Gerente"></label>
+      <div class="perm-head"><label class="check"><input type="checkbox" id="pall"> <strong>Marcar todos</strong></label><span class="small muted" id="pcount"></span></div>
+      <div class="perm-mods">${mods.map((md) => `<details class="perm-mod" data-mod="${esc(md.code)}">
+        <summary><input type="checkbox" class="perm-modchk" aria-label="Marcar tudo de ${esc(md.label)}"><span class="perm-mn">${esc(md.label)}</span><span class="perm-cnt"></span>${icon('chevron')}</summary>
+        <div class="perm-items">${md.items.map((i) => item(md, i)).join('')}</div></details>`).join('')}</div></form>`,
+    foot: `<button class="btn" data-close>Voltar</button><button class="btn primary" id="prsave">${icon('check')}Confirmar</button>`,
   });
-  $('#all', m.el).onclick = () => $$('.perm-list input', m.el).forEach((c) => (c.checked = true));
-  $('#none', m.el).onclick = () => $$('.perm-list input', m.el).forEach((c) => (c.checked = false));
+  const boxes = () => $$('.perm-items input', m.el);
+  const paint = () => {
+    let on = 0;
+    $$('.perm-mod', m.el).forEach((d) => {
+      const bs = $$('.perm-items input', d); const n = bs.filter((b) => b.checked).length; on += n;
+      const mc = $('.perm-modchk', d); mc.checked = n === bs.length; mc.indeterminate = n > 0 && n < bs.length;
+      $('.perm-cnt', d).textContent = n ? `${n}/${bs.length}` : '';
+      d.classList.toggle('has', n > 0);
+    });
+    const all = boxes(); const pa = $('#pall', m.el);
+    pa.checked = on === all.length; pa.indeterminate = on > 0 && on < all.length;
+    $('#pcount', m.el).textContent = `${on} de ${all.length} permissões`;
+  };
+  m.el.addEventListener('click', (e) => { if (e.target.matches('.perm-modchk')) e.stopPropagation(); }, true);
+  m.el.addEventListener('change', (e) => {
+    const t = e.target;
+    if (t.id === 'pall') boxes().forEach((b) => (b.checked = t.checked));
+    else if (t.matches('.perm-modchk')) $$('.perm-items input', t.closest('.perm-mod')).forEach((b) => (b.checked = t.checked));
+    else if (t.matches('.perm-items input')) {
+      const d = t.closest('.perm-mod'); const view = $('input[data-view]', d);
+      // Qualquer ação precisa de Visualizar; sem Visualizar, nenhuma ação do módulo vale
+      if (t.checked && view && !t.dataset.view) view.checked = true;
+      if (!t.checked && t.dataset.view) $$('.perm-items input', d).forEach((b) => (b.checked = false));
+    }
+    paint();
+  });
+  paint();
   const save = (btn) => busy(btn, async () => {
     const name = $('#prf input[name=name]', m.el).value.trim();
     if (!name) throw new Error('Dê um nome ao perfil');
-    const list = $$('.perm-list input', m.el).filter((c) => c.checked).map((c) => c.value);
+    const list = boxes().filter((c) => c.checked).map((c) => c.value);
     const r = await api('profile_save', { body: { id: pr?.id, name, permissions: list } });
     m.close(); toast('Perfil salvo'); onSaved && onSaved(r.id);
   });
@@ -4208,37 +4253,44 @@ function profileForm(pr, perms, onSaved) {
 }
 
 async function viewPermissions(v) {
-  const [{ profiles, perms }, users] = await Promise.all([api('profiles'), api('users')]);
-  const keys = Object.keys(perms);
+  const [{ profiles, modules: mods }, users] = await Promise.all([api('profiles'), api('users')]);
   const members = users.filter((u) => u.role !== 'admin');
   const admins = users.filter((u) => u.role === 'admin' && +u.active);
   const profOptions = (sel) => `<option value="">Sem perfil (acesso total)</option>${profiles.map((p) => `<option value="${p.id}" ${p.id == sel ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}`;
-  v.innerHTML = `<div class="page-head"><div><h1>Permissões</h1><p class="muted">Crie perfis com o que cada tipo de pessoa pode acessar e escolha o perfil de cada usuário. Mudou o perfil, muda para todos que o usam.</p></div>
+  const sumHtml = (list) => {
+    const s2 = permSummary(mods, list);
+    return s2.on === s2.total ? '<span class="badge ok">tudo</span>' : s2.on ? esc(s2.mods.join(', ')) : '<span class="badge err">nada</span>';
+  };
+  v.innerHTML = `<div class="page-head"><div><h1>Permissões</h1><p class="muted">Crie perfis com o que cada tipo de pessoa pode ver e fazer em cada módulo e escolha o perfil de cada usuário. Mudou o perfil, muda para todos que o usam.</p></div>
       <div class="actions"><button class="btn primary" id="newp">${icon('plus')}Novo perfil</button></div></div>
     <div class="card"><div class="card-head"><h2>Perfis de permissão</h2></div>
-      ${profiles.length ? `<div class="table-wrap"><table class="perm-table"><thead><tr><th>Área</th>${profiles.map((p) => `<th class="perm-user"><div>${esc(p.name)}</div><div class="small muted" style="font-weight:400">${p.users} usuário(s)</div>
-          <div class="perm-tools"><button class="btn sm ghost" data-edit="${p.id}">Editar</button><button class="btn sm ghost danger" data-del="${p.id}" ${p.users ? 'disabled title="Em uso"' : ''}>Excluir</button></div></th>`).join('')}</tr></thead>
-        <tbody>${keys.map((k) => `<tr><td>${esc(perms[k])}</td>${profiles.map((p) => `<td class="perm-cell">${p.permissions.includes(k) ? `<span class="perm-yes" title="Liberado">${icon('check')}</span>` : '<span class="perm-no" title="Bloqueado">—</span>'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+      ${profiles.length ? `<div class="table-wrap"><table><thead><tr><th>Perfil</th><th>Usuários</th><th>Permissões</th><th>Módulos</th><th></th></tr></thead><tbody>
+        ${profiles.map((p) => { const s2 = permSummary(mods, p.permissions); return `<tr class="click" data-edit="${p.id}"><td><strong>${esc(p.name)}</strong></td><td>${p.users}</td>
+          <td class="nowrap">${s2.on} de ${s2.total}</td><td class="small">${sumHtml(p.permissions)}</td>
+          <td class="num nowrap"><button class="btn sm ghost" data-edit="${p.id}">${icon('pencil')}Editar</button><button class="btn sm ghost danger" data-del="${p.id}" ${p.users ? 'disabled title="Em uso"' : ''}>${icon('trash')}</button></td></tr>`; }).join('')}</tbody></table></div>`
         : '<div class="empty">Nenhum perfil criado. Clique em <strong>Novo perfil</strong>.</div>'}
     </div>
     <div class="card"><div class="card-head"><h2>Usuários</h2><a class="small" href="#/usuarios">cadastrar usuário</a></div>
       ${members.length ? `<div class="table-wrap"><table><thead><tr><th>Usuário</th><th>Perfil de permissão</th><th>Pode acessar</th></tr></thead><tbody>
         ${members.map((u) => `<tr><td><strong>${esc(u.name)}</strong> ${+u.active ? '' : '<span class="badge">inativo</span>'}<div class="small muted">${esc(u.email)}</div></td>
           <td><select data-user="${u.id}" style="min-width:200px">${profOptions(u.profile_id)}</select></td>
-          <td class="small">${u.permissions.length === keys.length ? '<span class="badge ok">tudo</span>' : u.permissions.length ? u.permissions.map((k) => esc(perms[k].split(' (')[0])).join(', ') : '<span class="badge err">nada</span>'}</td></tr>`).join('')}</tbody></table></div>`
+          <td class="small">${sumHtml(u.permissions)}</td></tr>`).join('')}</tbody></table></div>`
         : '<p class="muted">Nenhum usuário além dos administradores. Cadastre em <a href="#/usuarios">Usuários</a>.</p>'}
-      <p class="help" style="margin-bottom:0">Administradores (${admins.map((u) => esc(u.name)).join(', ') || '—'}) sempre têm acesso total, inclusive a Empresa, Usuários e Permissões. Para tornar alguém administrador, use <a href="#/usuarios">Usuários</a>.</p>
+      <p class="help" style="margin-bottom:0">Administradores (${admins.map((u) => esc(u.name)).join(', ') || '—'}) sempre têm acesso total, inclusive a todas as OS, Empresa, Usuários e Permissões. Quem não tem <strong>Ver as OS de todos os técnicos</strong> só vê as ordens em que é o técnico. Para tornar alguém administrador, use <a href="#/usuarios">Usuários</a>.</p>
     </div>`;
-  $('#newp', v).onclick = () => profileForm(null, perms, () => route());
+  $('#newp', v).onclick = () => profileForm(null, mods, () => route());
   v.addEventListener('click', async (e) => {
-    const ed = e.target.closest('[data-edit]');
-    if (ed) { profileForm(profiles.find((p) => p.id == ed.dataset.edit), perms, () => route()); return; }
     const del = e.target.closest('[data-del]');
-    if (del && !del.disabled) {
+    if (del) {
+      e.stopPropagation();
+      if (del.disabled) return;
       const p = profiles.find((x) => x.id == del.dataset.del);
       if (!(await confirmBox(`Excluir o perfil "${p.name}"?`, { ok: 'Excluir', danger: true }))) return;
       busy(del, async () => { await api('profile_delete', { body: { id: p.id } }); toast('Perfil excluído'); route(); });
+      return;
     }
+    const ed = e.target.closest('[data-edit]');
+    if (ed) profileForm(profiles.find((p) => p.id == ed.dataset.edit), mods, () => route());
   });
   v.addEventListener('change', async (e) => {
     const sel = e.target.closest('select[data-user]'); if (!sel) return;
@@ -4294,7 +4346,7 @@ async function viewQuotes(v) {
     ['vendidos_mes', 'Viraram venda no mês', { month: 'sold' }, '#475569'],
   ];
   v.innerHTML = `<div class="page-head"><div><h1>Orçamentos</h1></div>
-      <div class="actions"><button class="btn" id="csv">Download</button><a class="btn primary" href="#/orcamento/novo">${icon('plus')}Adicionar orçamento</a></div></div>
+      <div class="actions"><button class="btn" id="csv">Download</button>${can('orcamentos.add') ? `<a class="btn primary" href="#/orcamento/novo">${icon('plus')}Adicionar orçamento</a>` : ''}</div></div>
     <div class="qkpis" id="kpis"></div>
     <div class="card"><div class="filters" style="align-items:center">
       <label class="grow">Buscar <input id="q" placeholder="Nº, cliente, lead ou código externo"></label>
@@ -4500,21 +4552,21 @@ async function viewQuoteForm(v, id) {
 
   v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/orcamentos">← Orçamentos</a></p><h1>${isNew ? (copyOf ? `Novo orçamento <span class="muted small">(cópia do #${copyOf.id})</span>` : fromOs ? `Novo orçamento <span class="muted small">(da OS #${fromOs.service_order_id})</span>` : 'Novo orçamento') : 'Orçamento #' + q.id}</h1></div>
     <div class="actions">${!isNew ? `<a class="btn qbtn-view" href="${esc(q.public_url)}" target="_blank" rel="noopener">${icon('eye')}Visualizar orçamento</a>` : ''}
-      ${!isNew && !editing && q.status === 'aprovado' ? `<button class="btn" id="conv" style="border-color:var(--ok);color:var(--ok)">${icon('cart')}Gerar venda</button>` : ''}
+      ${!isNew && !editing && q.status === 'aprovado' && can('orcamentos.convert') ? `<button class="btn" id="conv" style="border-color:var(--ok);color:var(--ok)">${icon('cart')}Gerar venda</button>` : ''}
       ${editing ? `<button class="btn" id="cancel">${icon('x')}Cancelar</button><button class="btn primary" id="save">Salvar</button>`
-        : `${sold ? '' : `<button class="btn" id="edit">${icon('pencil')}Editar</button>`}
+        : `${sold || !can('orcamentos.edit') ? '' : `<button class="btn" id="edit">${icon('pencil')}Editar</button>`}
         <div class="dd"><button type="button" class="btn dd-btn qbtn-more" aria-haspopup="true" aria-expanded="false">${icon('menu')}Mais ações${icon('chevron')}</button>
           <div class="dd-menu" role="menu" hidden>
             <button type="button" role="menuitem" data-act="link">${icon('link')}Copiar link</button>
             <button type="button" role="menuitem" data-act="pdf">${icon('download')}Download PDF</button>
             <button type="button" role="menuitem" data-act="email">${icon('mail')}Enviar por E-mail</button>
             <button type="button" role="menuitem" data-act="whats">${icon('whats')}Enviar por WhatsApp</button>
-            ${sold ? '' : `<button type="button" role="menuitem" data-act="sent">${icon('send')}Marcar como enviado</button>
+            ${sold || !can('orcamentos.status') ? '' : `<button type="button" role="menuitem" data-act="sent">${icon('send')}Marcar como enviado</button>
             <button type="button" role="menuitem" data-act="approved">${icon('check')}Marcar como aprovado</button>
             <button type="button" role="menuitem" data-act="refused">${icon('x')}Marcar como recusado</button>`}
-            ${can('ordens') && q.customer_id ? `<button type="button" role="menuitem" data-act="os">${icon('tool')}Gerar ordem de serviço</button>` : ''}
-            <button type="button" role="menuitem" data-act="dup">${icon('copy')}Duplicar</button>
-            ${sold ? '' : `<button type="button" role="menuitem" data-act="del" class="danger">${icon('trash')}Excluir</button>`}
+            ${can('ordens.add') && q.customer_id ? `<button type="button" role="menuitem" data-act="os">${icon('tool')}Gerar ordem de serviço</button>` : ''}
+            ${can('orcamentos.add') ? `<button type="button" role="menuitem" data-act="dup">${icon('copy')}Duplicar</button>` : ''}
+            ${sold || !can('orcamentos.delete') ? '' : `<button type="button" role="menuitem" data-act="del" class="danger">${icon('trash')}Excluir</button>`}
           </div></div>`}</div></div>
     ${!isNew && (q.service_orders || []).length ? `<div class="alert info q-os">${icon('tool')}<span>${q.service_orders.map((so) => `${+so.id === +q.service_order_id ? 'Aberto a partir da' : 'Gerou a'} <a href="#/ordem/${so.id}"><strong>OS #${so.id}</strong></a> (${esc(so.status_label)})`).join(' · ')}</span></div>` : ''}
     ${isNew && fromOs ? `<div class="alert info q-os">${icon('tool')}<span>Orçamento da <a href="#/ordem/${fromOs.service_order_id}"><strong>OS #${fromOs.service_order_id}</strong></a>: confira os itens e salve.</span></div>` : ''}
@@ -4524,7 +4576,7 @@ async function viewQuoteForm(v, id) {
     <div class="qsumbar">
       <div class="card qsb"><span class="qsb-ic">${icon('dollar')}</span><div><div class="qsb-l">Valor orçado</div><div class="qsb-v" id="sumval">${money(q.total || 0)}</div></div></div>
       <div class="card qsb"><span class="qsb-ic">${icon('quote')}</span><div style="flex:1;min-width:0"><div class="qsb-l">Status</div>
-        ${sold ? `<div class="qsb-v">${esc(Q_STATUS.vendido.label)}</div>` : `<select id="sumst" class="qsb-sel" aria-label="Status do orçamento">${editableStatuses.map(([k, s]) => `<option value="${k}" ${k === q.status ? 'selected' : ''}>${esc(s.label)}</option>`).join('')}</select>`}</div></div>
+        ${sold ? `<div class="qsb-v">${esc(Q_STATUS.vendido.label)}</div>` : `<select id="sumst" class="qsb-sel" aria-label="Status do orçamento" ${can('orcamentos.status') ? '' : 'disabled'}>${editableStatuses.map(([k, s]) => `<option value="${k}" ${k === q.status ? 'selected' : ''}>${esc(s.label)}</option>`).join('')}</select>`}</div></div>
       <div class="card qsb"><span class="qsb-ic">${icon('calendar')}</span><div><div class="qsb-l">Data cadastro</div><div class="qsb-v">${dOnly(q.created_at || today())}</div></div></div>
     </div>
     <div class="qform ${locked ? 'locked' : ''}">
@@ -5331,7 +5383,7 @@ async function viewPurchases(v) {
   const tab = (k, plural) => (PO_STATUS[k].custom ? PO_STATUS[k].label : plural);
   const TABS = [['abertas', 'Em andamento'], ['rascunho', tab('rascunho', 'Rascunho')], ['enviada', tab('enviada', 'Enviadas')], ['confirmada', tab('confirmada', 'Confirmadas')], ['recebida', tab('recebida', 'Recebidas')], ['cancelada', tab('cancelada', 'Canceladas')], ['', 'Todas']];
   v.innerHTML = `<div class="page-head"><div><h1>Ordens de compra</h1><p class="muted">Pedidos formais de peças e produtos aos fornecedores.</p></div>
-      <div class="actions"><a class="btn primary" href="#/compra/nova">${icon('plus')}Nova ordem de compra</a></div></div>
+      <div class="actions">${can('compras.add') ? `<a class="btn primary" href="#/compra/nova">${icon('plus')}Nova ordem de compra</a>` : ''}</div></div>
     <div class="card"><div class="filters" style="align-items:center">
       <div class="seg" id="tabs">${TABS.map(([k, l]) => `<button data-s="${k}">${l}<span class="tabn" data-n="${k}"></span></button>`).join('')}</div>
       <label class="grow">Buscar <input id="q" type="search" placeholder="Nº, fornecedor ou item"></label>
@@ -5415,7 +5467,7 @@ async function viewPurchaseForm(v, id) {
   const isNew = !id;
   const o = isNew ? { status: 'rascunho', order_date: defs.order_date, expected_date: defs.expected_date, payment_method: defs.payment_method, payment_terms: defs.payment_terms, notes: defs.notes, items: [], freight: 0, discount: 0 } : await api('purchase', { params: { id } });
   // Ordem salva abre só para visualizar; "Editar" libera os campos, e "Salvar"/"Cancelar" voltam à visualização
-  const canEdit = ['rascunho', 'enviada'].includes(o.status);
+  const canEdit = ['rascunho', 'enviada'].includes(o.status) && (isNew ? can('compras.add') : can('compras.edit'));
   const editFlag = sessionStorage.getItem('poedit') === String(id); sessionStorage.removeItem('poedit');
   const editable = canEdit && (isNew || editFlag);
   const cancelBtn = isNew ? `<a class="btn" href="#/compras">${icon('x')}Cancelar</a>` : `<button type="button" class="btn" data-cancel>${icon('x')}Cancelar</button>`;
@@ -6163,7 +6215,7 @@ async function viewUsers(v) {
       route();
     });
   };
-  $('#new', v).onclick = () => form(null);
+  ($('#new', v) || {}).onclick = () => form(null);
   v.addEventListener('click', (e) => { const b = e.target.closest('button[data-id]'); if (b) form(rows.find((u) => u.id == b.dataset.id)); });
 }
 
@@ -6326,6 +6378,8 @@ async function viewAccount(v) {
 // Abre sozinho no celular (tela estreita) para quem tem acesso às ordens; "Versão completa" no menu volta ao sistema.
 const TK_MOBILE = () => window.matchMedia && window.matchMedia('(max-width: 760px)').matches;
 const tkMode = (v) => { try { if (v === undefined) return localStorage.getItem('tkMode') || ''; localStorage.setItem('tkMode', v); } catch (_) { return ''; } return v; };
+/** O app do técnico vale para quem tem ordens, no celular. Só quem tem "Alternar entre o app e a versão completa" pode sair dele. */
+const tkOn = () => TK_MOBILE() && can('ordens') && (!can('app.switch') || tkMode() !== 'off');
 const tkHello = () => { const h = new Date().getHours(); return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'; };
 const tkYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const tkToday = () => tkYmd(new Date());
@@ -6350,14 +6404,14 @@ function tkShell() {
         ${link('m', 'home', 'Início')}${link('m/agenda', 'calendar', 'Agenda')}
         ${can('clientes') ? link('clientes', 'users', 'Clientes') : ''}${can('orcamentos') ? link('orcamentos', 'quote', 'Orçamentos') : ''}
         ${can('produtos') ? link('produtos', 'box', 'Produtos') : ''}${can('servicos') ? link('servicos', 'tool', 'Serviços') : ''}
-        ${link('equipamentos', 'gear', 'Equipamentos')}${link('conta', 'user', 'Minha conta')}
+        ${can('equipamentos') ? link('equipamentos', 'gear', 'Equipamentos') : ''}${link('conta', 'user', 'Minha conta')}
       </nav>
-      <div class="tk-dfoot"><a href="#/painel" id="tkfull">${icon('monitor')}Versão completa</a><a href="#" id="tkout">${icon('login')}Sair</a></div>
+      <div class="tk-dfoot">${can('app.switch') ? `<a href="#/painel" id="tkfull">${icon('monitor')}Versão completa</a>` : ''}<a href="#" id="tkout">${icon('login')}Sair</a></div>
     </div></div>
     <main class="tk-main" id="tkv"></main></div>`;
   const dr = $('#tkdrawer');
   dr.onclick = (e) => { if (e.target === dr || e.target.closest('a')) dr.hidden = true; };
-  $('#tkfull').onclick = () => tkMode('off');
+  if ($('#tkfull')) $('#tkfull').onclick = () => tkMode('off');
   $('#tkout').onclick = async (e) => { e.preventDefault(); try { await api('logout', { body: {} }); } catch (_) {} await loadMe(); renderLogin(); };
 }
 const tkMenuBtn = () => `<button class="tk-ib" data-tkmenu aria-label="Menu">${icon('menu')}</button>`;
@@ -6386,15 +6440,15 @@ const tkProgress = (done, total, pctShow = true) => `<div class="tk-prog"><div c
 
 // ---- Início ----
 async function tkHome(v) {
-  const all = sessionStorage.getItem('tkAll') === '1';
+  const all = can('ordens.all') && sessionStorage.getItem('tkAll') === '1';
   const d = await api('tech_home', { params: { all: all ? 1 : '' } });
   d.today.forEach((r) => (r.mine = +r.technician_id === +state.me.id));
   const pend = d.today.filter((r) => r.status !== 'concluida');
   const short = (h, ic, l, cls) => `<a class="tk-short" href="#/${h}"><span class="tk-si ${cls}">${icon(ic)}</span>${l}</a>`;
   v.innerHTML = `<div class="tk-top">${tkMenuBtn()}</div>
     <div class="tk-hello"><div><span>${tkHello()},</span><h1>${esc(state.me.name)}</h1></div><button class="tk-sync" id="tksync">${icon('refresh')}Sincronizar</button></div>
-    <div class="tk-shorts">${short('ordem/nova', 'plus', 'Nova Tarefa', 'p')}${can('clientes') ? short('clientes', 'users', 'Clientes', 'b') : ''}
-      ${can('orcamentos') ? short('orcamento/novo', 'quote', 'Orçamento', 'o') : ''}${can('produtos') ? short('produtos', 'box', 'Produto', 'g') : ''}${short('m/agenda', 'calendar', 'Agenda', 'b')}</div>
+    <div class="tk-shorts">${can('ordens.add') ? short('ordem/nova', 'plus', 'Nova Tarefa', 'p') : ''}${can('clientes') ? short('clientes', 'users', 'Clientes', 'b') : ''}
+      ${can('orcamentos.add') ? short('orcamento/novo', 'quote', 'Orçamento', 'o') : ''}${can('produtos') ? short('produtos', 'box', 'Produto', 'g') : ''}${short('m/agenda', 'calendar', 'Agenda', 'b')}</div>
     <div class="tk-kpis">
       <a class="tk-kpi" href="#/m/agenda"><span class="tk-ki b">${icon('calendar')}</span><b>${d.today.length}</b><span>OS para hoje</span></a>
       <div class="tk-kpi"><span class="tk-ki r">${icon('warn')}</span><b>${d.late}</b><span>OS atrasadas</span></div>
@@ -6402,18 +6456,18 @@ async function tkHome(v) {
       <div class="tk-kpi"><span class="tk-ki g">${icon('play')}</span><b>${d.running}</b><span>em execução</span></div>
     </div>
     <div class="tk-sec"><h2>Agenda de hoje</h2><a href="#/m/agenda">Ver tudo ${icon('chevron')}</a></div>
-    <label class="tk-scope"><input type="checkbox" id="tkall" ${all ? 'checked' : ''}> Mostrar as tarefas de toda a equipe</label>
+    ${can('ordens.all') ? `<label class="tk-scope"><input type="checkbox" id="tkall" ${all ? 'checked' : ''}> Mostrar as tarefas de toda a equipe</label>` : ''}
     ${tkProgress(d.done, d.today.length)}
     <div class="tk-list">${pend.length ? pend.map(tkTaskCard).join('') : '<p class="tk-empty">Nenhuma tarefa pendente para hoje</p>'}</div>`;
   tkBindTop(v);
   $('#tksync', v).onclick = () => route();
-  $('#tkall', v).onchange = (e) => { sessionStorage.setItem('tkAll', e.target.checked ? '1' : '0'); route(); };
+  if ($('#tkall', v)) $('#tkall', v).onchange = (e) => { sessionStorage.setItem('tkAll', e.target.checked ? '1' : '0'); route(); };
 }
 
 // ---- Minha agenda (Calendário da semana ou lista do mês) ----
 async function tkAgenda(v) {
   const st = JSON.parse(sessionStorage.getItem('tkAg') || 'null') || {};
-  st.mode = st.mode || 'cal'; st.day = st.day || tkToday(); st.filter = st.filter || 'todas'; st.all = !!st.all; st.q = st.q || '';
+  st.mode = st.mode || 'cal'; st.day = st.day || tkToday(); st.filter = st.filter || 'todas'; st.all = !!st.all && can('ordens.all'); st.q = st.q || '';
   const save = () => sessionStorage.setItem('tkAg', JSON.stringify(st));
   const dayD = new Date(st.day + 'T12:00:00');
   const weekStart = new Date(dayD); weekStart.setDate(dayD.getDate() - dayD.getDay());
@@ -6426,7 +6480,7 @@ async function tkAgenda(v) {
     .filter((r) => !q || [r.customer_name, r.customer_trade_name, r.description, r.task_type_name, String(r.id)].some((x) => String(x || '').toLowerCase().includes(q)));
   const byDay = (ymd) => rows.filter((r) => String(r.scheduled_at).slice(0, 10) === ymd);
   const head = `<div class="tk-top">${tkMenuBtn()}</div>
-    <div class="tk-aghead"><select id="tkwho" class="tk-who"><option value="0">Minha Agenda</option><option value="1" ${st.all ? 'selected' : ''}>Agenda da equipe</option></select>
+    <div class="tk-aghead">${can('ordens.all') ? `<select id="tkwho" class="tk-who"><option value="0">Minha Agenda</option><option value="1" ${st.all ? 'selected' : ''}>Agenda da equipe</option></select>` : '<strong class="tk-who">Minha Agenda</strong>'}
       <div class="tk-toggle"><button data-mode="cal" class="${st.mode === 'cal' ? 'on' : ''}">Calendário</button><button data-mode="mes" class="${st.mode === 'mes' ? 'on' : ''}">Mês</button></div>
       <button class="tk-ib" id="tksearch" aria-label="Buscar">${icon('search')}</button></div>
     <div class="tk-searchbox" ${st.q ? '' : 'hidden'}><input id="tkq" type="search" placeholder="Cliente, descrição ou ID" value="${esc(st.q)}"></div>`;
@@ -6443,7 +6497,7 @@ async function tkAgenda(v) {
         <div class="tk-days">${days.map((x) => { const y = tkYmd(x); return `<button data-day="${y}" class="${y === st.day ? 'on' : ''} ${y === tkToday() ? 'today' : ''}"><span>${TK_WD[x.getDay()]}</span><b>${x.getDate()}</b>${byDay(y).length ? '<i></i>' : '<i class="no"></i>'}</button>`; }).join('')}</div>
         ${st.day !== tkToday() ? '<button class="tk-pill" data-day="' + tkToday() + '">Hoje</button>' : '<span class="tk-pill off">Hoje</span>'}
         <div class="tk-chips">${TK_FILTERS.map(([k, l]) => `<button data-f="${k}" class="${st.filter === k ? 'on' : ''}">${l} (${counts[k]})</button>`).join('')}</div></div>
-      <div class="tk-btns"><a class="tk-btn p" href="#/ordem/nova">${icon('plus')}Nova Tarefa</a><button class="tk-sync" id="tksync">${icon('refresh')}Sincronizar</button></div>
+      <div class="tk-btns">${can('ordens.add') ? `<a class="tk-btn p" href="#/ordem/nova">${icon('plus')}Nova Tarefa</a>` : ''}<button class="tk-sync" id="tksync">${icon('refresh')}Sincronizar</button></div>
       ${dayRows.length ? tkProgress(done, dayRows.length, false) : ''}
       <div class="tk-list">${shown.length ? shown.map(tkTaskCard).join('') : '<p class="tk-empty">Nenhuma tarefa encontrada</p>'}</div>`;
   } else {
@@ -6461,7 +6515,7 @@ async function tkAgenda(v) {
     const wk = e.target.closest('[data-wk]'); if (wk) { const x = new Date(st.day + 'T12:00:00'); x.setDate(x.getDate() + +wk.dataset.wk); st.day = tkYmd(x); save(); route(); return; }
     const f = e.target.closest('[data-f]'); if (f) { st.filter = f.dataset.f; save(); route(); }
   });
-  $('#tkwho', v).onchange = (e) => { st.all = e.target.value === '1'; save(); route(); };
+  if ($('#tkwho', v)) $('#tkwho', v).onchange = (e) => { st.all = e.target.value === '1'; save(); route(); };
   $('#tksearch', v).onclick = () => { const b = $('.tk-searchbox', v); b.hidden = !b.hidden; if (!b.hidden) $('#tkq', v).focus(); };
   $('#tkq', v).oninput = debounce((e) => { st.q = e.target.value; save(); route(); }, 400);
   const sy = $('#tksync', v); if (sy) sy.onclick = () => route();
@@ -6519,7 +6573,7 @@ async function tkOrder(v, id, page, sub) {
   v.innerHTML = `<div class="tk-top">${tkBackBtn(back)}${tkMenuBtn()}</div>
     <div class="tk-ohead"><div><h1>${esc(cust)}</h1><span class="tk-sub">Tarefa #${o.id}</span>
       <div class="tk-tags"><span class="tk-st ${tkStatusCls(o.status)}">${esc(o.status_label.toLowerCase())}</span>${pend.length && o.status !== 'concluida' ? `<span class="tk-tag warn">${pend.length} pendência${pend.length > 1 ? 's' : ''}</span>` : ''}</div></div>
-      <div class="tk-oacts">${phone ? `<a class="tk-ib b" href="tel:${phone}" aria-label="Ligar">${icon('phone')}</a>` : ''}<a class="tk-ib b" href="#/ordem/${o.id}" id="tkedit" aria-label="Editar na versão completa">${icon('pencil')}</a><button class="tk-ib b" id="tkshare" aria-label="Compartilhar">${icon('share')}</button></div></div>
+      <div class="tk-oacts">${phone ? `<a class="tk-ib b" href="tel:${phone}" aria-label="Ligar">${icon('phone')}</a>` : ''}${can('app.switch') && o.status !== 'concluida' ? `<a class="tk-ib b" href="#/ordem/${o.id}" id="tkedit" aria-label="Editar na versão completa">${icon('pencil')}</a>` : ''}<button class="tk-ib b" id="tkshare" aria-label="Compartilhar">${icon('share')}</button></div></div>
     ${o.status === 'concluida' ? `<div class="tk-lock">${icon('lock')}<span>Check-out feito: a ordem está concluída. Pelo celular dá só para consultar; para alterar, use o computador.</span></div>` : ''}
     <div class="tk-tabs">${[['detalhes', 'Detalhes'], ['relatorio', 'Relatório'], ['pendencias', 'Pendências']].map(([k, l]) => `<button data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}${k === 'pendencias' && pend.length ? ` (${pend.length})` : ''}</button>`).join('')}</div>
     <div data-pane="detalhes" ${tab === 'detalhes' ? '' : 'hidden'}>
@@ -6556,7 +6610,7 @@ async function tkOrder(v, id, page, sub) {
     $$('.tk-tabs button', v).forEach((b) => b.classList.toggle('on', b === t));
     $$('[data-pane]', v).forEach((p) => (p.hidden = p.dataset.pane !== t.dataset.tab));
   });
-  $('#tkedit', v).onclick = () => tkMode('off');
+  if ($('#tkedit', v)) $('#tkedit', v).onclick = () => tkMode('off');
   $('#tkshare', v).onclick = async () => {
     try { if (navigator.share) await navigator.share({ title: `OS #${o.id}`, url: o.public_url }); else await copyLink(o.public_url, 'Link da OS digital copiado'); } catch (_) {}
   };
@@ -6865,6 +6919,38 @@ async function tkRoute(path) {
   window.scrollTo(0, 0);
 }
 
+/**
+ * Telas da versão completa abertas a partir do app do técnico (Minha conta, Equipamentos, Clientes…):
+ * ficam dentro do app, com o menu do app, sem voltar para a barra lateral da versão completa.
+ */
+async function tkHost(path) {
+  if (!path || path === 'painel') return go('m');
+  const om = path.match(/^ordem\/(\d+)$/);
+  if (om) return go('m/os/' + om[1]); // a OS no celular abre sempre no app
+  tkShell();
+  $('#tkdrawer').hidden = true;
+  const [re, fn, perm] = ROUTES.find(([r]) => r.test(path)) || [/^/, viewDashboard];
+  const sec = navSection(path);
+  let title = 'Gestão de Serviços';
+  for (const g of NAV) for (const it of (g.items || [])) for (const x of (it.items || [it])) if (Array.isArray(x) && x[0] === sec) title = x[1];
+  if (sec === 'conta' || path === 'aparencia') title = 'Minha conta';
+  const old = $('#tkv'); const shell = old.cloneNode(false); old.replaceWith(shell);
+  shell.innerHTML = `<div class="tk-top">${tkMenuBtn()}<a class="tk-ib" href="#/m" aria-label="Início do app" title="Início">${icon('home')}</a></div><div class="tk-host" id="view" aria-label="${esc(title)}"><p class="tk-empty">Carregando…</p></div>`;
+  tkBindTop(shell);
+  const view = $('#view', shell);
+  const token = ++routeToken;
+  try {
+    if (!state.meta) { state.meta = await api('meta'); paintBrand(); }
+    syncQStatus(); syncPoStatus();
+    if (token !== routeToken) return;
+    if (!can(perm)) { view.innerHTML = `<div class="empty">${icon('lock')}<h2>Sem acesso</h2><p>Você não tem permissão para esta área.</p><a class="btn" href="#/m">Voltar ao início</a></div>`; return; }
+    await fn(view, ...path.match(re).slice(1));
+  } catch (e) {
+    if (token === routeToken) view.innerHTML = `<div class="alert err">${esc(e.message)}</div>`;
+  }
+  window.scrollTo(0, 0);
+}
+
 // ============ Início ============
 applyTheme();
 window.addEventListener('hashchange', route);
@@ -6872,7 +6958,7 @@ window.addEventListener('hashchange', route);
   try { await loadMe(); } catch (e) { $('#app').innerHTML = `<div class="boot">${esc(e.message)}</div>`; return; }
   // No celular, quem atende ordens entra direto no app do técnico (a não ser que tenha escolhido a versão completa)
   const h0 = location.hash.replace(/^#\/?/, '');
-  if (state.me && TK_MOBILE() && tkMode() !== 'off' && can('ordens') && (h0 === '' || h0 === 'painel')) location.replace('#/m');
-  else if (state.me) renderShell();
+  if (state.me && tkOn() && (h0 === '' || h0 === 'painel')) location.replace('#/m');
+  else if (state.me && !tkOn()) renderShell();
   route();
 })();

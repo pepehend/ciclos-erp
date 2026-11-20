@@ -7,3 +7,5 @@ data/*
 *.sqlite-*
 *.sql
 .DS_Store
+# Configuração da instalação em VM (deploy/debian/install.sh)
+deploy/servidor.conf

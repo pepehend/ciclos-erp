@@ -46,12 +46,17 @@ try {
     $method = $_SERVER['REQUEST_METHOD'];
     if ($method === 'POST') Auth::checkCsrf();
     $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    // Ordens de serviço: sem "Ver as OS de todos os técnicos" só aparecem as do próprio usuário
+    if ($me0 = Auth::user()) {
+        if (!Auth::can('ordens.all')) ServiceOrders::$onlyTech = (int)$me0['id'];
+        ServiceOrders::$afterCheckout = Auth::can('ordens.after_checkout');
+    }
 
     $routes = [
         // ---- Sessão ----
         'GET me' => function () {
             $u = Auth::withAvatar(Auth::user());
-            $r = ['user' => $u, 'csrf' => Auth::csrf(), 'version' => APP_VERSION, 'perms' => Auth::PERMS];
+            $r = ['user' => $u, 'csrf' => Auth::csrf(), 'version' => APP_VERSION, 'perms' => Auth::perms(), 'perm_modules' => Auth::modules()];
             // Tela de login: nome e logo da empresa (só quando ninguém está logado)
             if (!$u) $r['brand'] = ['name' => Settings::get('company_name'), 'logo' => Settings::get('company_logo')];
             return $r;
@@ -105,7 +110,7 @@ try {
             if (Auth::can('financeiro')) $d['finance'] = Finance::summary();
             $me = Auth::user();
             if (Auth::can('ordens')) $d['orders'] = ServiceOrders::dashboard((int)$me['id']);
-            $rk = array_values(array_filter([Auth::can('produtos') ? 'produto' : null, Auth::can('servicos') ? 'servico' : null]));
+            $rk = array_values(array_filter([Auth::can('produtos.review') ? 'produto' : null, Auth::can('servicos.review') ? 'servico' : null]));
             if ($rk) $d['items_review'] = count(OrderExec::reviewList($rk));
             if (Auth::can('orcamentos')) {
                 $d['quotes'] = [
@@ -181,7 +186,7 @@ try {
         },
         // Importação de produtos por planilha: 1) prévia (lê o arquivo e confere) 2) cadastro em lotes
         'POST products_import_preview' => function () {
-            Auth::requirePerm('produtos');
+            Auth::requirePerm('produtos.add');
             $f = $_FILES['file'] ?? null;
             if (!$f || $f['error'] !== UPLOAD_ERR_OK) {
                 $err = $f['error'] ?? null;
@@ -192,7 +197,7 @@ try {
             return ProductImport::preview(ProductImport::read((string)file_get_contents($f['tmp_name']), (string)$f['name']));
         },
         'POST products_import' => function () {
-            Auth::requirePerm('produtos');
+            Auth::requirePerm('produtos.add');
             @set_time_limit(120);
             $rows = input()['rows'] ?? [];
             if (!is_array($rows)) throw new AppError('Linhas inválidas');
@@ -208,15 +213,16 @@ try {
             return ProductImport::undo((string)(input()['day'] ?? ''));
         },
         'POST product_delete' => function () {
-            Auth::requireAdmin();
-            return ['result' => Inventory::deleteProduct((int)(input()['id'] ?? 0))];
+            $pid = (int)(input()['id'] ?? 0);
+            Auth::requirePerm(DB::val('SELECT type FROM products WHERE id = ?', [$pid]) === 'servico' ? 'servicos.delete' : 'produtos.delete');
+            return ['result' => Inventory::deleteProduct($pid)];
         },
         'POST product_save' => function () {
             $in = input();
             $isService = ($in['type'] ?? '') === 'servico'
                 || (!empty($in['id']) && DB::val('SELECT type FROM products WHERE id = ?', [(int)$in['id']]) === 'servico');
-            Auth::requirePerm($isService ? 'servicos' : 'produtos');
             $id = !empty($in['id']) ? (int)$in['id'] : null;
+            Auth::requirePerm(($isService ? 'servicos' : 'produtos') . ($id ? '.edit' : '.add'));
             if (isset($in['active']) && !$in['active']) Auth::requireAdmin();
             return ['id' => Inventory::saveProduct($in, $id, Auth::user()['id'] ?? null)];
         },
@@ -238,7 +244,7 @@ try {
             return ['rows' => $rows, 'total' => $total];
         },
         'POST movement' => function () {
-            $u = Auth::requirePerm('movimentacoes');
+            $u = Auth::requirePerm('movimentacoes.add');
             return Inventory::manualMove(input(), $u['id']);
         },
 
@@ -272,18 +278,18 @@ try {
             return $s;
         },
         'POST sale_create' => function () {
-            $u = Auth::requirePerm('vendas');
+            $u = Auth::requirePerm('vendas.add');
             return ['id' => Inventory::createSale(input(), $u['id'])];
         },
         'POST sale_cancel' => function () {
-            $u = Auth::requirePerm('vendas');
+            $u = Auth::requirePerm('vendas.cancel');
             Inventory::cancelSale((int)(input()['id'] ?? 0), $u['id']);
             return ['ok' => true];
         },
 
         // ---- Notas fiscais ----
         'POST invoice_parse' => function () {
-            Auth::requirePerm('notas');
+            Auth::requirePerm('notas.import');
             $in = input();
             if (!empty($in['qr'])) {
                 $inv = Invoices::fetchNfce((string)$in['qr']);
@@ -307,7 +313,7 @@ try {
             return Invoices::suggest($inv);
         },
         'POST invoice_confirm' => function () {
-            $u = Auth::requirePerm('notas');
+            $u = Auth::requirePerm('notas.import');
             return ['id' => Invoices::confirm(input(), $u['id'])];
         },
         'GET invoices' => function () {
@@ -330,7 +336,7 @@ try {
             return $i;
         },
         'POST invoice_revert' => function () {
-            $u = Auth::requireAdmin();
+            $u = Auth::requirePerm('notas.revert');
             Invoices::revert((int)(input()['id'] ?? 0), $u['id']);
             return ['ok' => true];
         },
@@ -374,11 +380,11 @@ try {
         },
         // ---- Portal do cliente (cliente/) ----
         'POST customer_portal_invite' => function () {
-            Auth::requirePerm('clientes');
+            Auth::requirePerm('clientes.portal');
             return Portal::invite((int)(input()['id'] ?? 0));
         },
         'POST customer_portal_revoke' => function () {
-            Auth::requirePerm('clientes');
+            Auth::requirePerm('clientes.portal');
             Portal::revoke((int)(input()['id'] ?? 0));
             return ['ok' => true];
         },
@@ -388,14 +394,14 @@ try {
             return ['ok' => true];
         },
         'POST customer_save' => function () {
-            Auth::requirePerm('clientes');
             $in = input();
             $id = !empty($in['id']) ? (int)$in['id'] : null;
+            Auth::requirePerm($id ? 'clientes.edit' : 'clientes.add');
             if (isset($in['active']) && !$in['active']) Auth::requireAdmin();
             return ['id' => Customers::save($in, $id)];
         },
         'POST customer_delete' => function () {
-            Auth::requireAdmin();
+            Auth::requirePerm('clientes.delete');
             return ['result' => Removals::delete('customers', (int)(input()['id'] ?? 0))];
         },
         'GET cnpj' => function () { Auth::require(); return Customers::lookupCnpj((string)q('cnpj', '')); },
@@ -438,15 +444,15 @@ try {
             return $c;
         },
         'POST supplier_save' => function () {
-            Auth::requirePerm('fornecedores');
             $in = input();
             $id = !empty($in['id']) ? (int)$in['id'] : null;
+            Auth::requirePerm($id ? 'fornecedores.edit' : 'fornecedores.add');
             if (isset($in['active']) && !$in['active']) Auth::requireAdmin();
             return ['id' => Customers::save($in, $id, 'suppliers')];
         },
 
         'POST supplier_delete' => function () {
-            Auth::requireAdmin();
+            Auth::requirePerm('fornecedores.delete');
             return ['result' => Removals::delete('suppliers', (int)(input()['id'] ?? 0))];
         },
 
@@ -494,27 +500,27 @@ try {
                 'user_id' => $u['id'], 'notes' => Settings::get('quote_default_notes'), 'statuses' => QuoteStatuses::map()];
         },
         'POST quote_save' => function () {
-            $u = Auth::requirePerm('orcamentos');
             $in = input();
+            $u = Auth::requirePerm(!empty($in['id']) ? 'orcamentos.edit' : 'orcamentos.add');
             return ['id' => Quotes::save($in, $u['id'], !empty($in['id']) ? (int)$in['id'] : null)];
         },
         'POST quote_status' => function () {
-            Auth::requirePerm('orcamentos');
+            Auth::requirePerm('orcamentos.status');
             $in = input();
             Quotes::setStatus((int)($in['id'] ?? 0), (string)($in['status'] ?? ''));
             return ['ok' => true];
         },
         'POST quote_convert' => function () {
-            Auth::requirePerm('orcamentos');
-            $u = Auth::requirePerm('vendas');
+            Auth::requirePerm('orcamentos.convert');
+            $u = Auth::requirePerm('vendas.add');
             $in = input();
             return ['sale_id' => Quotes::convert((int)($in['id'] ?? 0), (string)($in['payment_method'] ?? ''), $u['id'],
                 isset($in['installments']) ? (int)$in['installments'] : null, isset($in['installment_days']) ? (int)$in['installment_days'] : null,
                 $in['installment_plan'] ?? null, isset($in['installment_entry']) ? !empty($in['installment_entry']) : null)];
         },
         'POST quotes_bulk' => function () {
-            Auth::requirePerm('orcamentos');
             $in = input();
+            Auth::requirePerm(($in['action'] ?? '') === 'delete' ? 'orcamentos.delete' : 'orcamentos.status');
             return Quotes::bulk((array)($in['ids'] ?? []), (string)($in['action'] ?? ''), isset($in['status']) ? (string)$in['status'] : null);
         },
         'GET quote_pdf' => function () {
@@ -549,12 +555,12 @@ try {
             exit;
         },
         'POST quote_mark' => function () {
-            Auth::requirePerm('orcamentos');
+            Auth::requirePerm('orcamentos.status');
             $in = input();
             return ['status' => Quotes::mark((int)($in['id'] ?? 0), (string)($in['action'] ?? ''))];
         },
         'POST quote_delete' => function () {
-            Auth::requirePerm('orcamentos');
+            Auth::requirePerm('orcamentos.delete');
             Quotes::delete((int)(input()['id'] ?? 0));
             return ['ok' => true];
         },
@@ -580,7 +586,7 @@ try {
             return ['ok' => true];
         },
         'POST quote_duplicate' => function () {
-            $u = Auth::requirePerm('orcamentos');
+            $u = Auth::requirePerm('orcamentos.add');
             return ['id' => Quotes::duplicate((int)(input()['id'] ?? 0), $u['id'])];
         },
         // ---- Ordens de serviço ----
@@ -589,7 +595,7 @@ try {
             return ServiceOrders::agenda(['from' => q('from'), 'to' => q('to'), 'tech' => q('tech'), 'task_type_id' => q('task_type_id'), 'status' => q('status'), 'q' => q('q'), 'late' => q('late') === '1']);
         },
         'POST agenda_move' => function () {
-            $u = Auth::requirePerm('ordens');
+            $u = Auth::requirePerm('ordens.reschedule');
             $in = input();
             ServiceOrders::reschedule((int)($in['id'] ?? 0), (string)($in['scheduled_at'] ?? ''), $in['technician_id'] ?? null, (int)$u['id']);
             return ['ok' => true];
@@ -603,16 +609,16 @@ try {
             return ServiceOrders::get((int)q('id'));
         },
         'GET service_order_form' => function () {
-            Auth::requirePerm('ordens');
+            Auth::requirePerm('ordens'); // a ficha usa as listas também para mostrar (técnico, tipo, equipamento)
             return ServiceOrders::formData((int)q('customer_id', 0));
         },
         'POST service_order_save' => function () {
-            $u = Auth::requirePerm('ordens');
             $in = input();
+            $u = Auth::requirePerm(!empty($in['id']) ? 'ordens.edit' : 'ordens.add');
             return ['id' => ServiceOrders::save($in, $u['id'], !empty($in['id']) ? (int)$in['id'] : null)];
         },
         'POST service_order_status' => function () {
-            $u = Auth::requirePerm('ordens');
+            $u = Auth::requirePerm('ordens.execute');
             $in = input();
             ServiceOrders::setStatus((int)($in['id'] ?? 0), (string)($in['status'] ?? ''), (int)$u['id'], isset($in['reason']) ? (string)$in['reason'] : null);
             return ['ok' => true];
@@ -620,44 +626,44 @@ try {
         // ---- App do técnico (celular) ----
         'GET tech_home' => function () {
             $u = Auth::requirePerm('ordens');
-            return ServiceOrders::techHome((int)$u['id'], q('all') !== '1') + ['can_quotes' => Auth::can('orcamentos')];
+            return ServiceOrders::techHome((int)$u['id'], q('all') !== '1' || !Auth::can('ordens.all')) + ['can_quotes' => Auth::can('orcamentos')];
         },
         'GET tech_tasks' => function () {
             $u = Auth::requirePerm('ordens');
-            return ['rows' => ServiceOrders::techTasks((string)q('from'), (string)q('to'), q('all') === '1' ? null : (int)$u['id']), 'statuses' => ServiceOrders::STATUSES];
+            return ['rows' => ServiceOrders::techTasks((string)q('from'), (string)q('to'), q('all') === '1' && Auth::can('ordens.all') ? null : (int)$u['id']), 'statuses' => ServiceOrders::STATUSES];
         },
         'GET service_order_detail' => function () {
             Auth::requirePerm('ordens');
             return OrderExec::detail((int)q('id'));
         },
         'POST so_answers_save' => function () {
-            $u = Auth::requirePerm('ordens');
+            $u = Auth::requirePerm('ordens.execute', 'ordens.edit');
             $in = input();
             return OrderExec::saveAnswers((int)($in['id'] ?? 0), (int)($in['questionnaire_id'] ?? 0), $in['answers'] ?? [], $in['equipment_id'] ?? null, (int)$u['id']);
         },
         'POST so_report_save' => function () {
-            Auth::requirePerm('ordens');
+            Auth::requirePerm('ordens.execute', 'ordens.edit');
             $in = input();
             OrderExec::saveReport((int)($in['id'] ?? 0), $in);
             return ['ok' => true];
         },
         'POST so_photo_add' => function () {
-            $u = Auth::requirePerm('ordens');
+            $u = Auth::requirePerm('ordens.execute', 'ordens.edit');
             $in = input();
             return ['id' => OrderExec::addPhoto((int)($in['id'] ?? 0), $in['image'] ?? '', (string)($in['caption'] ?? ''), (int)$u['id'])];
         },
         'POST so_photo_delete' => function () {
-            Auth::requirePerm('ordens');
+            Auth::requirePerm('ordens.execute', 'ordens.edit');
             OrderExec::deletePhoto((int)(input()['photo_id'] ?? 0));
             return ['ok' => true];
         },
         'POST so_item_save' => function () {
-            $u = Auth::requirePerm('ordens');
+            $u = Auth::requirePerm('ordens.execute', 'ordens.edit');
             $in = input();
             return ['id' => OrderExec::saveItem((int)($in['id'] ?? 0), $in, (int)$u['id'])];
         },
         'POST so_item_review' => function () {
-            $u = Auth::requirePerm('produtos', 'servicos');
+            $u = Auth::requirePerm('produtos.review', 'servicos.review');
             $in = input();
             $it = DB::one('SELECT * FROM so_items WHERE id = ?', [(int)($in['item_id'] ?? 0)]);
             if (!$it) throw new AppError('Item não encontrado', 404);
@@ -666,83 +672,84 @@ try {
             return ['ok' => true];
         },
         'GET so_items_review' => function () {
-            Auth::requirePerm('produtos', 'servicos');
-            $kinds = array_values(array_filter([Auth::can('produtos') ? 'produto' : null, Auth::can('servicos') ? 'servico' : null]));
+            Auth::requirePerm('produtos.review', 'servicos.review');
+            $kinds = array_values(array_filter([Auth::can('produtos.review') ? 'produto' : null, Auth::can('servicos.review') ? 'servico' : null]));
             return ['rows' => OrderExec::reviewList($kinds), 'kinds' => OrderExec::KINDS];
         },
         'POST so_item_delete' => function () {
-            Auth::requirePerm('ordens');
+            Auth::requirePerm('ordens.execute', 'ordens.edit');
             OrderExec::deleteItem((int)(input()['item_id'] ?? 0));
             return ['ok' => true];
         },
         'POST so_hours_save' => function () {
-            $u = Auth::requirePerm('ordens');
+            $u = Auth::requirePerm('ordens.hours');
             $in = input();
             return ['changed' => OrderExec::saveHours((int)($in['id'] ?? 0), $in, (int)$u['id'])];
         },
         'POST so_send' => function () {
-            $u = Auth::requirePerm('ordens');
+            $u = Auth::requirePerm('ordens.send');
             $in = input();
+            ServiceOrders::get((int)($in['id'] ?? 0)); // só as OS que o usuário pode ver
             OrderExec::send((int)($in['id'] ?? 0), (string)($in['kind'] ?? ''), (string)($in['to'] ?? ''), (int)$u['id']);
             return ['ok' => true];
         },
         'GET equipments' => function () {
-            Auth::requirePerm('ordens');
+            Auth::requirePerm('equipamentos', 'ordens');
             return Equipments::list($_GET);
         },
         'POST equipment_save' => function () {
-            Auth::requirePerm('ordens');
             $in = input();
+            Auth::requirePerm(!empty($in['id']) ? 'equipamentos.edit' : 'equipamentos.add');
             return ['id' => Equipments::save($in, !empty($in['id']) ? (int)$in['id'] : null)];
         },
         'POST equipment_active' => function () {
-            Auth::requirePerm('ordens');
+            Auth::requirePerm('equipamentos.edit');
             $in = input();
             Equipments::setActive((int)($in['id'] ?? 0), !empty($in['active']));
             return ['ok' => true];
         },
         'POST equipment_delete' => function () {
-            Auth::requireAdmin();
+            Auth::requirePerm('equipamentos.delete');
             return ['result' => Removals::delete('equipments', (int)(input()['id'] ?? 0))];
         },
         'POST questionnaire_delete' => function () {
-            Auth::requireAdmin();
+            Auth::requirePerm('questionarios.delete');
             return ['result' => Removals::delete('questionnaires', (int)(input()['id'] ?? 0))];
         },
         'POST task_type_delete' => function () {
-            Auth::requireAdmin();
+            Auth::requirePerm('tipos_tarefa.delete');
             return ['result' => Removals::delete('task_types', (int)(input()['id'] ?? 0))];
         },
         'GET questionnaires' => function () {
-            Auth::requirePerm('ordens');
+            Auth::requirePerm('questionarios', 'tipos_tarefa', 'ordens');
             return ['rows' => Questionnaires::list(q('all') === '1'), 'types' => Questionnaires::TYPES];
         },
         'GET questionnaire' => function () {
-            Auth::requirePerm('ordens');
+            Auth::requirePerm('questionarios', 'ordens');
             return Questionnaires::get((int)q('id'));
         },
         'POST questionnaire_save' => function () {
-            Auth::requirePerm('ordens');
             $in = input();
+            Auth::requirePerm(!empty($in['id']) ? 'questionarios.edit' : 'questionarios.add');
             return ['id' => Questionnaires::save($in, !empty($in['id']) ? (int)$in['id'] : null)];
         },
         'POST questionnaire_active' => function () {
-            Auth::requirePerm('ordens');
+            Auth::requirePerm('questionarios.edit');
             $in = input();
             Questionnaires::setActive((int)($in['id'] ?? 0), !empty($in['active']));
             return ['ok' => true];
         },
         'GET task_types' => function () {
-            Auth::requirePerm('ordens');
+            Auth::requirePerm('tipos_tarefa', 'ordens');
             return ['rows' => TaskTypes::list(q('all') === '1'), 'requires' => TaskTypes::REQUIRES, 'questionnaires' => Questionnaires::options()];
         },
         'POST task_type_save' => function () {
-            Auth::requirePerm('ordens');
             $in = input();
+            Auth::requirePerm(!empty($in['id']) ? 'tipos_tarefa.edit' : 'tipos_tarefa.add');
             return ['id' => TaskTypes::save($in, !empty($in['id']) ? (int)$in['id'] : null)];
         },
         'POST task_type_active' => function () {
-            Auth::requirePerm('ordens');
+            Auth::requirePerm('tipos_tarefa.edit');
             $in = input();
             TaskTypes::setActive((int)($in['id'] ?? 0), !empty($in['active']));
             return ['ok' => true];
@@ -768,27 +775,27 @@ try {
         },
         'GET purchase_low_stock' => function () { Auth::requirePerm('compras'); return PurchaseOrders::lowStock(); },
         'POST purchase_save' => function () {
-            $u = Auth::requirePerm('compras');
             $in = input();
+            $u = Auth::requirePerm(!empty($in['id']) ? 'compras.edit' : 'compras.add');
             return ['id' => PurchaseOrders::save($in, $u['id'], !empty($in['id']) ? (int)$in['id'] : null)];
         },
         'POST purchase_status' => function () {
-            Auth::requirePerm('compras');
+            Auth::requirePerm('compras.edit');
             $in = input();
             PurchaseOrders::setStatus((int)($in['id'] ?? 0), (string)($in['status'] ?? ''), $in['date'] ?? null);
             return ['ok' => true];
         },
         'POST purchases_bulk' => function () {
-            Auth::requirePerm('compras');
             $in = input();
+            Auth::requirePerm(($in['action'] ?? '') === 'delete' ? 'compras.delete' : 'compras.edit');
             return PurchaseOrders::bulk((array)($in['ids'] ?? []), (string)($in['action'] ?? ''), isset($in['status']) ? (string)$in['status'] : null, $in['date'] ?? null);
         },
         'POST purchase_duplicate' => function () {
-            $u = Auth::requirePerm('compras');
+            $u = Auth::requirePerm('compras.add');
             return ['id' => PurchaseOrders::duplicate((int)(input()['id'] ?? 0), $u['id'])];
         },
         'POST purchase_delete' => function () {
-            Auth::requirePerm('compras');
+            Auth::requirePerm('compras.delete');
             PurchaseOrders::delete((int)(input()['id'] ?? 0));
             return ['ok' => true];
         },
@@ -840,19 +847,19 @@ try {
         },
         'GET finance_entry' => function () { Auth::requirePerm('financeiro'); return Finance::get((int)q('id')); },
         'POST finance_save' => function () {
-            $u = Auth::requirePerm('financeiro');
             $in = input();
+            $u = Auth::requirePerm(!empty($in['id']) ? 'financeiro.edit' : 'financeiro.add');
             return ['ids' => Finance::save($in, $u['id'], !empty($in['id']) ? (int)$in['id'] : null)];
         },
         'POST finance_pay' => function () {
-            Auth::requirePerm('financeiro');
+            Auth::requirePerm('financeiro.edit');
             $in = input();
             Finance::pay((int)($in['id'] ?? 0), $in);
             return ['ok' => true];
         },
-        'POST finance_reopen' => function () { Auth::requirePerm('financeiro'); Finance::reopen((int)(input()['id'] ?? 0)); return ['ok' => true]; },
-        'POST finance_cancel' => function () { Auth::requirePerm('financeiro'); Finance::cancel((int)(input()['id'] ?? 0)); return ['ok' => true]; },
-        'POST finance_delete' => function () { Auth::requirePerm('financeiro'); Finance::delete((int)(input()['id'] ?? 0)); return ['ok' => true]; },
+        'POST finance_reopen' => function () { Auth::requirePerm('financeiro.edit'); Finance::reopen((int)(input()['id'] ?? 0)); return ['ok' => true]; },
+        'POST finance_cancel' => function () { Auth::requirePerm('financeiro.edit'); Finance::cancel((int)(input()['id'] ?? 0)); return ['ok' => true]; },
+        'POST finance_delete' => function () { Auth::requirePerm('financeiro.delete'); Finance::delete((int)(input()['id'] ?? 0)); return ['ok' => true]; },
         'GET cashflow' => function () { Auth::requirePerm('financeiro'); return Finance::cashflow($_GET); },
         'POST cash_opening' => function () {
             Auth::requireAdmin(); // saldo inicial do caixa é configuração: só administrador
@@ -922,7 +929,7 @@ try {
             $me = Auth::requireAdmin();
             return ['result' => Auth::deleteUser((int)(input()['id'] ?? 0), (int)$me['id'])];
         },
-        'GET profiles' => function () { Auth::requireAdmin(); return ['profiles' => Auth::profiles(), 'perms' => Auth::PERMS]; },
+        'GET profiles' => function () { Auth::requireAdmin(); return ['profiles' => Auth::profiles(), 'perms' => Auth::perms(), 'modules' => Auth::modules()]; },
         'POST profile_save' => function () { Auth::requireAdmin(); return ['id' => Auth::saveProfile(input())]; },
         'POST profile_delete' => function () { Auth::requireAdmin(); Auth::deleteProfile((int)(input()['id'] ?? 0)); return ['ok' => true]; },
         'GET backup' => function () {

@@ -61,7 +61,7 @@ Inventory::manualMove(['product_id' => $farinha, 'kind' => 'saida', 'quantity' =
 Inventory::manualMove(['product_id' => $acucar, 'kind' => 'saida', 'quantity' => 1], $uid);
 near(Inventory::product($donut)['avg_cost'], 3.25, 'custo médio do produto');
 ok(!method_exists('Inventory', 'produce') && !method_exists('Inventory', 'recipe'), 'produção e ficha técnica removidas');
-ok(!isset(Auth::PERMS['producao']), 'permissão de produção removida');
+ok(!isset(Auth::perms()['producao']), 'permissão de produção removida');
 
 $oldIns = DB::insert('products', ['name' => 'Insumo antigo', 'type' => 'insumo', 'unit' => 'kg', 'recipe_mode' => 'sob_demanda', 'created_at' => now(), 'updated_at' => now()]);
 DB::upgrade();
@@ -250,8 +250,8 @@ echo "Permissões\n";
 $mid = Auth::createUser(['name' => 'Sócio', 'email' => 'socio@example.com', 'password' => 'senha12345', 'permissions' => ['vendas', 'clientes', 'xyz']]);
 $mu = DB::one('SELECT * FROM users WHERE id = ?', [$mid]);
 ok(Auth::permsOf($mu) === ['vendas', 'clientes'], 'grava só permissões conhecidas');
-ok(count(Auth::permsOf(DB::one('SELECT * FROM users WHERE id = ?', [$uid]))) === count(Auth::PERMS), 'administrador tem todas');
-ok(count(Auth::permsOf(['role' => 'membro', 'permissions' => null])) === count(Auth::PERMS), 'usuário antigo (sem configuração) mantém tudo');
+ok(count(Auth::permsOf(DB::one('SELECT * FROM users WHERE id = ?', [$uid]))) === count(Auth::perms()), 'administrador tem todas');
+ok(count(Auth::permsOf(['role' => 'membro', 'permissions' => null])) === count(Auth::perms()), 'usuário antigo (sem configuração) mantém tudo');
 ok(Auth::permsOf(['role' => 'membro', 'permissions' => '']) === [], 'pode ficar sem nenhuma permissão');
 echo "Perfis de permissão\n";
 DB::migrate(); Auth::seedProfiles();
@@ -424,7 +424,7 @@ DB::pdo()->exec("INSERT INTO invoices (kind, supplier_name, supplier_cnpj, total
 DB::upgrade();
 ok((int)DB::val('SELECT COUNT(*) FROM suppliers') === 2, 'cria fornecedores a partir das notas antigas');
 ok((int)DB::val('SELECT COUNT(*) FROM invoices WHERE supplier_id IS NOT NULL') === 3, 'liga as notas antigas aos fornecedores');
-ok(count(Auth::permsOf(DB::one("SELECT * FROM users WHERE email = 'm@x.com'"))) === count(Auth::PERMS), 'membros existentes continuam com acesso total');
+ok(count(Auth::permsOf(DB::one("SELECT * FROM users WHERE email = 'm@x.com'"))) === count(Auth::perms()), 'membros existentes continuam com acesso total');
 ok((int)DB::val('SELECT COUNT(*) FROM permission_profiles') === 4, 'cria os perfis de exemplo na atualização');
 DB::upgrade();
 ok((int)DB::val('SELECT COUNT(*) FROM suppliers') === 2, 'rodar de novo não duplica');
@@ -1373,10 +1373,15 @@ ok(count(array_filter($histEq, fn($r) => (int)$r['equipment_id'] !== (int)$eqA))
 ok(array_key_exists('description', $todasCli[0]), 'lista de ordens traz a descrição');
 ok(str_contains(Backup::sql(), 'INSERT INTO `service_orders`'), 'backup inclui ordens de serviço');
 $tecProfile = DB::one("SELECT permissions FROM permission_profiles WHERE name = 'Técnico'");
-ok($tecProfile && $tecProfile['permissions'] === 'ordens', 'perfil Técnico só tem ordens de serviço');
+ok($tecProfile && str_starts_with($tecProfile['permissions'], '_v2,ordens') && !str_contains($tecProfile['permissions'], 'ordens.all') && !str_contains($tecProfile['permissions'], 'vendas'), 'perfil Técnico: executa as próprias OS, sem ver as de todos e sem vendas');
 $tecId = Auth::createUser(['name' => 'Técnico Teste', 'email' => 'tecnico@example.com', 'password' => 'senha12345', 'profile_id' => (int)DB::val("SELECT id FROM permission_profiles WHERE name = 'Técnico'")]);
 $tecUser = DB::one('SELECT u.*, p.permissions profile_permissions FROM users u LEFT JOIN permission_profiles p ON p.id = u.profile_id WHERE u.id = ?', [$tecId]);
-ok(Auth::permsOf($tecUser) === ['ordens'], 'usuário com perfil Técnico recebe só a permissão de ordens');
+ok(in_array('ordens.execute', Auth::permsOf($tecUser), true) && !in_array('ordens.all', Auth::permsOf($tecUser), true) && !in_array('vendas', Auth::permsOf($tecUser), true), 'usuário com perfil Técnico recebe as permissões do perfil');
+$legRe = fn($c) => $c !== 'ordens.all' && preg_match('/^(ordens|vendas|equipamentos|tipos_tarefa|questionarios|app)(\.|$)/', $c);
+$legExp = Auth::expandLegacy(['ordens', 'vendas']); $legWant = array_values(array_filter(array_keys(Auth::perms()), $legRe)); sort($legExp); sort($legWant);
+ok($legExp === $legWant, 'lista antiga: cada módulo ganha as ações dele (ordens leva equipamentos, tipos, questionários e o app), menos ver as OS de todos');
+ok(Auth::normalizePerms(['ordens.add', 'xyz']) === '_v2,ordens,ordens.add', 'gravar: ação leva o visualizar do módulo e códigos inválidos saem');
+ok(Auth::permsOf(['role' => 'membro', 'permissions' => '_v2,orcamentos']) === ['orcamentos'], 'formato novo não é expandido');
 ok(in_array($tecId, array_map('intval', array_column(DB::all("SELECT id FROM users WHERE active = 1 ORDER BY name"), 'id'))), 'técnico aparece na lista de técnicos');
 
 echo "\nAgenda\n";
@@ -1678,6 +1683,37 @@ $ttOs = ServiceOrders::save(['customer_id' => $psCli, 'task_type_id' => $ttT, 'd
 ok(TaskTypes::get($ttT)['questionnaire_ids'] === [$ttB, $ttA] && array_map(fn($q) => (int)$q['id'], OrderExec::questionnaires(ServiceOrders::get($ttOs))) === [$ttB, $ttA], 'tipo de tarefa com vários questionários na ordem escolhida, e a OS segue essa ordem');
 $psQn = Questionnaires::get(Questionnaires::save(['name' => 'Sem equipamento', 'allow_equipment' => 1, 'equipment_required' => 1, 'questions' => [['id' => 'a', 'label' => 'Ok', 'type' => 'texto']]]));
 ok(!$psQn['allow_equipment'] && !$psQn['equipment_required'], 'questionário não pede mais equipamento');
+
+echo "\nPermissões por módulo e OS do técnico: ";
+$tA = Auth::createUser(['name' => 'Téc A', 'email' => 'teca@x.com', 'password' => 'senha-forte-1']);
+$tB = Auth::createUser(['name' => 'Téc B', 'email' => 'tecb@x.com', 'password' => 'senha-forte-1']);
+$osA = ServiceOrders::save(['customer_id' => $psCli, 'technician_id' => $tA, 'description' => 'Do técnico A', 'scheduled_at' => date('Y-m-d') . ' 10:00'], $uid);
+$osB = ServiceOrders::save(['customer_id' => $psCli, 'technician_id' => $tB, 'description' => 'Do técnico B', 'scheduled_at' => date('Y-m-d') . ' 11:00'], $uid);
+ServiceOrders::$onlyTech = $tA;
+$ids = array_map(fn($r) => (int)$r['id'], ServiceOrders::list([]));
+ok(in_array($osA, $ids, true) && !in_array($osB, $ids, true), 'técnico sem "ver todas" só lista as OS dele');
+throws(fn() => ServiceOrders::get($osB), 'não encontrada', 'e não abre a OS de outro técnico');
+throws(fn() => OrderExec::saveReport($osB, ['report' => 'x']), 'não encontrada', 'nem altera a OS de outro técnico');
+$ag = ServiceOrders::agenda(['from' => date('Y-m-d'), 'to' => date('Y-m-d')]);
+ok(array_map(fn($r) => (int)$r['id'], $ag['rows']) === [$osA] && count($ag['technicians']) === 1, 'agenda do técnico só com as OS dele');
+ok(!array_filter(ServiceOrders::techTasks(date('Y-m-d'), date('Y-m-d'), null), fn($r) => (int)$r['id'] === $osB), 'app do técnico não mostra a equipe sem a permissão');
+$osA2 = ServiceOrders::save(['customer_id' => $psCli, 'technician_id' => $tB, 'description' => 'Criada pelo técnico'], $tA);
+ok((int)ServiceOrders::get($osA2)['technician_id'] === $tA, 'OS criada por quem só vê as próprias fica com ele');
+ok(ServiceOrders::dashboard($tA)['scoped'] === true, 'painel das OS também fica só com as dele');
+ServiceOrders::$onlyTech = null;
+ok((int)ServiceOrders::get($osB)['id'] === $osB, 'quem tem "ver todas" (ou administrador) vê todas');
+DB::update('service_orders', $osA, ['status' => 'concluida']);
+ServiceOrders::$afterCheckout = false;
+throws(fn() => OrderExec::saveReport($osA, ['report' => 'x']), 'depois do check-out', 'OS concluída só muda com "Editar OS depois do check-out"');
+throws(fn() => ServiceOrders::save(['customer_id' => $psCli, 'description' => 'x'], $uid, $osA), 'depois do check-out', 'nem os detalhes');
+ServiceOrders::$afterCheckout = true;
+OrderExec::saveReport($osA, ['report' => 'Ajuste depois do check-out']);
+ok(true, 'com a permissão, altera depois do check-out');
+$tec = array_column(Auth::profiles(), null, 'name')['Técnico'] ?? null;
+ok($tec && in_array('ordens.execute', $tec['permissions'], true) && !in_array('ordens.all', $tec['permissions'], true) && !in_array('app.switch', $tec['permissions'], true), 'perfil Técnico executa as próprias OS e fica no app do celular');
+ok(in_array('app.switch', Auth::permsOf(['role' => 'admin']), true) && in_array('ordens.all', Auth::permsOf(['role' => 'admin']), true), 'administrador tem tudo, inclusive ver todas as OS e alternar o app');
+$mods = array_column(Auth::modules(), null, 'code');
+ok(isset($mods['ordens'], $mods['equipamentos'], $mods['orcamentos']) && in_array('ordens.hours', array_column($mods['ordens']['items'], 'code'), true), 'módulos com Visualizar e as ações de cada um');
 
 @unlink($db);
 echo "\n$passes passaram, $fails falharam\n";

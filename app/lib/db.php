@@ -679,7 +679,7 @@ class DB
             self::migrate();
             // O perfil "Acesso total" ganha a área nova e entra o perfil "Técnico"
             $p = self::one("SELECT id FROM permission_profiles WHERE name = 'Acesso total'");
-            if ($p) self::update('permission_profiles', (int)$p['id'], ['permissions' => implode(',', array_keys(Auth::PERMS))]);
+            if ($p) self::update('permission_profiles', (int)$p['id'], ['permissions' => Auth::normalizePerms(array_keys(Auth::perms()))]);
             Auth::seedProfiles();
         }
         // Perfis de exemplo novos (ex.: "Técnico") entram também em instalações que já têm as ordens de serviço
@@ -753,7 +753,7 @@ class DB
             self::migrate();
             // O perfil "Acesso total" ganha as áreas novas
             $p = self::one("SELECT id, permissions FROM permission_profiles WHERE name = 'Acesso total'");
-            if ($p) self::update('permission_profiles', (int)$p['id'], ['permissions' => implode(',', array_keys(Auth::PERMS))]);
+            if ($p) self::update('permission_profiles', (int)$p['id'], ['permissions' => Auth::normalizePerms(array_keys(Auth::perms()))]);
             // Vendas antigas entram no caixa como recebidas
             foreach (self::all("SELECT id FROM sales WHERE status = 'ok'") as $sl) Finance::fromSale((int)$sl['id']);
         }
@@ -792,6 +792,8 @@ class DB
             try { self::pdo()->exec('CREATE INDEX idx_quotes_so ON quotes (service_order_id)'); } catch (PDOException $e2) {}
         }
         try { self::run("UPDATE service_orders SET status = 'concluida' WHERE status = 'faturada'"); } catch (PDOException $e) {}
+        // v3.1.0: permissões por módulo (visualizar, adicionar, editar, excluir…); listas antigas passam para o formato novo
+        try { Auth::upgradePerms(); } catch (PDOException $e) { /* tabela ainda não existe */ }
         // v3.0.0: o questionário não escolhe mais equipamento (fica nos Detalhes da OS)
         try { self::run('UPDATE questionnaires SET allow_equipment = 0, equipment_required = 0 WHERE allow_equipment <> 0 OR equipment_required <> 0'); } catch (PDOException $e) { /* tabela ainda não existe */ }
         // v2.4.0: exclusão de clientes, fornecedores, equipamentos, tipos de tarefa e questionários (os já usados ficam
@@ -846,7 +848,7 @@ class DB
                 try { self::pdo()->exec('ALTER TABLE quotes MODIFY payment_methods VARCHAR(500) NULL'); } catch (PDOException $e2) { /* ok */ }
             }
             $p = self::one("SELECT id FROM permission_profiles WHERE name = 'Acesso total'");
-            if ($p) self::update('permission_profiles', (int)$p['id'], ['permissions' => implode(',', array_keys(Auth::PERMS))]);
+            if ($p) self::update('permission_profiles', (int)$p['id'], ['permissions' => Auth::normalizePerms(array_keys(Auth::perms()))]);
         }
         // v1.8.6: parcelamento por forma de pagamento (máximo de parcelas e intervalo)
         try {
