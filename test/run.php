@@ -1648,6 +1648,37 @@ throws(fn() => ServiceOrders::techTasks('2026-01-01', '2026-06-01', null), 'Per�
 $tkO = ServiceOrders::get($tkOs);
 ok(array_key_exists('customer_street', $tkO) && array_key_exists('task_type_duration', $tkO), 'OS traz o endereço do cliente e o tempo do tipo de tarefa');
 
+echo "\nPeças e serviços da OS (itens novos com revisão)\n";
+$psCli = Customers::save(['type' => 'pf', 'name' => 'Cliente peças']);
+$psOs = ServiceOrders::save(['customer_id' => $psCli, 'description' => 'Troca de peças'], $uid);
+$psPeca = Inventory::saveProduct(['type' => 'produto', 'name' => 'Filtro de ar', 'unit' => 'un', 'sale_price' => '80']);
+throws(fn() => OrderExec::saveItem($psOs, ['kind' => 'produto', 'description' => 'Peça qualquer'], $uid), 'Escolha a peça do cadastro', 'peça sem cadastro precisa ser marcada como não cadastrada');
+OrderExec::saveItem($psOs, ['kind' => 'produto', 'product_id' => $psPeca, 'quantity' => 2, 'unit_price' => '80'], $uid);
+$psNova = OrderExec::saveItem($psOs, ['kind' => 'produto', 'new_item' => 1, 'description' => 'Rolamento 6205', 'quantity' => 1, 'unit_price' => '45,90'], $uid);
+$psSvc = OrderExec::saveItem($psOs, ['kind' => 'servico', 'new_item' => 1, 'description' => 'Alinhamento a laser', 'quantity' => 1, 'unit_price' => '300'], $uid);
+ok(OrderExec::items($psOs)['review'] === 2, 'OS indica os itens aguardando revisão');
+ok(count(OrderExec::reviewList(['produto'])) >= 1 && !array_filter(OrderExec::reviewList(['produto']), fn($r) => $r['kind'] === 'servico'), 'lista de revisão só mostra a área de quem revisa');
+throws(fn() => Quotes::save(['target' => 'cliente', 'customer_id' => $psCli, 'service_order_id' => $psOs, 'items' => [['product_id' => $psPeca, 'quantity' => 1]]], $uid), 'aguardando revisão', 'orçamento da OS só com tudo cadastrado');
+OrderExec::reviewItem($psNova, 'cadastrar', ['name' => 'Rolamento 6205 2RS', 'unit' => 'un'], $uid);
+$psI = DB::one('SELECT * FROM so_items WHERE id = ?', [$psNova]);
+$psP = DB::one('SELECT * FROM products WHERE id = ?', [$psI['product_id']]);
+ok($psP && $psP['name'] === 'Rolamento 6205 2RS' && (float)$psP['sale_price'] === 45.9 && $psP['type'] === 'produto' && $psI['description'] === 'Rolamento 6205 2RS', 'revisar e cadastrar: cria a peça com o preço lançado e liga na OS');
+$psSvc2 = Inventory::saveProduct(['type' => 'servico', 'name' => 'Alinhamento', 'unit' => 'un', 'sale_price' => '250']);
+throws(fn() => OrderExec::reviewItem($psSvc, 'vincular', ['product_id' => $psPeca], $uid), 'Escolha um serviço', 'vincular serviço só a serviço');
+OrderExec::reviewItem($psSvc, 'vincular', ['product_id' => $psSvc2], $uid);
+ok((int)DB::val('SELECT product_id FROM so_items WHERE id = ?', [$psSvc]) === $psSvc2 && OrderExec::items($psOs)['review'] === 0, 'revisar e vincular a um serviço já cadastrado');
+$psRec = OrderExec::saveItem($psOs, ['kind' => 'produto', 'new_item' => 1, 'description' => 'Peça errada'], $uid);
+OrderExec::reviewItem($psRec, 'recusar', [], $uid);
+ok(!DB::val('SELECT id FROM so_items WHERE id = ?', [$psRec]), 'recusar tira o item da OS');
+ok(Quotes::save(['target' => 'cliente', 'customer_id' => $psCli, 'service_order_id' => $psOs, 'items' => [['product_id' => $psPeca, 'quantity' => 1]]], $uid) > 0, 'com tudo cadastrado, o orçamento abre a partir da OS');
+$ttA = Questionnaires::save(['name' => 'Q A', 'questions' => [['id' => 'a', 'label' => 'A', 'type' => 'texto']]]);
+$ttB = Questionnaires::save(['name' => 'Q B', 'questions' => [['id' => 'a', 'label' => 'B', 'type' => 'texto']]]);
+$ttT = TaskTypes::save(['name' => 'Ordem manual', 'questionnaire_ids' => [$ttB, $ttA]]);
+$ttOs = ServiceOrders::save(['customer_id' => $psCli, 'task_type_id' => $ttT, 'description' => 'Ordem dos questionários'], $uid);
+ok(TaskTypes::get($ttT)['questionnaire_ids'] === [$ttB, $ttA] && array_map(fn($q) => (int)$q['id'], OrderExec::questionnaires(ServiceOrders::get($ttOs))) === [$ttB, $ttA], 'tipo de tarefa com vários questionários na ordem escolhida, e a OS segue essa ordem');
+$psQn = Questionnaires::get(Questionnaires::save(['name' => 'Sem equipamento', 'allow_equipment' => 1, 'equipment_required' => 1, 'questions' => [['id' => 'a', 'label' => 'Ok', 'type' => 'texto']]]));
+ok(!$psQn['allow_equipment'] && !$psQn['equipment_required'], 'questionário não pede mais equipamento');
+
 @unlink($db);
 echo "\n$passes passaram, $fails falharam\n";
 exit($fails ? 1 : 0);

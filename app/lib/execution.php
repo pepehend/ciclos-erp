@@ -39,7 +39,8 @@ class Mailer
 
 class OrderExec
 {
-    const KINDS = ['produto' => 'Produto', 'servico' => 'Serviço', 'custo' => 'Custo adicional'];
+    /** Peças e serviços da OS (do cadastro) e custos adicionais. Peça/serviço sem product_id = item novo aguardando revisão. */
+    const KINDS = ['produto' => 'Peça', 'servico' => 'Serviço', 'custo' => 'Custo adicional'];
     const MAX_PHOTOS = 30;
     const MAX_IMAGE = 1200000; // tamanho máximo de uma imagem em data URL (~900 KB)
 
@@ -214,12 +215,7 @@ class OrderExec
         foreach (self::questionnaires($o) as $x) if ((int)$x['id'] === $qid) $qn = $x;
         if (!$qn) throw new AppError('Este questionário não faz parte da ordem de serviço');
         $ans = self::normalizeAnswers($qn, $answers);
-        $eq = null;
-        if ($qn['allow_equipment'] && (int)$equipmentId) {
-            $e = Equipments::get((int)$equipmentId);
-            if ((int)$e['customer_id'] !== (int)$o['customer_id']) throw new AppError('O equipamento não pertence a este cliente');
-            $eq = (int)$equipmentId;
-        }
+        $eq = null; // v3.0.0: o equipamento fica nos Detalhes da OS, não no questionário
         $data = ['answers' => json_encode($ans, JSON_UNESCAPED_UNICODE), 'equipment_id' => $eq, 'user_id' => $userId ?: null, 'updated_at' => now()];
         $id = DB::val('SELECT id FROM so_answers WHERE order_id = ? AND questionnaire_id = ?', [$orderId, $qid]);
         // Tudo apagado (nenhuma resposta e nenhum equipamento): o questionário volta a não respondido
@@ -283,6 +279,8 @@ class OrderExec
         if (!isset(self::KINDS[$kind])) throw new AppError('Tipo de item inválido');
         $desc = trim((string)($in['description'] ?? ''));
         $pid = null;
+        // Peça ou serviço não cadastrado: entra na OS aguardando a revisão de quem cuida dos cadastros
+        if ($kind !== 'custo' && !(int)($in['product_id'] ?? 0) && empty($in['new_item'])) throw new AppError($kind === 'servico' ? 'Escolha o serviço do cadastro (ou marque que não está cadastrado)' : 'Escolha a peça do cadastro (ou marque que não está cadastrada)');
         if ($kind !== 'custo' && (int)($in['product_id'] ?? 0)) {
             $p = DB::one('SELECT id, name, type, deleted_at FROM products WHERE id = ?', [(int)$in['product_id']]);
             if (!$p || $p['deleted_at']) throw new AppError('Item do cadastro não encontrado');
@@ -311,12 +309,56 @@ class OrderExec
     {
         $rows = DB::all('SELECT * FROM so_items WHERE order_id = ? ORDER BY id', [$orderId]);
         $tot = ['produto' => 0.0, 'servico' => 0.0, 'custo' => 0.0];
+        $review = 0;
         foreach ($rows as &$r) {
             $r['total'] = round((float)$r['quantity'] * (float)$r['unit_price'], 2);
+            $r['review'] = $r['kind'] !== 'custo' && !$r['product_id'];
+            if ($r['review']) $review++;
             $tot[$r['kind']] += $r['total'];
         }
         unset($r);
-        return ['rows' => $rows, 'totals' => $tot + ['total' => round(array_sum($tot), 2)]];
+        return ['rows' => $rows, 'totals' => $tot + ['total' => round(array_sum($tot), 2)], 'review' => $review];
+    }
+
+    /** Área de cadastro que revisa o item novo: peça → produtos, serviço → serviços. */
+    public static function reviewPerm(array $item): string
+    {
+        return $item['kind'] === 'servico' ? 'servicos' : 'produtos';
+    }
+
+    /**
+     * Revisão de peça/serviço novo lançado na OS: "cadastrar" (cria no cadastro com nome, preço e unidade),
+     * "vincular" (liga a um item já cadastrado) ou "recusar" (tira da OS).
+     */
+    public static function reviewItem(int $itemId, string $action, array $in, ?int $userId = null): void
+    {
+        $i = DB::one('SELECT * FROM so_items WHERE id = ?', [$itemId]);
+        if (!$i) throw new AppError('Item não encontrado', 404);
+        if ($i['kind'] === 'custo' || $i['product_id']) throw new AppError('Este item já está no cadastro');
+        $type = $i['kind'] === 'servico' ? 'servico' : 'produto';
+        if ($action === 'recusar') { DB::run('DELETE FROM so_items WHERE id = ?', [$itemId]); return; }
+        if ($action === 'vincular') {
+            $p = DB::one('SELECT id, name, type, deleted_at FROM products WHERE id = ?', [(int)($in['product_id'] ?? 0)]);
+            if (!$p || $p['deleted_at']) throw new AppError('Escolha o item do cadastro');
+            if ($p['type'] !== $type) throw new AppError($type === 'servico' ? 'Escolha um serviço' : 'Escolha uma peça (produto)');
+            DB::update('so_items', $itemId, ['product_id' => (int)$p['id'], 'description' => mb_substr($p['name'], 0, 200)]);
+            return;
+        }
+        if ($action !== 'cadastrar') throw new AppError('Ação inválida');
+        $name = trim((string)($in['name'] ?? '')) ?: $i['description'];
+        $price = array_key_exists('sale_price', $in) && trim((string)$in['sale_price']) !== '' ? $in['sale_price'] : $i['unit_price'];
+        $pid = Inventory::saveProduct(['type' => $type, 'name' => $name, 'unit' => (string)($in['unit'] ?? 'un'), 'sale_price' => $price], null, $userId);
+        DB::update('so_items', $itemId, ['product_id' => $pid, 'description' => mb_substr($name, 0, 200)]);
+    }
+
+    /** Itens novos (peças e serviços) aguardando revisão, em todas as OS, só das áreas que o usuário revisa. */
+    public static function reviewList(array $kinds): array
+    {
+        if (!$kinds) return [];
+        $in = implode(',', array_fill(0, count($kinds), '?'));
+        return DB::all("SELECT i.*, o.status order_status, c.name customer_name, c.trade_name customer_trade_name, u.name user_name
+            FROM so_items i JOIN service_orders o ON o.id = i.order_id JOIN customers c ON c.id = o.customer_id LEFT JOIN users u ON u.id = i.user_id
+            WHERE i.product_id IS NULL AND i.kind IN ($in) ORDER BY i.id", $kinds);
     }
 
     // ---------------- Histórico de status / controle de horas ----------------

@@ -1068,3 +1068,15 @@ a.tk-arow:hover { text-decoration: none; }
 .tk-dfoot { display: flex; justify-content: space-between; padding: 14px 16px; padding-bottom: max(14px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
 .tk-dfoot a { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 .tk-dfoot svg { width: 18px; height: 18px; }
+.tk-lock { display: flex; gap: 8px; align-items: flex-start; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; font-size: .84rem; color: var(--muted); }
+.tk-pk { margin-bottom: 10px; }
+.tk-pk button { padding: 7px 18px; font-size: .85rem; }
+.tk-arow .tk-ib { width: 34px; height: 34px; color: var(--muted); }
+/* Tipo de tarefa: questionários na ordem em que aparecem na OS */
+.tt-qlist { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 6px; }
+.tt-qlist li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.tt-qlist li.tt-none { border-style: dashed; }
+.tt-qn { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: .78rem; font-weight: 700; flex: none; }
+.tt-qname { flex: 1; min-width: 0; }
+.tt-qlist .qtools { display: inline-flex; gap: 2px; }
+.alert > svg { width: 18px; height: 18px; vertical-align: -3px; flex: none; }

@@ -521,7 +521,7 @@ function installmentBox(el, { codes = [], total = 0, n = 1, days = 30, plan = nu
         <span class="help">Deixe em branco para a entrada ficar igual às parcelas. O restante é dividido igualmente em ${st.n} parcela${st.n > 1 ? 's' : ''}.</span></div>` : ''}
       ${active() ? `<div class="table-wrap"><table class="inst-table"><thead><tr><th>Parcela</th><th class="num">Valor (R$)</th><th>Vencimento</th></tr></thead><tbody>
         ${st.rows.map((r, i) => `<tr data-r="${i}"><td><strong>${st.entry && i === 0 ? 'Entrada' : `${st.entry ? i : i + 1}/${st.n}`}</strong></td>
-          <td class="num"><input data-k="amount" inputmode="decimal" value="${fmt2(r.amount)}" ${disabled ? 'disabled' : ''}></td>
+          <td class="num"><input data-k="amount" data-num="money" inputmode="decimal" value="${fmt2(r.amount)}" ${disabled ? 'disabled' : ''}></td>
           <td><input data-k="due" type="date" value="${esc(r.due_date)}" ${disabled || !free ? 'disabled' : ''} title="${free ? '' : 'Esta forma de pagamento é sempre de 30 em 30 dias'}"></td></tr>`).join('')}
         </tbody></table></div><p class="help inst-info"></p>` : ''}`;
     info();
@@ -660,7 +660,9 @@ document.addEventListener('input', (e) => {
   const el = e.target;
   if (!el.matches || !el.matches('input[data-num]')) return;
   if (el.dataset.num === 'money') {
-    // Os números entram sempre pela direita (centavos); o cursor fica no fim
+    // Os números entram sempre pela direita (centavos); o cursor fica no fim.
+    // Só na digitação (eventos do sistema que avisam mudança de valor não passam pela máscara)
+    if (!e.isTrusted) return;
     const out = moneyMask(el.value);
     if (out !== el.value) el.value = out;
     try { el.setSelectionRange(out.length, out.length); } catch (_) {}
@@ -673,6 +675,14 @@ document.addEventListener('input', (e) => {
   el.value = clean;
   try { el.setSelectionRange(pos, pos); } catch (_) {}
 }, true);
+// Ao entrar num campo de valor, o que já estava escrito ("12,5", "1.234") vira "12,50" / "1.234,00" para a máscara continuar certa
+document.addEventListener('focusin', (e) => {
+  const el = e.target;
+  if (!el.matches || !el.matches('input[data-num="money"]') || el.readOnly || el.disabled) return;
+  if (String(el.value).trim() === '') return;
+  const v = num(el.value), out = moneyMaskVal(v);
+  if (out !== el.value) el.value = out;
+});
 const maskOf = (el) => (el && el.matches ? MASKS.find((m) => el.matches(m.sel)) : null);
 const maskFmtEl = (el, m = maskOf(el)) => { if (!m) return; if (el.value && !m.free(el)) el.value = m.fmt(el.value, el); el.dataset.pd = el.value.replace(/\D/g, ''); };
 const phoneFmtEl = (el) => maskFmtEl(el);
@@ -730,8 +740,8 @@ function filterPanelHtml({ statuses, team, f, userLabel = 'Responsável', custom
     <label>Até <input type="date" data-af="to" value="${esc(f.to || '')}"></label>
     <label class="af-wide">Cliente <input data-af="customer" value="${esc(f.customer || '')}" placeholder="${esc(customerHint)}" autocomplete="off"></label>
     <label>Status <select data-af="status"><option value="">Todos</option>${statuses.map(([k, l]) => `<option value="${esc(k)}" ${f.status === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
-    <label>Valor mínimo (R$) <input data-af="min" inputmode="decimal" value="${esc(f.min || '')}" placeholder="0,00"></label>
-    <label>Valor máximo (R$) <input data-af="max" inputmode="decimal" value="${esc(f.max || '')}" placeholder="sem limite"></label>
+    <label>Valor mínimo (R$) <input data-af="min" data-num="money" inputmode="decimal" value="${esc(f.min || '')}" placeholder="0,00"></label>
+    <label>Valor máximo (R$) <input data-af="max" data-num="money" inputmode="decimal" value="${esc(f.max || '')}" placeholder="sem limite"></label>
     <label>${esc(userLabel)} <select data-af="user_id"><option value="">Todos</option>${team.map((u) => `<option value="${u.id}" ${String(f.user_id) === String(u.id) ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>
     <div class="af-actions"><button type="button" class="btn ghost sm" data-af-clear>Limpar filtros</button></div>
   </div>`;
@@ -894,7 +904,8 @@ const NAV = [
     ['produtos', 'Produtos', 'box', 'produtos'], ['servicos', 'Serviços', 'tool', 'servicos'],
     ['clientes', 'Clientes', 'id', 'clientes'], ['fornecedores', 'Fornecedores', 'truck', 'fornecedores'],
     ['pagamento', 'Pagamento', 'wallet', 'pagamento'],
-    ['equipamentos', 'Equipamentos', 'box', 'ordens'], ['tipos-tarefa', 'Tipos de tarefa', 'tool', 'ordens'], ['questionarios', 'Questionários', 'check', 'ordens']] },
+    ['equipamentos', 'Equipamentos', 'box', 'ordens'], ['tipos-tarefa', 'Tipos de tarefa', 'tool', 'ordens'], ['questionarios', 'Questionários', 'check', 'ordens'],
+    ['revisao-itens', 'Itens para revisar', 'check', 'revisao']] },
   { g: 'financeiro', label: 'Financeiro', icon: 'wallet', items: [
     ['financeiro', 'Pagamentos e recebimentos', 'wallet', 'financeiro'], ['fluxo-caixa', 'Fluxo de caixa', 'flow', 'financeiro']] },
   { g: 'relatorios', label: 'Relatórios', icon: 'chart', items: [
@@ -907,6 +918,7 @@ const NAV = [
     { sub: 'Sistema', key: 'sistema', icon: 'monitor', items: [['usuarios', 'Usuários', 'users', 'admin'], ['permissoes', 'Permissões', 'lock', 'admin'], ['backup', 'Backup', 'database', 'admin']] }] },
 ];
 const can = (perm) => !perm || (perm === 'pagamento' ? can('formas_pagamento') || isAdmin()
+  : perm === 'revisao' ? can('produtos') || can('servicos')
   : perm === 'admin' ? isAdmin() : isAdmin() || (state.me?.permissions || []).includes(perm));
 
 /** Qual item do menu fica destacado para cada endereço. */
@@ -1039,6 +1051,7 @@ const ROUTES = [
   [/^questionarios$/, viewQuestionnaires, 'ordens'],
   [/^questionario\/nova$/, (v) => viewQuestionnaireForm(v, null), 'ordens'],
   [/^questionario\/(\d+)$/, viewQuestionnaireForm, 'ordens'],
+  [/^revisao-itens$/, viewItemsReview, 'revisao'],
   [/^financeiro$/, viewFinance, 'financeiro'],
   [/^fluxo-caixa$/, viewCashflow, 'financeiro'],
   [/^conta$/, viewAccount],
@@ -1148,6 +1161,7 @@ function dashOrdersHtml(d) {
       <div class="kpi ${o.late_count ? 'neg' : ''}"><div class="label">OS atrasadas</div><div class="value">${o.late_count}</div><div class="sub">${o.unscheduled ? `${o.unscheduled} sem agendamento` : '<a href="#/agenda">ver agenda</a>'}</div></div>
       <div class="kpi pos"><div class="label">Concluídas no mês</div><div class="value">${o.done_month}</div><div class="sub">satisfação ${stars(o.survey.avg)}${o.survey.count ? ` (${o.survey.count} resposta${o.survey.count > 1 ? 's' : ''})` : ''}</div></div>
       ${q ? `<div class="kpi"><div class="label">Orçamentos aprovados</div><div class="value">${q.approved}</div><div class="sub">${money(q.approved_total)} aguardando venda</div></div>` : ''}
+      ${d.items_review ? `<div class="kpi neg"><div class="label">Itens de OS para revisar</div><div class="value">${d.items_review}</div><div class="sub"><a href="#/revisao-itens">revisar cadastro</a></div></div>` : ''}
       ${o.no_quote ? `<div class="kpi"><div class="label">OS concluídas sem orçamento</div><div class="value">${o.no_quote}</div><div class="sub">nos últimos 30 dias${q ? ` · ${q.from_os} orçamento(s) aberto(s) por OS no mês` : ''}</div></div>` : ''}
     </div>
     <div class="grid two">
@@ -1368,7 +1382,7 @@ async function productForm(p, onSaved, { editing = false } = {}) {
       <fieldset class="only-venda"><legend>Preço de venda</legend>
         <div class="row">
           <label>Markup sobre o custo (%) <input name="markup" inputmode="decimal" value="${p.markup !== null && p.markup !== undefined && p.markup !== '' ? qty(p.markup, 2) : ''}" placeholder="vazio = preço manual"><span class="help">Ex.: 100% = vende pelo dobro do custo</span></label>
-          <label>Preço de venda (R$) <input name="sale_price" inputmode="decimal" value="${+p.sale_price ? qty(p.sale_price, 2) : ''}" placeholder="0,00"><span class="help" id="pcalc"></span></label>
+          <label>Preço de venda (R$) <input name="sale_price" data-num="money" inputmode="decimal" value="${+p.sale_price ? qty(p.sale_price, 2) : ''}" placeholder="0,00"><span class="help" id="pcalc"></span></label>
         </div>
         <p class="help" style="margin:0" id="pauto"></p>
       </fieldset>
@@ -1541,7 +1555,7 @@ function movementForm(preset, onDone) {
       <p class="help" id="khelp" style="margin:0"></p>
       <div class="row">
         <label data-for="entrada saida perda">Quantidade <span class="inline"><input name="quantity" inputmode="decimal" style="width:130px"> <span class="u muted small"></span></span></label>
-        <label data-for="entrada">Valor total pago (R$) <input name="total_cost" inputmode="decimal" placeholder="0,00"></label>
+        <label data-for="entrada">Valor total pago (R$) <input name="total_cost" data-num="money" inputmode="decimal" placeholder="0,00"></label>
         <label data-for="ajuste">Quantidade contada <span class="inline"><input name="counted" inputmode="decimal" style="width:130px"> <span class="u muted small"></span></span><span class="help cur"></span></label>
       </div>
       <label>Observação <input name="note" maxlength="255" placeholder="opcional"></label>
@@ -1632,7 +1646,7 @@ async function viewNewSale(v) {
         <div class="form" style="margin-top:12px"><label>Condição de pagamento <input id="sterms" list="sterms-dl" data-create="term" maxlength="160" placeholder="Escolha ou digite uma nova (opcional)">${termsList('sterms-dl')}</label></div>
         <div id="inst" class="form" style="margin-top:12px"></div>
         <div class="form" style="margin-top:14px">
-          <label>Desconto (R$) <input id="disc" inputmode="decimal" placeholder="0,00">${+BH().sale_max_discount > 0 && !isAdmin() ? `<span class="help">Máximo de ${qty(BH().sale_max_discount, 2)}% do valor da venda.</span>` : ''}</label>
+          <label>Desconto (R$) <input id="disc" data-num="money" inputmode="decimal" placeholder="0,00">${+BH().sale_max_discount > 0 && !isAdmin() ? `<span class="help">Máximo de ${qty(BH().sale_max_discount, 2)}% do valor da venda.</span>` : ''}</label>
         </div>
         <div class="cart-total" style="margin:16px 0" id="tot"></div>
         <button class="btn primary lg" style="width:100%" id="finish">Finalizar venda</button>
@@ -1644,7 +1658,7 @@ async function viewNewSale(v) {
     const rows = cart.map((c, i) => [c, i]).filter(([c]) => isServ(c.p) === serv);
     box.innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>${serv ? 'Serviço' : 'Produto'}</th><th>Qtd.</th><th>Preço unit.</th><th class="num">Total</th><th></th></tr></thead><tbody>
       ${rows.map(([c, i]) => `<tr data-i="${i}"><td>${esc(c.p.name)}${serv ? '' : `<div class="small muted">estoque: ${qty(c.p.stock)} ${esc(c.p.unit)}</div>`}</td>
-      <td><input class="qty-input" data-f="q" inputmode="decimal" value="${qty(c.q, 4)}"></td><td><input class="price-input" data-f="price" inputmode="decimal" value="${qty(c.price, 2)}"></td>
+      <td><input class="qty-input" data-f="q" inputmode="decimal" value="${qty(c.q, 4)}"></td><td><input class="price-input" data-f="price" data-num="money" inputmode="decimal" value="${qty(c.price, 2)}"></td>
       <td class="num">${money(c.q * c.price)}</td><td><button class="icon-btn" data-rm aria-label="Remover">${icon('trash')}</button></td></tr>`).join('')}</tbody></table></div>`
       : `<div class="empty">Nenhum ${serv ? 'serviço' : 'produto'} ainda. Clique em <strong>Incluir ${serv ? 'serviço' : 'produto'}</strong>.</div>`;
   };
@@ -1652,7 +1666,7 @@ async function viewNewSale(v) {
   const paintExtras = () => {
     $('#extras', v).innerHTML = extras.length ? `<div class="table-wrap"><table><thead><tr><th>Custo adicional</th><th>Valor (R$)</th><th></th></tr></thead><tbody>
       ${extras.map((x, i) => `<tr data-e="${i}"><td><input data-f="d" value="${esc(x.d)}" maxlength="200" placeholder="Ex.: frete, embalagem, deslocamento"></td>
-      <td><input class="price-input" data-f="v" inputmode="decimal" value="${x.v ? qty(x.v, 2) : ''}" placeholder="0,00"></td><td><button class="icon-btn" data-rme aria-label="Remover">${icon('trash')}</button></td></tr>`).join('')}</tbody></table></div>`
+      <td><input class="price-input" data-f="v" data-num="money" inputmode="decimal" value="${x.v ? qty(x.v, 2) : ''}" placeholder="0,00"></td><td><button class="icon-btn" data-rme aria-label="Remover">${icon('trash')}</button></td></tr>`).join('')}</tbody></table></div>`
       : '<div class="empty">Nenhum custo adicional. Use para frete, deslocamento, embalagem…</div>';
     paintTotals();
   };
@@ -2038,7 +2052,7 @@ async function renderReview(box, inv, { batch = false } = {}) {
         <button type="button" class="icon-btn rm" aria-label="Remover">${icon('trash')}</button></div>
         <div class="grid4"><label>Qtd. na nota <input class="q" inputmode="decimal" value="${qty(it.qty, 4)}"></label>
           <label>Unidade da nota <input class="un" value="${esc(it.unit)}" maxlength="10"></label>
-          <label>Custo total (R$) <input class="c" inputmode="decimal" value="${qty(it.cost_total, 2)}"></label>
+          <label>Custo total (R$) <input class="c" data-num="money" inputmode="decimal" value="${qty(it.cost_total, 2)}"></label>
           <label>Conversão <span class="inline" style="flex-wrap:nowrap"><span class="small nowrap">1 <span class="nu"></span> =</span><input class="fct" inputmode="decimal" value="${qty(it.factor, 4)}" style="width:100%;min-width:60px"><span class="small fu nowrap"></span></span></label></div>
         <div class="pick inline"><div style="flex:1;min-width:220px"><input class="pp" placeholder="Produto do estoque"></div><button type="button" class="btn sm mk">${icon('plus')}Cadastrar novo</button></div>
         <div class="newp row" hidden><label>Nome do novo produto <input class="nn" value="${esc(it.description)}"></label>
@@ -2046,7 +2060,7 @@ async function renderReview(box, inv, { batch = false } = {}) {
           <label style="align-self:end"><button type="button" class="btn sm ex">Usar produto existente</button></label></div>
         <div class="result"></div>
         ${PRICE_MODE !== 'manter' ? `<div class="pricebox inline" style="gap:8px;margin-top:6px"><label class="check"><input type="checkbox" class="pon" ${it.price_on ? 'checked' : ''}> Atualizar preço de venda para</label>
-          <input class="pv" inputmode="decimal" style="width:110px" aria-label="Novo preço de venda"><span class="small muted pcur"></span></div>` : ''}`;
+          <input class="pv" data-num="money" inputmode="decimal" style="width:110px" aria-label="Novo preço de venda"><span class="small muted pcur"></span></div>` : ''}`;
       list.appendChild(el);
       const picker = productPicker($('.pp', el), { list: () => all, onPick: (p) => { it.product_id = p.id; paintItem(it, el); } });
       if (it.product_id) picker.set(all.find((x) => x.id == it.product_id));
@@ -2083,7 +2097,7 @@ async function renderReview(box, inv, { batch = false } = {}) {
       const t = today();
       $('#dups', box).innerHTML = dups.map((d, i) => `<tr data-d="${i}"><td><input data-k="number" value="${esc(d.number)}" maxlength="20" style="width:80px" placeholder="${i + 1}"></td>
         <td><input type="date" data-k="due_date" value="${esc(d.due_date)}"><div class="small stock-low" ${d.due_date && d.due_date < t && !d.paid ? '' : 'hidden'}>vencida: marque se já foi paga</div></td>
-        <td class="num"><input data-k="amount" inputmode="decimal" value="${fmt2(d.amount)}" style="width:120px;text-align:right"></td>
+        <td class="num"><input data-k="amount" data-num="money" inputmode="decimal" value="${fmt2(d.amount)}" style="width:120px;text-align:right"></td>
         <td><label class="check"><input type="checkbox" data-k="paid" ${d.paid ? 'checked' : ''}> paga</label></td>
         <td><button type="button" class="icon-btn" data-rmd aria-label="Remover parcela">${icon('trash')}</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted small">Nenhuma parcela.</td></tr>';
       paintDupSum();
@@ -2488,7 +2502,7 @@ function serviceForm(sv, onSaved) {
   const m = modal({
     title: isNew ? 'Novo serviço' : 'Editar serviço',
     body: `<form class="form" id="svf"><label>Nome do serviço * <input name="name" required maxlength="200" value="${esc(sv?.name)}" placeholder="Ex.: Montagem de mesa de doces"></label>
-      <label>Preço (R$) * <input name="sale_price" inputmode="decimal" value="${sv && +sv.sale_price ? qty(sv.sale_price, 2) : ''}" placeholder="0,00"></label></form>`,
+      <label>Preço (R$) * <input name="sale_price" data-num="money" inputmode="decimal" value="${sv && +sv.sale_price ? qty(sv.sale_price, 2) : ''}" placeholder="0,00"></label></form>`,
     foot: `${!isNew && isAdmin() ? `<button class="btn danger" id="svdel" style="margin-right:auto">${icon('trash')}Excluir</button>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="svsave">Salvar serviço</button>`,
   });
   const f = $('#svf', m.el);
@@ -2713,7 +2727,49 @@ function qFieldHtml(q, v) {
 }
 
 const SO_ACTION = { aberta: 'Voltar para aberta', agendada: 'Marcar como agendada', a_caminho: 'A caminho (deslocamento)', pausada: 'Pausar', concluida: 'Concluir (check-out)' };
-const SO_FICHA_TABS = [['detalhes', 'Detalhes'], ['relato', 'Relato'], ['questionarios', 'Questionários'], ['valores', 'Valores'], ['orcamentos', 'Orçamentos'], ['pendencias', 'Pendências'], ['horas', 'Controle de horas'], ['envios', 'Envios']];
+const SO_FICHA_TABS = [['detalhes', 'Detalhes'], ['relato', 'Relato'], ['questionarios', 'Questionários'], ['valores', 'Peças e Serviços'], ['orcamentos', 'Orçamentos'], ['pendencias', 'Pendências'], ['horas', 'Controle de horas'], ['envios', 'Envios']];
+
+/**
+ * Revisão de peça/serviço novo lançado numa OS: cadastrar (nome, unidade e preço), ligar a um item já cadastrado ou recusar.
+ * Só para quem pode mexer no cadastro (produtos para peça, serviços para serviço).
+ */
+function reviewItemModal(r, kinds, all, onDone) {
+  if (!r) return;
+  const svc = r.kind === 'servico';
+  const list = all.filter((p) => +p.active !== 0 && (svc ? p.type === 'servico' : p.type !== 'servico'));
+  const units = (state.meta && state.meta.units) || ['un'];
+  const m = modal({
+    title: `Revisar ${svc ? 'serviço' : 'peça'} novo`,
+    body: `<p class="small muted">Lançado ${r.user_name ? `por ${esc(r.user_name)} ` : ''}na OS #${r.order_id}${r.customer_name ? ` · ${esc(r.customer_trade_name || r.customer_name)}` : ''}: <strong>${esc(r.description)}</strong> · ${qty(r.quantity)} × ${money(r.unit_price)}</p>
+      <div class="seg" id="rvtabs"><button type="button" data-rv="cadastrar" class="on">Cadastrar</button><button type="button" data-rv="vincular">Já está cadastrado</button><button type="button" data-rv="recusar">Recusar</button></div>
+      <form class="form" id="rvf">
+        <div data-rvp="cadastrar"><label>Nome no cadastro <input name="name" maxlength="200" value="${esc(r.description)}"></label>
+          <div class="grid two"><label>Unidade <select name="unit">${units.map((u) => `<option ${u === 'un' ? 'selected' : ''}>${esc(u)}</option>`).join('')}</select></label>
+          <label>Preço de venda (R$) <input name="sale_price" data-num="money" inputmode="decimal" value="${esc(moneyMaskVal(+r.unit_price || ''))}" placeholder="0,00"></label></div>
+          <p class="small muted">Cria ${svc ? 'o serviço' : 'a peça'} no cadastro e liga na OS. Os outros dados (código, marca, tributação) podem ser completados depois no cadastro.</p></div>
+        <div data-rvp="vincular" hidden><label>${svc ? 'Serviço' : 'Peça'} do cadastro <select name="product_id"><option value="">Selecione…</option>${list.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></label>
+          <p class="small muted">O item da OS passa a ser este do cadastro (o nome muda; quantidade e valor ficam).</p></div>
+        <div data-rvp="recusar" hidden><p>O item sai da OS. Avise o técnico para lançar o item certo.</p></div>
+      </form>`,
+    foot: `<button class="btn" data-close>Cancelar</button><button class="btn primary" id="rvok">${icon('check')}Confirmar</button>`,
+  });
+  let act = 'cadastrar';
+  $('#rvtabs', m.el).onclick = (e) => {
+    const b = e.target.closest('[data-rv]'); if (!b) return;
+    act = b.dataset.rv;
+    $$('#rvtabs button', m.el).forEach((x) => x.classList.toggle('on', x === b));
+    $$('[data-rvp]', m.el).forEach((x) => (x.hidden = x.dataset.rvp !== act));
+    $('#rvok', m.el).className = `btn ${act === 'recusar' ? 'danger solid' : 'primary'}`;
+  };
+  $('#rvok', m.el).onclick = (e) => busy(e.currentTarget, async () => {
+    const d = formData($('#rvf', m.el));
+    if (act === 'vincular' && !d.product_id) throw new Error('Escolha o item do cadastro');
+    if (act === 'cadastrar' && !d.name.trim()) throw new Error('Informe o nome');
+    await api('so_item_review', { body: { item_id: r.id, action: act, ...d } });
+    if (act === 'cadastrar') invalidateProducts();
+    m.close(); toast(act === 'recusar' ? 'Item recusado e retirado da OS' : act === 'vincular' ? 'Item ligado ao cadastro' : 'Item cadastrado'); onDone && onDone();
+  }).catch(fail);
+}
 
 async function viewServiceOrderForm(v, id) {
   const isNew = !id;
@@ -2808,6 +2864,7 @@ async function viewServiceOrderForm(v, id) {
       <span class="inline js-edit-only" hidden><button class="btn" id="socancelall">${icon('x')}Cancelar</button><button class="btn primary" id="sosaveall">${icon('check')}Salvar</button></span>
     </div></div>
     <div class="alert info so-editing js-edit-only" hidden>${icon('pencil')}<span>Editando a ordem: altere o que precisar em qualquer aba e clique em <strong>Salvar</strong> no topo.</span></div>
+    ${D.items.review ? `<div class="alert warn so-pend js-view-only">${icon('warn')}<span>${D.items.review} ${D.items.review === 1 ? 'item novo aguarda' : 'itens novos aguardam'} revisão do cadastro. <a href="#" data-tabgo="valores">Ver em Peças e Serviços</a></span></div>` : ''}
     ${pend.length && o.status !== 'concluida' ? `<div class="alert warn so-pend js-view-only">${icon('warn')}<span>Para concluir esta ordem falta ${pend.length} ${pend.length === 1 ? 'item' : 'itens'}. <a href="#" data-tabgo="pendencias">Ver pendências</a></span></div>` : ''}
     <div class="seg so-tabs" id="sotabs">${SO_FICHA_TABS.map(([k, l]) => `<button type="button" data-tab="${k}">${l}${counts[k] ? ` <span class="badge${k === 'pendencias' ? ' red' : ''}">${counts[k]}</span>` : ''}</button>`).join('')}</div>
     <div id="sopanes">
@@ -2911,7 +2968,6 @@ async function viewServiceOrderForm(v, id) {
         <div class="small"><span class="qstat">${qStatusHtml(q, q.answers || {}, q.answer_equipment_id)}</span>
           ${q.answered && q.answered_at ? `<span class="muted"> · atualizado em ${dt(q.answered_at)}</span>` : ''}${q.linked ? '' : '<span class="muted"> · fora do tipo de tarefa atual</span>'}</div></div></div>
       <form class="form" onsubmit="return false">
-        ${q.allow_equipment ? `<label>Equipamento${q.equipment_required ? ' *' : ''} <select data-eq><option value="">Nenhum</option>${D.equipments.map((e) => `<option value="${e.id}" ${+q.answer_equipment_id === +e.id ? 'selected' : ''}>${esc(e.name)}${e.serial ? ' · ' + esc(e.serial) : ''}</option>`).join('')}</select></label>` : ''}
         <div class="qr-grid" style="--cols:${Math.max(1, +q.per_line || 1)}"></div>
       </form></div>`).join('')
     : '<div class="card"><div class="empty">Esta ordem não tem questionários. Escolha um tipo de tarefa com questionários em Detalhes, ou ligue questionários ao tipo em Cadastros → Tipos de tarefa.</div></div>';
@@ -2963,73 +3019,85 @@ async function viewServiceOrderForm(v, id) {
     locks.push(editLock(card, $('form', card), true, (l) => { isLocked = l; paint(); }));
     savers.push([`Questionário "${q.name}"`, async () => {
       if (!dirty) return 0;
-      const eq = $('[data-eq]', card);
-      if (q.allow_equipment && q.equipment_required && eq && !eq.value) { showTab('questionarios'); throw new Error(`Escolha o equipamento do questionário "${q.name}"`); }
       const vis = qVisible(q.questions, ans);
       const out = {}; for (const x of q.questions) if (vis[x.id] && ans[x.id] !== undefined) out[x.id] = ans[x.id];
-      await api('so_answers_save', { body: { id: o.id, questionnaire_id: q.id, answers: out, equipment_id: eq ? eq.value : null } });
+      await api('so_answers_save', { body: { id: o.id, questionnaire_id: q.id, answers: out } });
       dirty = false;
       return 1;
     }]);
   });
 
-  // ---- Valores (registro do que foi usado; não fatura: quem fatura é o orçamento)
+  // ---- Peças e Serviços (o que o técnico usou ou vai usar; não fatura: quem fatura é o orçamento)
+  // Peça/serviço que não está no cadastro entra como "item novo" e aguarda revisão de quem cuida dos cadastros.
   const vp = pane('valores');
   const it = D.items;
   const newItems = []; const delItems = new Set();
   const all = await products().catch(() => []);
-  vp.innerHTML = `<div class="card"><h2>Produtos, serviços e custos</h2>
-      <p class="small muted">Registro do que foi usado no atendimento. Não baixa o estoque nem gera cobrança: para cobrar, abra um orçamento a partir desta OS (Mais ações → Abrir orçamento).</p>
+  const canReview = (r) => (r.kind === 'servico' ? can('servicos') : can('produtos'));
+  vp.innerHTML = `<div class="card"><h2>Peças e Serviços</h2>
+      <p class="small muted">Peças para substituir e serviços a executar, escolhidos do cadastro. Item que ainda não está cadastrado pode ser incluído e fica <strong>aguardando revisão</strong> de quem cuida dos cadastros. Não baixa estoque nem gera cobrança: para cobrar, abra um orçamento a partir desta OS (precisa estar tudo cadastrado).</p>
+      ${it.review ? `<div class="alert warn">${icon('warn')} ${it.review} ${it.review === 1 ? 'item novo aguarda' : 'itens novos aguardam'} revisão do cadastro.</div>` : ''}
       <div class="table-wrap"><table><thead><tr><th>Descrição</th><th>Tipo</th><th class="num">Qtd.</th><th class="num">Valor unit.</th><th class="num">Total</th><th></th></tr></thead>
-        <tbody id="itbody">${it.rows.map((r) => `<tr data-it="${r.id}"><td>${esc(r.description)}</td><td>${esc(D.kinds[r.kind])}</td><td class="num">${qty(r.quantity)}</td><td class="num">${money(r.unit_price)}</td><td class="num">${money(r.total)}</td>
-          <td class="num"><button type="button" class="icon-btn js-edit-only js-needs-edit" data-itdel="${r.id}" title="Remover" aria-label="Remover" hidden>${icon('trash')}</button></td></tr>`).join('')}</tbody>
+        <tbody id="itbody">${it.rows.map((r) => `<tr data-it="${r.id}"><td>${esc(r.description)}${r.review ? ' <span class="badge warn">aguardando revisão</span>' : ''}</td><td>${esc(D.kinds[r.kind])}</td><td class="num">${qty(r.quantity)}</td><td class="num">${money(r.unit_price)}</td><td class="num">${money(r.total)}</td>
+          <td class="num nowrap">${r.review && canReview(r) ? `<button type="button" class="btn sm js-view-only" data-itrev="${r.id}">${icon('check')}Revisar</button>` : ''}<button type="button" class="icon-btn js-edit-only js-needs-edit" data-itdel="${r.id}" title="Remover" aria-label="Remover" hidden>${icon('trash')}</button></td></tr>`).join('')}</tbody>
         <tbody id="itnew"></tbody>
-        <tfoot>${Object.entries({ produto: 'Produtos', servico: 'Serviços', custo: 'Custos adicionais' }).filter(([k]) => it.totals[k]).map(([k, l]) => `<tr><td colspan="4" class="num muted">${l}</td><td class="num">${money(it.totals[k])}</td><td></td></tr>`).join('')}
+        <tfoot>${Object.entries({ produto: 'Peças', servico: 'Serviços', custo: 'Custos adicionais' }).filter(([k]) => it.totals[k]).map(([k, l]) => `<tr><td colspan="4" class="num muted">${l}</td><td class="num">${money(it.totals[k])}</td><td></td></tr>`).join('')}
           <tr><td colspan="4" class="num"><strong>Total</strong></td><td class="num"><strong>${money(it.totals.total)}</strong></td><td></td></tr></tfoot></table></div>
-      ${it.rows.length ? '' : '<p class="muted js-view-only">Nenhum item lançado.</p>'}
+      ${it.rows.length ? '' : '<p class="muted js-view-only">Nenhuma peça ou serviço lançado.</p>'}
       <form class="form js-edit-only so-additem" id="itf" hidden>
         <div class="so-itgrid"><label>Tipo <select name="kind">${Object.entries(D.kinds).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
-          <label>Item <select name="product_id"></select><input name="description" maxlength="200" placeholder="Descrição" hidden></label>
+          <label><span id="itlab">Peça do cadastro</span> <input name="pick" list="itdl" autocomplete="off" placeholder="Digite para buscar no cadastro"><datalist id="itdl"></datalist>
+            <input name="description" maxlength="200" placeholder="Descrição" hidden></label>
           <label>Qtd. <input name="quantity" inputmode="decimal" value="1"></label></div>
-        <div class="so-itgrid"><label>Valor unitário (R$) <input name="unit_price" inputmode="decimal" placeholder="0,00"></label>
+        <label class="check" id="itnewwrap"><input type="checkbox" name="new_item"> <span id="itnewlab">A peça não está cadastrada (vai para revisão)</span></label>
+        <div class="so-itgrid"><label>Valor unitário (R$) <input name="unit_price" data-num="money" inputmode="decimal" placeholder="0,00"></label>
           <div class="actions" style="align-self:end"><button type="button" class="btn" id="itadd">${icon('plus')}Incluir item</button></div></div>
       </form></div>`;
   const itf = $('#itf', vp);
-  const kindSel = itf.kind, pSel = itf.product_id, dIn = itf.description;
+  const kindSel = itf.kind, pick = itf.pick, dIn = itf.description, newCk = itf.new_item;
+  const listFor = (k) => all.filter((p) => +p.active !== 0 && (k === 'servico' ? p.type === 'servico' : p.type !== 'servico'));
+  const pLabel = (p) => `${p.name}${p.mfr_code ? ' · ' + p.mfr_code : p.sku ? ' · ' + p.sku : ''}`;
+  const findPick = () => listFor(kindSel.value).find((p) => pLabel(p) === pick.value.trim() || p.name === pick.value.trim());
   const fillProducts = () => {
-    const k = kindSel.value;
-    pSel.hidden = k === 'custo'; dIn.hidden = k !== 'custo';
-    const list = all.filter((p) => (k === 'servico' ? p.type === 'servico' : p.type !== 'servico'));
-    pSel.innerHTML = `<option value="">Selecione…</option>${list.map((p) => `<option value="${p.id}" data-price="${+p.sale_price || 0}">${esc(p.name)}</option>`).join('')}`;
+    const k = kindSel.value, isCost = k === 'custo', isNew = !isCost && newCk.checked;
+    $('#itnewwrap', vp).hidden = isCost;
+    $('#itnewlab', vp).textContent = k === 'servico' ? 'O serviço não está cadastrado (vai para revisão)' : 'A peça não está cadastrada (vai para revisão)';
+    $('#itlab', vp).textContent = isCost ? 'Descrição do custo' : isNew ? (k === 'servico' ? 'Nome do serviço novo' : 'Nome da peça nova') : (k === 'servico' ? 'Serviço do cadastro' : 'Peça do cadastro');
+    pick.hidden = isCost || isNew; dIn.hidden = !pick.hidden;
+    $('#itdl', vp).innerHTML = listFor(k).map((p) => `<option value="${esc(pLabel(p))}"></option>`).join('');
   };
-  kindSel.onchange = fillProducts; fillProducts();
-  pSel.onchange = () => { const op = pSel.selectedOptions[0]; if (op && op.dataset.price && !itf.unit_price.value) itf.unit_price.value = (+op.dataset.price).toLocaleString('pt-BR', { minimumFractionDigits: 2 }); };
-  const numBr = (x) => { const s2 = String(x || '').trim(); return +(s2.includes(',') ? s2.replace(/\./g, '').replace(',', '.') : s2) || 0; };
+  kindSel.onchange = () => { pick.value = ''; fillProducts(); };
+  newCk.onchange = fillProducts;
+  fillProducts();
+  pick.onchange = () => { const p2 = findPick(); if (p2 && +p2.sale_price && !itf.unit_price.value) itf.unit_price.value = moneyMaskVal(+p2.sale_price); };
+  const numBr = (x) => num(x);
   const paintNewItems = () => {
-    $('#itnew', vp).innerHTML = newItems.map((n, i) => `<tr class="it-new"><td>${esc(n.label)} <span class="badge">Novo</span></td><td>${esc(D.kinds[n.kind])}</td><td class="num">${qty(numBr(n.quantity) || 1)}</td>
+    $('#itnew', vp).innerHTML = newItems.map((n, i) => `<tr class="it-new"><td>${esc(n.label)} <span class="badge">Novo</span>${n.new_item ? ' <span class="badge warn">vai para revisão</span>' : ''}</td><td>${esc(D.kinds[n.kind])}</td><td class="num">${qty(numBr(n.quantity) || 1)}</td>
       <td class="num">${money(numBr(n.unit_price))}</td><td class="num">${money((numBr(n.quantity) || 1) * numBr(n.unit_price))}</td>
       <td class="num"><button type="button" class="icon-btn" data-itnewdel="${i}" title="Tirar" aria-label="Tirar">${icon('x')}</button></td></tr>`).join('');
   };
-  locks.push(editLock(vp, itf, true, (l) => { $('#itadd', vp).disabled = l; }));
+  locks.push(editLock(vp, itf, true, (l) => { $('#itadd', vp).disabled = l; if (!l) fillProducts(); }));
   $('#itadd', vp).onclick = () => {
-    const d = formData(itf);
-    if (d.kind !== 'custo' && !d.product_id) return toast('Escolha o item do cadastro', 'err');
-    if (d.kind === 'custo' && !d.description.trim()) return toast('Descreva o custo', 'err');
-    if (!(numBr(d.quantity) > 0)) return toast('A quantidade precisa ser maior que zero', 'err');
-    const label = d.kind === 'custo' ? d.description.trim() : pSel.selectedOptions[0].textContent;
-    newItems.push({ ...d, label });
+    const k = kindSel.value, isNew = k !== 'custo' && newCk.checked;
+    const p2 = k !== 'custo' && !isNew ? findPick() : null;
+    if (k !== 'custo' && !isNew && !p2) return toast(k === 'servico' ? 'Escolha o serviço do cadastro (ou marque que não está cadastrado)' : 'Escolha a peça do cadastro (ou marque que não está cadastrada)', 'err');
+    if ((k === 'custo' || isNew) && !dIn.value.trim()) return toast(k === 'custo' ? 'Descreva o custo' : 'Informe o nome do item novo', 'err');
+    if (!(numBr(itf.quantity.value) > 0)) return toast('A quantidade precisa ser maior que zero', 'err');
+    newItems.push({ kind: k, product_id: p2 ? p2.id : '', description: p2 ? '' : dIn.value.trim(), new_item: isNew ? 1 : 0, quantity: itf.quantity.value, unit_price: itf.unit_price.value, label: p2 ? p2.name : dIn.value.trim() });
     paintNewItems();
-    itf.product_id.value = ''; itf.description.value = ''; itf.quantity.value = '1'; itf.unit_price.value = '';
+    pick.value = ''; dIn.value = ''; itf.quantity.value = '1'; itf.unit_price.value = ''; newCk.checked = false; fillProducts();
   };
   vp.addEventListener('click', (e) => {
     const nd = e.target.closest('[data-itnewdel]'); if (nd) { newItems.splice(+nd.dataset.itnewdel, 1); paintNewItems(); }
     const b = e.target.closest('[data-itdel]');
     if (b) { const id2 = +b.dataset.itdel, tr = b.closest('tr'); if (delItems.has(id2)) { delItems.delete(id2); tr.classList.remove('del'); } else { delItems.add(id2); tr.classList.add('del'); } }
+    const rv = e.target.closest('[data-itrev]');
+    if (rv) reviewItemModal(it.rows.find((r) => +r.id === +rv.dataset.itrev), D.kinds, all, () => route());
   });
-  savers.push(['Valores', async () => {
+  savers.push(['Peças e Serviços', async () => {
     let n = 0;
     for (const id2 of [...delItems]) { await api('so_item_delete', { body: { item_id: id2 } }); delItems.delete(id2); n++; }
-    while (newItems.length) { const x = newItems[0]; await api('so_item_save', { body: { id: o.id, kind: x.kind, product_id: x.product_id, description: x.description, quantity: x.quantity, unit_price: x.unit_price } }); newItems.shift(); n++; }
+    while (newItems.length) { const x = newItems[0]; await api('so_item_save', { body: { id: o.id, kind: x.kind, product_id: x.product_id, description: x.description, new_item: x.new_item, quantity: x.quantity, unit_price: x.unit_price } }); newItems.shift(); n++; }
     return n;
   }]);
 
@@ -3182,6 +3250,7 @@ async function viewServiceOrderForm(v, id) {
   };
   // Abrir orçamento: novo orçamento (não salvo) com o cliente e os itens de Valores
   const openQuote = () => {
+    if (it.review) { showTab('valores'); return toast(`Para abrir o orçamento, todos os itens precisam estar cadastrados: ${it.review} aguardando revisão.`, 'err'); }
     const byId = Object.fromEntries(all.map((p) => [String(p.id), p]));
     const items = it.rows.filter((r) => r.kind !== 'custo' && r.product_id && byId[String(r.product_id)]).map((r) => {
       const p = byId[String(r.product_id)];
@@ -3664,6 +3733,19 @@ async function viewAgenda(v) {
   await load();
 }
 
+// ============ Itens para revisar (peças e serviços novos lançados nas OS) ============
+async function viewItemsReview(v) {
+  const d = await api('so_items_review');
+  const all = await products(true).catch(() => []);
+  v.innerHTML = `<div class="page-head"><div><h1>Itens para revisar</h1><p class="muted">Peças e serviços que os técnicos lançaram nas ordens de serviço e ainda não estão no cadastro. Cadastre, ligue a um item que já existe ou recuse.</p></div></div>
+    <div class="card">${d.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Item</th><th>Tipo</th><th>Ordem de serviço</th><th class="num">Qtd.</th><th class="num">Valor unit.</th><th>Lançado por</th><th></th></tr></thead><tbody>
+      ${d.rows.map((r) => `<tr><td><strong>${esc(r.description)}</strong></td><td>${esc(d.kinds[r.kind])}</td><td><a href="#/ordem/${r.order_id}">#${r.order_id}</a> · ${soCustomer(r)}</td>
+        <td class="num">${qty(r.quantity)}</td><td class="num">${money(r.unit_price)}</td><td class="small">${esc(r.user_name || '—')}<div class="muted">${dt(r.created_at)}</div></td>
+        <td class="num"><button class="btn sm primary" data-rv="${r.id}">${icon('check')}Revisar</button></td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">Nenhum item aguardando revisão.</div>'}</div>`;
+  v.addEventListener('click', (e) => { const b = e.target.closest('[data-rv]'); if (b) reviewItemModal(d.rows.find((r) => +r.id === +b.dataset.rv), d.kinds, all, () => route()); });
+}
+
 // ============ Tipos de tarefa ============
 async function viewTaskTypes(v) {
   const f = { all: false };
@@ -3707,7 +3789,9 @@ function taskTypeForm(t, meta, qRows, onSaved) {
       <div class="grid two"><label>Tempo de tolerância <input name="tolerance" value="${esc(t?.tolerance || '')}" placeholder="HH:MM" inputmode="numeric"></label>
         <label>Tempo estimado de duração <input name="duration" value="${esc(t?.duration || '')}" placeholder="HH:MM" inputmode="numeric"></label></div>
       <fieldset class="fset"><legend>Questionários deste tipo</legend>
-        ${qList.length ? qList.map((q) => `<label class="check"><input type="checkbox" name="questionnaire_ids" value="${q.id}" ${chosen.has(+q.id) ? 'checked' : ''}> ${esc(q.name)}${+q.active ? '' : ' <span class="badge">inativo</span>'}</label>`).join('')
+        <p class="small muted" style="margin:0">Escolha um ou mais. A ordem desta lista é a ordem em que aparecem na OS (use ▲ ▼ para mudar).</p>
+        <ol class="tt-qlist" id="ttql"></ol>
+        ${qList.length ? `<div class="inline js-edit-only"><select id="ttqadd"></select><button type="button" class="btn" id="ttqaddb">${icon('plus')}Adicionar questionário</button></div>`
           : '<p class="small muted">Nenhum questionário cadastrado. Crie em Cadastros → Questionários.</p>'}</fieldset>
       <fieldset class="fset"><legend>Obrigatoriedades</legend>
         ${Object.entries(meta.requires).map(([k, l]) => `<label class="check"><input type="checkbox" name="requires" value="${k}" ${reqs.has(k) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</fieldset>
@@ -3718,6 +3802,33 @@ function taskTypeForm(t, meta, qRows, onSaved) {
     foot: `${!isNew ? `<span class="inline" style="margin-right:auto"><button class="btn ghost" id="ttact">${+t.active ? 'Desativar' : 'Reativar'}</button>${isAdmin() ? `<button class="btn danger" id="ttdel">${icon('trash')}Excluir</button>` : ''}</span>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="ttsave">Salvar tipo</button>`,
   });
   const f = $('#ttf', md.el);
+  // Questionários escolhidos, na ordem em que aparecem na OS
+  let order = (t?.questionnaire_ids || []).filter((qid) => qList.some((q) => +q.id === +qid)).map(Number);
+  let lockedTT = !isNew;
+  const qName = (qid) => { const q = qList.find((x) => +x.id === +qid); return q ? esc(q.name) + (+q.active ? '' : ' <span class="badge">inativo</span>') : '—'; };
+  const paintQ = () => {
+    const d = lockedTT ? 'disabled' : '';
+    $('#ttql', md.el).innerHTML = order.length ? order.map((qid, i) => `<li data-q="${qid}"><span class="tt-qn">${i + 1}</span><span class="tt-qname">${qName(qid)}</span>
+      <span class="qtools"><button type="button" class="icon-btn" data-qup ${d || (i === 0 ? 'disabled' : '')} title="Subir" aria-label="Subir">▲</button><button type="button" class="icon-btn" data-qdown ${d || (i === order.length - 1 ? 'disabled' : '')} title="Descer" aria-label="Descer">▼</button>
+      <button type="button" class="icon-btn" data-qrm ${d} title="Tirar" aria-label="Tirar">${icon('x')}</button></span></li>`).join('') : '<li class="muted small tt-none">Nenhum questionário escolhido.</li>';
+    const sel = $('#ttqadd', md.el);
+    if (sel) {
+      const rest = qList.filter((q) => +q.active && !order.includes(+q.id));
+      sel.innerHTML = rest.length ? rest.map((q) => `<option value="${q.id}">${esc(q.name)}</option>`).join('') : '<option value="">Todos já foram escolhidos</option>';
+      sel.disabled = lockedTT || !rest.length; $('#ttqaddb', md.el).disabled = lockedTT || !rest.length;
+    }
+  };
+  $('#ttql', md.el).onclick = (e) => {
+    const li = e.target.closest('li[data-q]'); if (!li || lockedTT) return;
+    const i = order.indexOf(+li.dataset.q);
+    if (e.target.closest('[data-qup]') && i > 0) [order[i - 1], order[i]] = [order[i], order[i - 1]];
+    if (e.target.closest('[data-qdown]') && i < order.length - 1) [order[i + 1], order[i]] = [order[i], order[i + 1]];
+    if (e.target.closest('[data-qrm]')) order.splice(i, 1);
+    paintQ();
+  };
+  const addB = $('#ttqaddb', md.el);
+  if (addB) addB.onclick = () => { const v2 = +$('#ttqadd', md.el).value; if (v2 && !order.includes(v2)) { order.push(v2); paintQ(); } };
+  paintQ();
   const save = (btn) => busy(btn, async () => {
     const d = formData(f);
     if (!d.name.trim()) throw new Error('Informe a descrição do tipo de tarefa');
@@ -3728,12 +3839,12 @@ function taskTypeForm(t, meta, qRows, onSaved) {
       duration: d.duration,
       send_survey: d.send_survey,
       send_os_email: d.send_os_email,
-      questionnaire_ids: $$('[name=questionnaire_ids]:checked', f).map((i) => +i.value),
+      questionnaire_ids: order,
       requires: $$('[name=requires]:checked', f).map((i) => i.value),
     } });
     md.close(); toast('Tipo salvo'); onSaved && onSaved();
   });
-  editLock(md.el, f, !isNew);
+  editLock(md.el, f, !isNew, (l) => { lockedTT = l; paintQ(); });
   $('#ttsave', md.el).onclick = (e) => save(e.currentTarget);
   f.onsubmit = (e) => { e.preventDefault(); save($('#ttsave', md.el)); };
   const del = $('#ttdel', md.el);
@@ -3755,9 +3866,8 @@ async function viewQuestionnaires(v) {
     <div class="card"><div class="filters"><label class="check"><input type="checkbox" id="all"> Mostrar inativos</label></div><div id="list"></div></div>`;
   const load = async () => {
     const d = await api('questionnaires', { params: { all: f.all ? 1 : '' } });
-    $('#list', v).innerHTML = d.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Questionário</th><th class="num">Perguntas</th><th>Equipamento</th><th></th></tr></thead><tbody>
+    $('#list', v).innerHTML = d.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Questionário</th><th class="num">Perguntas</th><th></th></tr></thead><tbody>
       ${d.rows.map((q) => `<tr class="click" data-id="${q.id}"><td><strong>${esc(q.name)}</strong></td><td class="num">${q.questions_count}</td>
-        <td>${q.allow_equipment ? (q.equipment_required ? 'Obrigatório' : 'Opcional') : '—'}</td>
         <td>${+q.active ? '' : '<span class="badge">inativo</span>'}</td></tr>`).join('')}</tbody></table></div>`
       : '<div class="empty">Nenhum questionário. Clique em <strong>Novo questionário</strong>.</div>';
   };
@@ -3790,8 +3900,7 @@ async function viewQuestionnaireForm(v, id) {
         <label class="check"><input type="checkbox" name="show_os" ${+q.show_os ? 'checked' : ''}> Mostrar as respostas na OS</label>
         <label class="check"><input type="checkbox" name="pairs" ${+q.pairs ? 'checked' : ''}> Agrupar perguntas em pares</label>
         <label class="check"><input type="checkbox" name="show_unanswered" ${+q.show_unanswered ? 'checked' : ''}> Mostrar perguntas sem resposta</label>
-        <label class="check"><input type="checkbox" name="allow_equipment" id="qeq" ${+q.allow_equipment ? 'checked' : ''}> Permitir vincular um equipamento</label>
-        <label class="check"><input type="checkbox" name="equipment_required" id="qeqr" ${+q.equipment_required ? 'checked' : ''} ${+q.allow_equipment ? '' : 'disabled'}> Equipamento obrigatório</label></fieldset>
+        <p class="small muted">O equipamento é o informado nos Detalhes da ordem de serviço.</p></fieldset>
     </form></div>
     <h2 class="qtitle">Perguntas</h2>
     <div id="qlist"></div>
@@ -3957,7 +4066,6 @@ async function viewQuestionnaireForm(v, id) {
     if (notes.length) noticeBox('Atenção!', notes.map(esc).join('<br><br>'));
   };
 
-  $('#qeq', v).onchange = (e) => { $('#qeqr', v).disabled = !e.target.checked; if (!e.target.checked) $('#qeqr', v).checked = false; };
   $('#qadd', v).onclick = () => { readQs(); qs.push({ id: newQid(), label: '', type: 'texto', required: false, description: '', options: [], cond: null }); render(); $$('.qe-label', box).at(-1)?.focus(); };
 
   // Campos da condicional sem preencher: "Este campo é obrigatório" embaixo de cada um.
@@ -3991,8 +4099,6 @@ async function viewQuestionnaireForm(v, id) {
       show_os: d.show_os,
       pairs: d.pairs,
       show_unanswered: d.show_unanswered,
-      allow_equipment: d.allow_equipment,
-      equipment_required: d.equipment_required,
       questions: qs.map((x) => ({ ...x, options: x.options || [] })),
     };
     const res = await api('questionnaire_save', { body });
@@ -4011,7 +4117,7 @@ async function viewQuestionnaireForm(v, id) {
     toast(to ? 'Questionário reativado' : 'Questionário desativado'); route();
   });
 
-  editLock(v, $('#qform', v), !isNew, (l) => { locked = l; $('#qeqr', v).disabled = l || !$('#qeq', v).checked; render(); });
+  editLock(v, $('#qform', v), !isNew, (l) => { locked = l; render(); });
   const qc = $('#qcancel', v); if (qc) qc.onclick = () => route();
 }
 
@@ -4500,7 +4606,7 @@ async function viewQuoteForm(v, id) {
           <div class="qprod-text"><input class="qdesc" data-f="name" value="${esc(l.p.name)}" maxlength="255" size="8" aria-label="Descrição">
             ${l.p.deleted ? '<div class="qsub"><span class="badge err">excluído do cadastro</span></div>' : kind === 'produto' && l.p.type !== 'servico' ? `<div class="qsub">estoque: ${qty(l.p.stock)} ${esc(l.p.unit || '')}</div>` : ''}</div></div></td>
         <td><div class="qstep"><button type="button" data-step="-1" aria-label="Diminuir">${icon('minus')}</button><input data-f="q" inputmode="decimal" value="${fmt2(l.q)}" aria-label="Quantidade"><button type="button" data-step="1" aria-label="Aumentar">${icon('plus')}</button></div></td>
-        <td><input class="qnum" data-f="price" inputmode="decimal" value="${fmt2(l.price)}" aria-label="Valor unitário"></td>
+        <td><input class="qnum" data-f="price" data-num="money" inputmode="decimal" value="${fmt2(l.price)}" aria-label="Valor unitário"></td>
         <td><div class="qdisc"><input data-f="dval" inputmode="decimal" value="${fmt2(l.dval)}" aria-label="Desconto"><select data-f="dtype" aria-label="Tipo de desconto"><option value="valor" ${l.dtype !== 'percent' ? 'selected' : ''}>R$</option><option value="percent" ${l.dtype === 'percent' ? 'selected' : ''}>%</option></select></div></td>
         <td class="num lt">${fmt2(lineTotal(l))}</td></tr>`).join('')
         : `<tr class="qempty"><td colspan="5">Nenhum ${label} selecionado</td></tr>`}
@@ -4509,7 +4615,7 @@ async function viewQuoteForm(v, id) {
   };
   const paintExtras = () => {
     $('#le', v).innerHTML = `<div class="table-wrap"><table class="qitems qextras"><thead><tr><th>Custo adicional</th><th>Valor (R$)</th><th></th></tr></thead><tbody>
-      ${extras.length ? extras.map((e, i) => `<tr data-e="${i}"><td><input data-f="d" value="${esc(e.d)}" maxlength="200" placeholder="Ex.: frete, embalagem, deslocamento"></td><td><input class="price-input" data-f="v" inputmode="decimal" value="${e.v ? fmt2(e.v) : ''}" placeholder="0,00"></td><td><button type="button" class="icon-btn" data-rme aria-label="Remover">${icon('trash')}</button></td></tr>`).join('')
+      ${extras.length ? extras.map((e, i) => `<tr data-e="${i}"><td><input data-f="d" value="${esc(e.d)}" maxlength="200" placeholder="Ex.: frete, embalagem, deslocamento"></td><td><input class="price-input" data-f="v" data-num="money" inputmode="decimal" value="${e.v ? fmt2(e.v) : ''}" placeholder="0,00"></td><td><button type="button" class="icon-btn" data-rme aria-label="Remover">${icon('trash')}</button></td></tr>`).join('')
         : '<tr><td colspan="3" class="empty">Nenhum custo adicional selecionado</td></tr>'}
       </tbody><tfoot><tr><td></td><td class="num" id="textras"></td><td></td></tr></tfoot></table></div>`;
     paintTotals();
@@ -5359,8 +5465,8 @@ async function viewPurchaseForm(v, id) {
           ${editable ? `<button type="button" class="btn sm" id="low">${icon('box')}Abaixo do mínimo</button>${can('produtos') ? `<button type="button" class="btn sm qbtn-blue" id="newp">${icon('plus')}Cadastrar produto</button>` : ''}<button type="button" class="btn sm qbtn-green" id="addp">${icon('plus')}Incluir item</button>` : ''}</span></div>
           <div id="lp"></div><p class="help" style="margin-bottom:0">O custo vem do custo médio do produto; ajuste para o preço combinado com o fornecedor. O pedido não mexe no estoque: a entrada acontece ao importar a nota da compra.</p></section>
         <section class="card"><h2>Resumo</h2><div class="table-wrap"><table class="qsum posum"><thead><tr><th>Itens</th><th>Frete</th><th>Desconto</th><th class="num">Total</th></tr></thead>
-          <tbody><tr><td id="sitems"></td><td><input id="freight" inputmode="decimal" style="width:120px" value="${+o.freight ? fmt2(o.freight) : ''}" placeholder="0,00"></td>
-          <td><input id="discount" inputmode="decimal" style="width:120px" value="${+o.discount ? fmt2(o.discount) : ''}" placeholder="0,00"></td><td class="num qtotal" id="stotal"></td></tr></tbody></table></div></section>
+          <tbody><tr><td id="sitems"></td><td><input id="freight" data-num="money" inputmode="decimal" style="width:120px" value="${+o.freight ? fmt2(o.freight) : ''}" placeholder="0,00"></td>
+          <td><input id="discount" data-num="money" inputmode="decimal" style="width:120px" value="${+o.discount ? fmt2(o.discount) : ''}" placeholder="0,00"></td><td class="num qtotal" id="stotal"></td></tr></tbody></table></div></section>
         <section class="card"><h2>Observações</h2><p class="help" style="margin-top:-6px">Aparece no pedido enviado ao fornecedor (endereço de entrega, horário de recebimento, transportadora…).</p>
           <textarea id="notes" rows="4" placeholder="Escreva aqui">${esc(o.notes)}</textarea>
           ${editable && isAdmin() ? '<label class="check" style="margin-top:8px"><input type="checkbox" id="defnotes"> Usar este texto como padrão nas próximas ordens</label>' : ''}</section>
@@ -5647,7 +5753,7 @@ function financeForm(e, meta, onSaved) {
       ${e.sale_id ? `<div class="alert">Este recebimento veio da <a href="#/venda/${e.sale_id}">venda #${e.sale_id}</a>. Para desfazer, cancele a venda.</div>` : ''}
       ${e.status === 'pago' ? `<div class="alert ok">${rec ? 'Recebido' : 'Pago'} em ${dOnly(e.paid_at)}: ${money(e.paid_amount)}${e.payment_method ? ' · ' + escpayLabel(e.payment_method) : ''}</div>` : ''}
       <label>Descrição * <input name="description" value="${esc(e.description)}" maxlength="200" required placeholder="${rec ? 'Ex.: Serviço de manutenção, cliente X' : 'Ex.: Aluguel, conta de luz, boleto do fornecedor'}"></label>
-      <div class="row"><label>Valor ${isNew ? 'total ' : ''}* <input name="amount" inputmode="decimal" value="${e.amount ? fmt2(e.amount) : ''}" placeholder="0,00" required></label>
+      <div class="row"><label>Valor ${isNew ? 'total ' : ''}* <input name="amount" data-num="money" inputmode="decimal" value="${e.amount ? fmt2(e.amount) : ''}" placeholder="0,00" required></label>
         <label>${isNew ? 'Vencimento (1ª parcela)' : 'Vencimento'} * <input type="date" name="due_date" value="${esc(e.due_date || today())}" required></label></div>
       <div class="row"><label>Categoria <input name="category" list="fcats" value="${esc(e.category || '')}" maxlength="80" placeholder="Escolha ou digite"><datalist id="fcats">${(meta.categories[e.type] || []).map((c) => `<option value="${esc(c)}">`).join('')}</datalist></label>
         <label>Forma de pagamento <select name="payment_method">${pmOptions(e.payment_method)}</select></label></div>
@@ -5700,7 +5806,7 @@ function payEntry(e, meta, onDone) {
     body: `<p style="margin-top:0"><strong>${esc(e.description)}</strong><br><span class="muted small">${e.party_name ? esc(e.party_name) + ' · ' : ''}vence ${dOnly(e.due_date)} · ${money(e.amount)}</span></p>
       <form class="form" id="pf">
       <div class="row"><label>Data * <input type="date" name="paid_at" value="${today()}" required></label>
-        <label>Valor ${rec ? 'recebido' : 'pago'} * <input name="paid_amount" inputmode="decimal" value="${fmt2(e.amount)}" required></label></div>
+        <label>Valor ${rec ? 'recebido' : 'pago'} * <input name="paid_amount" data-num="money" inputmode="decimal" value="${fmt2(e.amount)}" required></label></div>
       <label>Forma de pagamento <select name="payment_method">${pmOptions(e.payment_method)}</select></label>
       <label class="check" id="restw" hidden><input type="checkbox" name="keep_rest" checked> <span id="restl"></span></label>
       <p class="help" id="morel" hidden>Valor maior que o da conta (juros ou multa): o valor ${rec ? 'recebido' : 'pago'} é o que entra no fluxo de caixa.</p>
@@ -5827,7 +5933,7 @@ function openingForm(cur, onSaved) {
   const m = modal({
     title: 'Saldo inicial do caixa',
     body: `<p style="margin-top:0">Quanto havia em caixa e no banco <strong>antes</strong> do primeiro lançamento registrado no sistema. É o ponto de partida do saldo.</p>
-      <label>Saldo inicial (R$) <input id="opv" inputmode="decimal" value="${(Number(cur) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}"></label>
+      <label>Saldo inicial (R$) <input id="opv" data-num="money" inputmode="decimal" value="${(Number(cur) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}"></label>
       <p class="help">Pode ser negativo (ex.: conta no cheque especial). Use o sinal de menos: −500,00.</p>`,
     foot: `<button class="btn" data-close>Voltar</button><button class="btn primary" id="opok">Salvar</button>`,
   });
@@ -6414,6 +6520,7 @@ async function tkOrder(v, id, page, sub) {
     <div class="tk-ohead"><div><h1>${esc(cust)}</h1><span class="tk-sub">Tarefa #${o.id}</span>
       <div class="tk-tags"><span class="tk-st ${tkStatusCls(o.status)}">${esc(o.status_label.toLowerCase())}</span>${pend.length && o.status !== 'concluida' ? `<span class="tk-tag warn">${pend.length} pendência${pend.length > 1 ? 's' : ''}</span>` : ''}</div></div>
       <div class="tk-oacts">${phone ? `<a class="tk-ib b" href="tel:${phone}" aria-label="Ligar">${icon('phone')}</a>` : ''}<a class="tk-ib b" href="#/ordem/${o.id}" id="tkedit" aria-label="Editar na versão completa">${icon('pencil')}</a><button class="tk-ib b" id="tkshare" aria-label="Compartilhar">${icon('share')}</button></div></div>
+    ${o.status === 'concluida' ? `<div class="tk-lock">${icon('lock')}<span>Check-out feito: a ordem está concluída. Pelo celular dá só para consultar; para alterar, use o computador.</span></div>` : ''}
     <div class="tk-tabs">${[['detalhes', 'Detalhes'], ['relatorio', 'Relatório'], ['pendencias', 'Pendências']].map(([k, l]) => `<button data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}${k === 'pendencias' && pend.length ? ` (${pend.length})` : ''}</button>`).join('')}</div>
     <div data-pane="detalhes" ${tab === 'detalhes' ? '' : 'hidden'}>
       <div class="tk-card">
@@ -6429,7 +6536,7 @@ async function tkOrder(v, id, page, sub) {
       <div class="tk-card tk-rows">
         ${row(`m/os/${id}/relatorio`, 'quote', 'Relatório de tarefa', '', 'b')}
         ${row(`m/os/${id}/cliente`, 'user', 'Detalhes do cliente', '', 'p')}
-        ${row(`m/os/${id}/valores`, 'dollar', 'Valores', D.items.rows.length ? `${D.items.rows.length} item(ns) · ${money(D.items.totals.total)}` : '', 'o')}
+        ${row(`m/os/${id}/valores`, 'box', 'Peças e Serviços', D.items.rows.length ? `${D.items.rows.length} item(ns)${D.items.review ? ` · ${D.items.review} aguardando revisão` : ''}` : '', 'o')}
         ${row(`m/os/${id}/orcamentos`, 'tag', 'Orçamentos', D.quotes.length ? `${D.quotes.length} orçamento(s)` : '', 'r')}
       </div></div>
     <div data-pane="relatorio" ${tab === 'relatorio' ? '' : 'hidden'}>
@@ -6479,14 +6586,17 @@ function tkPauseReason() {
 /** Páginas de dentro da OS: fotos, questionários, quilometragem, relato, assinatura, pausas, cliente, valores e orçamentos. */
 async function tkOrderPage(v, D, page, sub) {
   const o = D.order, id = o.id;
-  const top = (title, saveBtn = false) => `<div class="tk-top">${tkBackBtn(page === 'questionario' ? `m/os/${id}/questionarios` : page === 'relatorio' ? `m/os/${id}` : `m/os/${id}`)}${saveBtn ? '<button class="tk-save" id="tksave">Salvar</button>' : tkMenuBtn()}</div>${title ? `<h1 class="tk-ptitle">${title}</h1>` : ''}`;
+  // Depois do check-out, no celular só se consulta (alterações só pela versão completa, no computador)
+  const ro = o.status === 'concluida';
+  const roNote = ro ? `<div class="tk-lock">${icon('lock')}<span>Ordem concluída: só consulta. Para alterar, use o computador.</span></div>` : '';
+  const top = (title, saveBtn = false) => `<div class="tk-top">${tkBackBtn(page === 'questionario' ? `m/os/${id}/questionarios` : page === 'relatorio' ? `m/os/${id}` : `m/os/${id}`)}${saveBtn && !ro ? '<button class="tk-save" id="tksave">Salvar</button>' : tkMenuBtn()}</div>${title ? `<h1 class="tk-ptitle">${title}</h1>` : ''}${roNote}`;
   tkBindTop(v);
   const report = (extra) => api('so_report_save', { body: { id, report: o.report || '', km: o.km != null ? String(o.km).replace('.', ',') : '', signer_name: o.signer_name || '', signer_doc: o.signer_doc || '', ...extra } });
   if (page === 'relatorio') { sessionStorage.setItem('tkTab:' + id, 'relatorio'); return go(`m/os/${id}`); }
   if (page === 'fotos') {
-    v.innerHTML = `${top('Fotos')}<button class="tk-btn p sm" id="tkphadd">${icon('camera')}Adicionar fotos</button>
-      <div class="tk-photos">${D.photos.length ? D.photos.map((p) => `<figure><img src="${esc(p.image)}" alt="Foto"><button class="tk-ib" data-phdel="${p.id}" aria-label="Remover foto">${icon('trash')}</button></figure>`).join('') : `<div class="tk-empty tk-noph">${icon('image')}<span>Nenhuma foto adicionada</span></div>`}</div>`;
-    $('#tkphadd', v).onclick = (e) => busy(e.currentTarget, async () => {
+    v.innerHTML = `${top('Fotos')}${ro ? '' : `<button class="tk-btn p sm" id="tkphadd">${icon('camera')}Adicionar fotos</button>`}
+      <div class="tk-photos">${D.photos.length ? D.photos.map((p) => `<figure><img src="${esc(p.image)}" alt="Foto">${ro ? '' : `<button class="tk-ib" data-phdel="${p.id}" aria-label="Remover foto">${icon('trash')}</button>`}</figure>`).join('') : `<div class="tk-empty tk-noph">${icon('image')}<span>Nenhuma foto adicionada</span></div>`}</div>`;
+    if ($('#tkphadd', v)) $('#tkphadd', v).onclick = (e) => busy(e.currentTarget, async () => {
       const imgs = await pickImages(true); if (!imgs.length) return;
       for (const img of imgs) await api('so_photo_add', { body: { id, image: img } });
       toast(imgs.length > 1 ? `${imgs.length} fotos adicionadas` : 'Foto adicionada'); route();
@@ -6499,15 +6609,15 @@ async function tkOrderPage(v, D, page, sub) {
     return;
   }
   if (page === 'km') {
-    v.innerHTML = `${top('Quilometragem', true)}<div class="tk-card"><label class="tk-field">Km rodado<input id="tkkm" data-num="dec" inputmode="decimal" value="${o.km != null ? esc(String(o.km).replace('.', ',')) : ''}" placeholder="0"></label></div>`;
+    v.innerHTML = `${top('Quilometragem', true)}<div class="tk-card"><label class="tk-field">Km rodado <input id="tkkm" data-num="dec" inputmode="decimal" ${ro ? 'disabled' : ''} value="${o.km != null ? esc(String(o.km).replace('.', ',')) : ''}" placeholder="0"></label></div>`;
     $('#tkkm', v).oninput = () => (v._dirty = true);
-    $('#tksave', v).onclick = (e) => busy(e.currentTarget, async () => { await report({ km: $('#tkkm', v).value }); v._dirty = false; toast('Quilometragem salva'); go(`m/os/${id}`); }).catch(fail);
+    if ($('#tksave', v)) $('#tksave', v).onclick = (e) => busy(e.currentTarget, async () => { await report({ km: $('#tkkm', v).value }); v._dirty = false; toast('Quilometragem salva'); go(`m/os/${id}`); }).catch(fail);
     return;
   }
   if (page === 'relato') {
-    v.innerHTML = `${top('Relato', true)}<div class="tk-card"><label class="tk-field">O que foi feito<textarea id="tkrel" rows="10" maxlength="10000" placeholder="Descreva o atendimento">${esc(o.report || '')}</textarea></label></div>`;
+    v.innerHTML = `${top('Relato', true)}<div class="tk-card"><label class="tk-field">O que foi feito <textarea id="tkrel" ${ro ? 'disabled' : ''} rows="10" maxlength="10000" placeholder="Descreva o atendimento">${esc(o.report || '')}</textarea></label></div>`;
     $('#tkrel', v).oninput = () => (v._dirty = true);
-    $('#tksave', v).onclick = (e) => busy(e.currentTarget, async () => { await report({ report: $('#tkrel', v).value }); v._dirty = false; toast('Relato salvo'); go(`m/os/${id}`); }).catch(fail);
+    if ($('#tksave', v)) $('#tksave', v).onclick = (e) => busy(e.currentTarget, async () => { await report({ report: $('#tkrel', v).value }); v._dirty = false; toast('Relato salvo'); go(`m/os/${id}`); }).catch(fail);
     return;
   }
   if (page === 'assinar') {
@@ -6516,17 +6626,17 @@ async function tkOrderPage(v, D, page, sub) {
     const pend = D.pending.filter((p) => !/assinatura|nome de quem|CPF\/CNPJ de quem/i.test(p));
     v.innerHTML = `${top('Assinar e enviar', true)}
       ${pend.length ? `<div class="tk-pend"><strong>${icon('warn')} Antes de enviar falta:</strong>${pend.map((p) => `<span class="tk-pline">${esc(p)}</span>`).join('')}</div>` : ''}
-      <div class="tk-card"><button class="tk-sigbox" id="tksig"></button>${sig ? '<button class="tk-link" id="tksigdel">Remover assinatura</button>' : ''}
-        <label class="tk-field">Nome de quem assinou<input id="tksn" maxlength="120" value="${esc(o.signer_name || '')}"></label>
-        <label class="tk-field">CPF/CNPJ de quem assinou<input id="tksd" data-mask="doc" inputmode="numeric" value="${esc(o.signer_doc ? docFmt(o.signer_doc) : '')}"></label></div>
+      <div class="tk-card"><button class="tk-sigbox" id="tksig" ${ro ? 'disabled' : ''}></button>${sig && !ro ? '<button class="tk-link" id="tksigdel">Remover assinatura</button>' : ''}
+        <label class="tk-field">Nome de quem assinou<input id="tksn" maxlength="120" ${ro ? 'disabled' : ''} value="${esc(o.signer_name || '')}"></label>
+        <label class="tk-field">CPF/CNPJ de quem assinou<input id="tksd" data-mask="doc" inputmode="numeric" ${ro ? 'disabled' : ''} value="${esc(o.signer_doc ? docFmt(o.signer_doc) : '')}"></label></div>
       <div class="tk-card"><label class="tk-field">Enviar a OS digital para o e-mail<input id="tkmail" type="email" value="${esc(o.customer_email || '')}" placeholder="email@cliente.com"></label>
         <button class="tk-btn" id="tksend">${icon('mail')}Enviar por e-mail</button>
         <a class="tk-btn" target="_blank" rel="noopener" href="https://wa.me/${String(o.customer_phone || '').replace(/\D/g, '').length >= 10 ? '55' + String(o.customer_phone).replace(/\D/g, '') : ''}?text=${encodeURIComponent(`Ordem de serviço #${o.id}: ${o.public_url}`)}">${icon('whats')}Enviar pelo WhatsApp</a></div>`;
     paint();
-    $('#tksig', v).onclick = async () => { const s = await signaturePad('Assinatura do cliente'); if (s) { sig = s; v._dirty = true; paint(); } };
+    $('#tksig', v).onclick = async () => { if (ro) return; const s = await signaturePad('Assinatura do cliente'); if (s) { sig = s; v._dirty = true; paint(); } };
     const sd = $('#tksigdel', v); if (sd) sd.onclick = () => { sig = ''; v._dirty = true; paint(); sd.remove(); };
-    v.addEventListener('input', () => (v._dirty = true));
-    $('#tksave', v).onclick = (e) => busy(e.currentTarget, async () => { await report({ signature: sig, signer_name: $('#tksn', v).value, signer_doc: $('#tksd', v).value }); v._dirty = false; toast('Assinatura salva'); go(`m/os/${id}`); }).catch(fail);
+    if (!ro) v.addEventListener('input', () => (v._dirty = true));
+    if ($('#tksave', v)) $('#tksave', v).onclick = (e) => busy(e.currentTarget, async () => { await report({ signature: sig, signer_name: $('#tksn', v).value, signer_doc: $('#tksd', v).value }); v._dirty = false; toast('Assinatura salva'); go(`m/os/${id}`); }).catch(fail);
     $('#tksend', v).onclick = (e) => busy(e.currentTarget, async () => {
       if (v._dirty) { await report({ signature: sig, signer_name: $('#tksn', v).value, signer_doc: $('#tksd', v).value }); v._dirty = false; }
       await api('so_send', { body: { id, kind: 'os', to: $('#tkmail', v).value } }); toast('OS enviada por e-mail');
@@ -6558,20 +6668,51 @@ async function tkOrderPage(v, D, page, sub) {
     </div>`;
     return;
   }
-  if (page === 'valores') {
-    const it = D.items;
-    v.innerHTML = `${top('Valores')}<div class="tk-card tk-acts">${it.rows.length ? it.rows.map((x) => `<div class="tk-arow"><div><strong>${esc(x.description || '')}</strong><small>${esc(D.kinds[x.kind] || x.kind)} · ${qty(x.quantity)} × ${money(x.unit_price)}</small></div><b>${money(x.total)}</b></div>`).join('')
-      + `<div class="tk-arow tot"><strong>Total</strong><b>${money(it.totals.total)}</b></div>` : '<p class="tk-empty">Nenhum valor lançado.</p>'}</div>
-      <p class="tk-hint">Para lançar produtos, serviços e custos, use a versão completa (lápis no topo da tarefa).</p>`;
-    return;
-  }
+  if (page === 'valores') return tkParts(v, D, top, ro);
   if (page === 'orcamentos') {
     v.innerHTML = `${top('Orçamentos')}<div class="tk-card tk-acts">${D.quotes.length ? D.quotes.map((q) => `<a class="tk-arow" href="#/orcamento/${q.id}"><div><strong>Orçamento #${q.id}</strong><small>${esc(q.relation || '')}${q.status_label ? ' · ' + esc(q.status_label) : ''}</small></div><b>${money(q.total)}</b></a>`).join('') : '<p class="tk-empty">Nenhum orçamento ligado a esta tarefa.</p>'}</div>`;
     return;
   }
   if (page === 'questionarios') return tkQuestionnaires(v, D, top);
-  if (page === 'questionario') return tkAnswer(v, D, +sub, top);
+  if (page === 'questionario') return tkAnswer(v, D, +sub, top, ro);
   v.innerHTML = `${top('')}<p class="tk-empty">Página não encontrada.</p>`;
+}
+
+/** Peças e serviços da tarefa: escolhe do cadastro ou lança um item novo (vai para revisão de quem cuida dos cadastros). */
+async function tkParts(v, D, top, ro) {
+  const id = D.order.id, it = D.items;
+  const all = await products().catch(() => []);
+  let kind = sessionStorage.getItem('tkPk') || 'produto';
+  const listFor = (k) => all.filter((p) => +p.active !== 0 && (k === 'servico' ? p.type === 'servico' : p.type !== 'servico'));
+  const pLabel = (p) => `${p.name}${p.mfr_code ? ' · ' + p.mfr_code : p.sku ? ' · ' + p.sku : ''}`;
+  v.innerHTML = `${top('Peças e Serviços')}
+    ${it.review ? `<div class="tk-pend"><strong>${icon('warn')} ${it.review} ${it.review === 1 ? 'item novo aguarda' : 'itens novos aguardam'} revisão do cadastro</strong></div>` : ''}
+    <div class="tk-card tk-acts">${it.rows.length ? it.rows.map((x) => `<div class="tk-arow"><div><strong>${esc(x.description)}</strong><small>${esc(D.kinds[x.kind] || x.kind)} · ${qty(x.quantity)} × ${money(x.unit_price)}${x.review ? ' · <span class="tk-tag warn">aguardando revisão</span>' : ''}</small></div>
+      <b>${money(x.total)}</b>${ro ? '' : `<button class="tk-ib" data-pdel="${x.id}" aria-label="Remover">${icon('trash')}</button>`}</div>`).join('')
+      + `<div class="tk-arow tot"><strong>Total</strong><b>${money(it.totals.total)}</b></div>` : '<p class="tk-empty">Nenhuma peça ou serviço lançado.</p>'}</div>
+    ${ro ? '' : `<div class="tk-card"><div class="tk-toggle tk-pk"><button data-pk="produto" class="${kind === 'produto' ? 'on' : ''}">Peça</button><button data-pk="servico" class="${kind === 'servico' ? 'on' : ''}">Serviço</button></div>
+      <label class="tk-field" id="tkpickw">${kind === 'servico' ? 'Serviço' : 'Peça'} do cadastro<input id="tkpick" list="tkpdl" autocomplete="off" placeholder="Digite para buscar"><datalist id="tkpdl">${listFor(kind).map((p) => `<option value="${esc(pLabel(p))}"></option>`).join('')}</datalist></label>
+      <label class="tk-opt sq" id="tknewl"><input type="checkbox" id="tknew"><span>${kind === 'servico' ? 'O serviço não está cadastrado' : 'A peça não está cadastrada'} (vai para revisão)</span></label>
+      <label class="tk-field" id="tkdescw" hidden>Nome ${kind === 'servico' ? 'do serviço novo' : 'da peça nova'}<input id="tkdesc" maxlength="200" placeholder="Ex.: Rolamento 6205"></label>
+      <div class="grid two"><label class="tk-field">Quantidade<input id="tkqty" data-num="dec" inputmode="decimal" value="1"></label>
+        <label class="tk-field">Valor unitário (R$)<input id="tkprice" data-num="money" inputmode="decimal" placeholder="0,00"></label></div>
+      <button class="tk-btn p" id="tkpadd">${icon('plus')}Adicionar</button></div>`}`;
+  if (ro) return;
+  const find = () => listFor(kind).find((p) => pLabel(p) === $('#tkpick', v).value.trim() || p.name === $('#tkpick', v).value.trim());
+  $('#tkpick', v).onchange = () => { const p = find(); if (p && +p.sale_price) $('#tkprice', v).value = moneyMaskVal(+p.sale_price); };
+  $('#tknew', v).onchange = (e) => { $('#tkpickw', v).hidden = e.target.checked; $('#tkdescw', v).hidden = !e.target.checked; };
+  v.addEventListener('click', async (e) => {
+    const k = e.target.closest('[data-pk]'); if (k) { sessionStorage.setItem('tkPk', k.dataset.pk); route(); return; }
+    const d = e.target.closest('[data-pdel]');
+    if (d) { if (!(await confirmBox('Remover este item da tarefa?', { ok: 'Remover', danger: true }))) return; try { await api('so_item_delete', { body: { item_id: +d.dataset.pdel } }); route(); } catch (err) { fail(err); } }
+  });
+  $('#tkpadd', v).onclick = (e) => busy(e.currentTarget, async () => {
+    const isNew = $('#tknew', v).checked, p = isNew ? null : find();
+    if (!isNew && !p) throw new Error(kind === 'servico' ? 'Escolha o serviço do cadastro (ou marque que não está cadastrado)' : 'Escolha a peça do cadastro (ou marque que não está cadastrada)');
+    if (isNew && !$('#tkdesc', v).value.trim()) throw new Error('Informe o nome do item novo');
+    await api('so_item_save', { body: { id, kind, product_id: p ? p.id : '', description: isNew ? $('#tkdesc', v).value.trim() : '', new_item: isNew ? 1 : 0, quantity: $('#tkqty', v).value, unit_price: $('#tkprice', v).value } });
+    toast(isNew ? 'Item novo incluído: aguarda revisão do cadastro' : 'Item incluído'); route();
+  }).catch(fail);
 }
 
 /** Lista dos questionários da tarefa, com filtro e progresso de cada um. */
@@ -6592,7 +6733,7 @@ function tkQuestionnaires(v, D, top) {
     <div class="tk-chips dark">${[['todos', 'Todos'], ['pendentes', 'Pendentes'], ['andamento', 'Em andamento'], ['finalizados', 'Finalizados']].map(([k, l]) => `<button data-qf="${k}" class="${f === k ? 'on' : ''}">${l} <i>${cnt[k]}</i></button>`).join('')}</div>
     <div class="tk-list">${shown.length ? shown.map(({ q, filled, total, st }) => `<button class="tk-qcard" data-tkgo="m/os/${id}/questionario/${q.id}">
       <div class="tk-qh"><span class="tk-ri p">${icon('quote')}</span><div><strong>${esc(q.name)}</strong><small>${st === 'fin' ? 1 : 0} de 1 finalizado</small></div>${icon('chevron')}</div>
-      <div class="tk-qe"><span>${icon('gear')} ${q.answer_equipment_id ? esc((D.equipments.find((e) => +e.id === +q.answer_equipment_id) || {}).name || 'Equipamento') : 'Sem equipamento vinculado'}</span>
+      <div class="tk-qe"><span>${icon('gear')} ${D.order.equipment_name ? esc(D.order.equipment_name) : 'Sem equipamento na OS'}</span>
         ${q.answered && q.answered_at ? `<small>${esc(tkWhen(q.answered_at))}</small>` : ''}
         <div class="tk-qp"><div class="tk-bar"><i style="width:${total ? Math.round(filled * 100 / total) : 0}%"></i></div><b>${total ? Math.round(filled * 100 / total) : 0}%</b><span class="tk-qs ${st}">• ${lab[st]}</span></div></div></button>`).join('')
       : `<p class="tk-empty">${D.questionnaires.length ? 'Nenhum questionário neste filtro.' : 'Esta tarefa não tem questionários.'}</p>`}</div>`;
@@ -6600,12 +6741,11 @@ function tkQuestionnaires(v, D, top) {
 }
 
 /** Responder um questionário: Todas (lista), Foco (uma pergunta por vez) e Sem resposta. */
-function tkAnswer(v, D, qid, top) {
+function tkAnswer(v, D, qid, top, ro = false) {
   const id = D.order.id;
   const q = D.questionnaires.find((x) => +x.id === qid);
   if (!q) { v.innerHTML = `${top('')}<p class="tk-empty">Questionário não encontrado.</p>`; return; }
   const ans = JSON.parse(JSON.stringify(q.answers || {}));
-  let eqId = q.answer_equipment_id || '';
   let mode = 'todas', idx = 0;
   const fieldHtml = (x) => {
     const val = ans[x.id], qid2 = esc(x.id);
@@ -6635,13 +6775,14 @@ function tkAnswer(v, D, qid, top) {
         <div class="tk-fnav"><button class="tk-btn" data-fo="-1" ${idx === 0 ? 'disabled' : ''}>‹ Anterior</button><button class="tk-btn p" data-fo="1">${idx === vq.length - 1 ? 'Concluir' : 'Próxima ›'}</button></div>` : '<p class="tk-empty">Nenhuma pergunta.</p>';
     }
     $('#tkqbody', v).innerHTML = body;
+    if (ro) $$('#tkqbody input, #tkqbody textarea, #tkqbody select, #tkqbody button[data-phadd], #tkqbody button[data-phdel], #tkqbody button[data-sig]', v).forEach((el) => (el.disabled = true));
     $('#tkqcount', v).textContent = `${filled} de ${vq.length}`;
     $('#tkqbar', v).style.width = `${vq.length ? Math.round(filled * 100 / vq.length) : 0}%`;
     $$('.tk-qtabs button', v).forEach((b) => b.classList.toggle('on', b.dataset.m === mode));
   };
   v.innerHTML = `${top(esc(q.name), true)}
     <div class="tk-qprog"><div class="tk-bar"><i id="tkqbar"></i></div><span id="tkqcount"></span></div>
-    ${+q.allow_equipment ? `<label class="tk-eq">${icon('gear')}<select id="tkeq"><option value="">${+q.equipment_required ? 'Escolha o equipamento *' : 'Escolha o equipamento'}</option>${D.equipments.map((e) => `<option value="${e.id}" ${+eqId === +e.id ? 'selected' : ''}>${esc(e.name)}${e.serial ? ' · ' + esc(e.serial) : ''}</option>`).join('')}</select></label>` : ''}
+    ${D.order.equipment_name ? `<div class="tk-eq">${icon('gear')}<span>${esc(D.order.equipment_name)}${D.order.equipment_serial ? ' · ' + esc(D.order.equipment_serial) : ''}</span></div>` : ''}
     <div class="tk-tabs tk-qtabs"><button data-m="todas">Todas</button><button data-m="foco">Foco</button><button data-m="sem">Sem resposta</button></div>
     <div id="tkqbody"></div>`;
   const read = (el) => {
@@ -6653,7 +6794,6 @@ function tkAnswer(v, D, qid, top) {
   };
   // Itens, múltipla e check mudam a visibilidade e o destaque: redesenha; campos de texto só atualizam o progresso
   v.addEventListener('change', (e) => {
-    if (e.target.id === 'tkeq') { eqId = e.target.value; v._dirty = true; return; }
     if (!e.target.dataset.q) return;
     read(e.target);
     // Itens/múltipla/check (e campos de data, hora e número ao sair) podem mostrar ou esconder condicionais
@@ -6673,7 +6813,8 @@ function tkAnswer(v, D, qid, top) {
   v.addEventListener('click', async (e) => {
     const t = e.target.closest('[data-m]'); if (t) { mode = t.dataset.m; if (mode === 'foco') idx = 0; paint(); window.scrollTo(0, 0); return; }
     const fo = e.target.closest('[data-fo]');
-    if (fo) { const vq = visibleQs(); if (+fo.dataset.fo > 0 && idx >= vq.length - 1) { $('#tksave', v).click(); return; } idx += +fo.dataset.fo; paint(); return; }
+    if (fo) { const vq = visibleQs(); if (+fo.dataset.fo > 0 && idx >= vq.length - 1) { if ($('#tksave', v)) $('#tksave', v).click(); return; } idx += +fo.dataset.fo; paint(); return; }
+    if (ro) return;
     const add = e.target.closest('[data-phadd]'), del = e.target.closest('[data-phdel]'), sg = e.target.closest('[data-sig]');
     if (add) {
       const x = q.questions.find((y) => y.id === add.dataset.phadd);
@@ -6686,11 +6827,10 @@ function tkAnswer(v, D, qid, top) {
     if (del) { ans[del.dataset.phdel].splice(+del.dataset.i, 1); v._dirty = true; paint(); }
     if (sg) { const s = await signaturePad(q.questions.find((y) => y.id === sg.dataset.sig).label); if (s) { ans[sg.dataset.sig] = s; v._dirty = true; paint(); } }
   });
-  $('#tksave', v).onclick = (e) => busy(e.currentTarget, async () => {
-    if (+q.allow_equipment && +q.equipment_required && !eqId) throw new Error('Escolha o equipamento');
+  if ($('#tksave', v)) $('#tksave', v).onclick = (e) => busy(e.currentTarget, async () => {
     const vis = qVisible(q.questions, ans);
     const out = {}; for (const x of q.questions) if (vis[x.id] && ans[x.id] !== undefined) out[x.id] = ans[x.id];
-    const r = await api('so_answers_save', { body: { id, questionnaire_id: q.id, answers: out, equipment_id: eqId || null } });
+    const r = await api('so_answers_save', { body: { id, questionnaire_id: q.id, answers: out } });
     v._dirty = false;
     toast(r.missing && r.missing.length ? `Salvo. Falta responder ${r.missing.length} obrigatória(s)` : 'Questionário salvo');
     go(`m/os/${id}/questionarios`);
