@@ -935,7 +935,7 @@ try {
         'GET backup' => function () {
             Auth::requireAdmin();
             header('Content-Type: application/sql; charset=utf-8');
-            header('Content-Disposition: attachment; filename="backup-estoque-' . date('Y-m-d-His') . '.sql"');
+            header('Content-Disposition: attachment; filename="' . GDrive::FILE_PREFIX . date('Y-m-d-His') . '.sql"');
             echo Backup::sql();
             exit;
         },

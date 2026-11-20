@@ -76,7 +76,7 @@ $v = fn($k, $d = '') => htmlspecialchars((string)($_POST[$k] ?? $d), ENT_QUOTES)
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>(function(){try{var t=localStorage.getItem('theme')||'auto';var d=t==='dark'||(t==='auto'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.setAttribute('data-theme',d?'dark':'light');}catch(e){}})();</script>
-<title>Instalação · Gestão de Serviços</title>
+<title>Instalação · CiclosERP</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body class="auth-page">

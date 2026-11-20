@@ -11,7 +11,7 @@ header('X-Frame-Options: SAMEORIGIN');
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <script>(function(){try{var t=localStorage.getItem('theme')||'auto';var d=t==='dark'||(t==='auto'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.setAttribute('data-theme',d?'dark':'light');}catch(e){}})();</script>
 <meta name="theme-color" content="#b02a37">
-<title>Gestão de Serviços</title>
+<title>CiclosERP</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23b02a37'/><path d='M8 12l8-4 8 4v9l-8 4-8-4z' fill='none' stroke='white' stroke-width='2' stroke-linejoin='round'/><path d='M8 12l8 4 8-4M16 16v9' fill='none' stroke='white' stroke-width='2'/></svg>">
 <link rel="stylesheet" href="assets/style.css?v=<?= $v ?>">
 <style id="accent-css"></style>

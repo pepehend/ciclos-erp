@@ -21,7 +21,7 @@ class Mailer
         }
         if (!function_exists('mail')) throw new AppError('Este servidor não envia e-mails');
         $co = Settings::all();
-        $name = $co['company_name'] ?: 'Sistema de Gestão de Serviços';
+        $name = $co['company_name'] ?: 'CiclosERP';
         $host = preg_replace('/^www\./', '', preg_replace('/:\d+$/', '', (string)($_SERVER['HTTP_HOST'] ?? 'localhost')));
         $enc = fn($s) => '=?UTF-8?B?' . base64_encode($s) . '?=';
         $headers = [
@@ -663,7 +663,7 @@ class OrderExec
             throw new AppError('A pesquisa de satisfação só é enviada depois que a ordem é concluída');
         }
         $co = Settings::all();
-        $company = $co['company_name'] ?: 'Sistema de Gestão de Serviços';
+        $company = $co['company_name'] ?: 'CiclosERP';
         $cust = $o['customer_trade_name'] ?: $o['customer_name'];
         $url = self::publicUrl($id, $kind === 'pesquisa');
         $e = fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');

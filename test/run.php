@@ -1130,7 +1130,7 @@ ok(GDrive::isDue('2026-03-10 03:05:00'), 'diário às 3h: chegou a hora');
 ok(GDrive::nextAt('2026-03-10 02:00:00') === '2026-03-10 03:00:00', 'próximo backup às 3h');
 $msg = GDrive::cron('2026-03-10 03:05:00');
 $sql = gzdecode($driveFiles[0]['data']);
-ok(str_contains($msg, 'backup-estoque-2026-03-10-030500.sql.gz') && str_contains($sql, 'INSERT INTO `products`'), 'agendador envia o .sql.gz com os dados');
+ok(str_contains($msg, 'bkp-db-2026-03-10-030500.sql.gz') && str_contains($sql, 'INSERT INTO `products`'), 'agendador envia o .sql.gz com os dados');
 ok(!str_contains($sql, $scriptKey) && !str_contains($sql, 'script.google.com') && str_contains($sql, "DELETE FROM `settings` WHERE SUBSTR(name, 1, 7) <> 'gdrive_'"), 'backup não leva a chave nem o endereço e não os apaga ao restaurar');
 ok(GDrive::cron('2026-03-10 03:10:00') === '' && GDrive::cron('2026-03-11 02:00:00') === '', 'não repete no mesmo dia');
 $driveFiles[] = ['id' => 'OUTRO', 'name' => 'planilha-do-pedro.xlsx', 'data' => ''];

@@ -92,7 +92,7 @@ passo "Configurando o PHP"
 for d in /etc/php/*/apache2/conf.d /etc/php/*/cli/conf.d; do
     [ -d "$d" ] || continue
     cat > "$d/99-ciclos-erp.ini" <<'INI'
-; Sistema de Gestão de Serviços (mesmos limites do .user.ini do cPanel)
+; CiclosERP (mesmos limites do .user.ini do cPanel)
 upload_max_filesize = 16M
 post_max_size = 18M
 memory_limit = 256M
@@ -155,7 +155,7 @@ fi
 
 passo "Agendando a publicação automática e as tarefas do sistema (cron a cada 5 minutos)"
 cat > /etc/cron.d/ciclos-erp <<CRON
-# Sistema de Gestão de Serviços: publica a branch $BRANCH aprovada e roda o backup automático
+# CiclosERP: publica a branch $BRANCH aprovada e roda o backup automático
 */5 * * * * root /bin/bash $REPO_DIR/deploy/auto-deploy.sh >/dev/null 2>&1
 CRON
 chmod 644 /etc/cron.d/ciclos-erp
