@@ -214,12 +214,14 @@ class ServiceOrders
             if (!isset(self::STATUSES[$status])) throw new AppError('Status inválido');
             $w[] = 'o.status = ?'; $p[] = $status;
         }
+        if (!empty($f['customer_id'])) { $w[] = 'o.customer_id = ?'; $p[] = (int)$f['customer_id']; }
+        if (!empty($f['equipment_id'])) { $w[] = 'o.equipment_id = ?'; $p[] = (int)$f['equipment_id']; }
         if (($s = trim((string)($f['q'] ?? ''))) !== '') {
             $like = '%' . mb_strtolower($s) . '%';
             $w[] = '(LOWER(c.name) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(o.description) LIKE ? OR o.id = ?)';
             array_push($p, $like, $like, $like, (int)$s);
         }
-        return DB::all("SELECT o.id, o.status, o.origin, o.service_type, o.scheduled_at, o.due_date, o.created_at,
+        return DB::all("SELECT o.id, o.status, o.origin, o.service_type, o.scheduled_at, o.due_date, o.created_at, o.description, o.customer_id, o.equipment_id,
                 c.name customer_name, c.trade_name customer_trade_name, e.name equipment_name, t.name technician_name
             FROM service_orders o
             JOIN customers c ON c.id = o.customer_id
