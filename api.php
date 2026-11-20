@@ -103,6 +103,15 @@ try {
             $d = Reports::dashboard();
             if (!Auth::can('relatorios')) { unset($d['today'], $d['month'], $d['month_days']); $d['stock']['value'] = null; }
             if (Auth::can('financeiro')) $d['finance'] = Finance::summary();
+            $me = Auth::user();
+            if (Auth::can('ordens')) $d['orders'] = ServiceOrders::dashboard((int)$me['id']);
+            if (Auth::can('orcamentos')) {
+                $d['quotes'] = [
+                    'approved' => (int)DB::val("SELECT COUNT(*) FROM quotes WHERE status = 'aprovado'"),
+                    'approved_total' => (float)DB::val("SELECT COALESCE(SUM(total),0) FROM quotes WHERE status = 'aprovado'"),
+                    'from_os' => (int)DB::val("SELECT COUNT(*) FROM quotes WHERE service_order_id IS NOT NULL AND created_at >= ?", [date('Y-m-01') . ' 00:00:00']),
+                ];
+            }
             if (Auth::can('compras')) {
                 $d['purchases'] = [
                     'open' => (int)DB::val("SELECT COUNT(*) FROM purchase_orders WHERE status IN ('rascunho','enviada','confirmada')"),

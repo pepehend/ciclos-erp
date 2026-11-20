@@ -1117,10 +1117,38 @@ function renderLogin() {
 }
 
 // ============ Painel ============
+/** Painel: bloco das ordens de serviço (agenda de hoje, atrasadas, concluídas, satisfação) e dos orçamentos ligados a elas. */
+function dashOrdersHtml(d) {
+  const o = d.orders, q = d.quotes;
+  if (!o && !q) return '';
+  const st = o ? o.statuses : {};
+  const row = (r, when) => `<tr class="click" data-go="ordem/${r.id}"><td class="nowrap">${when(r)}</td>
+    <td><div><strong>${soCustomer(r)}</strong></div><div class="small muted">#${r.id}${r.task_type_name ? ' · ' + esc(r.task_type_name) : ''}${r.technician_name ? ' · ' + esc(r.technician_name) : ''}</div></td>
+    <td>${soStatusHtml(r.status, st)}</td></tr>`;
+  const hour = (r) => esc(String(r.scheduled_at).slice(11, 16));
+  const late = (r) => `<span class="stock-low">${r.due_date && r.due_date < new Date().toISOString().slice(0, 10) ? 'prazo ' + dOnly(r.due_date) : 'agendada ' + dOnly(r.scheduled_at)}</span>`;
+  const stars = (n) => (n == null ? '—' : `${String(n).replace('.', ',')} <span style="color:#f5a524">★</span>`);
+  return `${o ? `<div class="kpis">
+      <div class="kpi"><div class="label">OS em aberto</div><div class="value">${o.open}</div><div class="sub">${SO_OPEN_CODES.filter((k) => o.by_status[k]).map((k) => `${esc(st[k] || k)}: ${o.by_status[k]}`).join(' · ') || 'nenhuma'}</div></div>
+      <div class="kpi"><div class="label">Na agenda hoje</div><div class="value">${o.today.length}</div><div class="sub">${o.mine_today ? `${o.mine_today} com você · ` : ''}${o.done_today} concluída(s) hoje</div></div>
+      <div class="kpi ${o.late_count ? 'neg' : ''}"><div class="label">OS atrasadas</div><div class="value">${o.late_count}</div><div class="sub">${o.unscheduled ? `${o.unscheduled} sem agendamento` : '<a href="#/agenda">ver agenda</a>'}</div></div>
+      <div class="kpi pos"><div class="label">Concluídas no mês</div><div class="value">${o.done_month}</div><div class="sub">satisfação ${stars(o.survey.avg)}${o.survey.count ? ` (${o.survey.count} resposta${o.survey.count > 1 ? 's' : ''})` : ''}</div></div>
+      ${q ? `<div class="kpi"><div class="label">Orçamentos aprovados</div><div class="value">${q.approved}</div><div class="sub">${money(q.approved_total)} aguardando venda</div></div>` : ''}
+      ${o.no_quote ? `<div class="kpi"><div class="label">OS concluídas sem orçamento</div><div class="value">${o.no_quote}</div><div class="sub">nos últimos 30 dias${q ? ` · ${q.from_os} orçamento(s) aberto(s) por OS no mês` : ''}</div></div>` : ''}
+    </div>
+    <div class="grid two">
+      <div class="card"><div class="card-head"><h2>Agenda de hoje</h2><a href="#/agenda" class="small">abrir agenda</a></div>
+        ${o.today.length ? `<div class="table-wrap"><table><tbody>${o.today.map((r) => row(r, hour)).join('')}</tbody></table></div>` : '<p class="muted">Nenhuma ordem agendada para hoje.</p>'}</div>
+      <div class="card"><div class="card-head"><h2>Ordens atrasadas</h2><a href="#/ordens" class="small">ver ordens</a></div>
+        ${o.late.length ? `<div class="table-wrap"><table><tbody>${o.late.map((r) => row(r, late)).join('')}</tbody></table></div>${o.late_count > o.late.length ? `<p class="help" style="margin:8px 0 0">Mostrando ${o.late.length} de ${o.late_count}.</p>` : ''}` : '<p class="muted">Nenhuma ordem atrasada.</p>'}</div>
+    </div>` : `<div class="kpis"><div class="kpi"><div class="label">Orçamentos aprovados</div><div class="value">${q.approved}</div><div class="sub">${money(q.approved_total)} aguardando venda</div></div></div>`}`;
+}
+
 async function viewDashboard(v) {
   const d = await api('dashboard');
   v.innerHTML = `<div class="page-head"><div><h1>Olá, ${esc(state.me.name.split(' ')[0])}</h1><p class="muted">${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</p></div>
     <div class="actions">${can('notas') ? `<a class="btn" href="#/notas/importar">${icon('upload')}Importar nota</a>` : ''}${newButton()}</div></div>
+    ${dashOrdersHtml(d)}
     ${d.today ? `<div class="kpis">
       <div class="kpi"><div class="label">Vendas hoje</div><div class="value">${money(d.today.revenue)}</div><div class="sub">${d.today.sales} venda(s)</div></div>
       <div class="kpi ${d.today.profit >= 0 ? 'pos' : 'neg'}"><div class="label">Lucro bruto hoje</div><div class="value">${money(d.today.profit)}</div></div>

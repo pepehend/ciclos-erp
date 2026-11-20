@@ -1608,6 +1608,18 @@ ok($rxBack === $rxCli && !Customers::get($rxCli)['deleted_at'], 'cadastrar de no
 $rxSup = Customers::save(['type' => 'pj', 'name' => 'Fornecedor sem uso'], null, 'suppliers');
 ok(Removals::delete('suppliers', $rxSup) === 'apagado', 'fornecedor nunca usado é apagado');
 
+echo "\nPainel das ordens de serviço\n";
+$pdCli = Customers::save(['type' => 'pf', 'name' => 'Cliente painel']);
+$pdBefore = ServiceOrders::dashboard($uid);
+$pdHoje = ServiceOrders::save(['customer_id' => $pdCli, 'description' => 'Hoje', 'technician_id' => $uid, 'scheduled_at' => date('Y-m-d') . ' 09:00'], $uid);
+$pdAtr = ServiceOrders::save(['customer_id' => $pdCli, 'description' => 'Atrasada', 'scheduled_at' => date('Y-m-d', strtotime('-2 days')) . ' 10:00'], $uid);
+$pdPrazo = ServiceOrders::save(['customer_id' => $pdCli, 'description' => 'Prazo vencido', 'due_date' => date('Y-m-d', strtotime('-1 day'))], $uid);
+$pd = ServiceOrders::dashboard($uid);
+ok($pd['open'] === $pdBefore['open'] + 3 && $pd['mine_today'] === $pdBefore['mine_today'] + 1 && in_array($pdHoje, array_map(fn($r) => (int)$r['id'], $pd['today']), true), 'painel conta as OS em aberto e a agenda de hoje (e as do técnico)');
+$pdLate = array_map(fn($r) => (int)$r['id'], $pd['late']);
+ok($pd['late_count'] === $pdBefore['late_count'] + 2 && in_array($pdAtr, $pdLate, true) && in_array($pdPrazo, $pdLate, true) && !in_array($pdHoje, $pdLate, true), 'painel mostra as atrasadas (agendada no passado ou prazo vencido)');
+ok($pd['unscheduled'] === $pdBefore['unscheduled'] + 1, 'painel conta as OS sem agendamento');
+
 @unlink($db);
 echo "\n$passes passaram, $fails falharam\n";
 exit($fails ? 1 : 0);
