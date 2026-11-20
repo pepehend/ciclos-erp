@@ -72,7 +72,7 @@ class OrderExec
     // ---------------- Questionários ----------------
 
     /**
-     * A pergunta aparece? Pergunta condicional (como no Auvo): só depois que a pergunta de "Apresentar quando"
+     * A pergunta aparece? Pergunta condicional: só depois que a pergunta de "Apresentar quando"
      * (que também precisa estar aparecendo) foi respondida, e se a resposta for Igual/Diferente da esperada.
      */
     public static function visibleMap(array $questions, array $ans): array
@@ -309,7 +309,7 @@ class OrderExec
             'reason' => $to === 'pausada' ? $reason : null, 'created_at' => now()]);
     }
 
-    /** Atividades do controle de horas (como no Auvo) e o status que cada uma deixa a OS. */
+    /** Atividades do controle de horas e o status que cada uma deixa a OS. */
     const ACTIVITY = ['deslocamento' => 'a_caminho', 'checkin' => 'em_execucao', 'pausa_inicio' => 'pausada', 'pausa_fim' => 'em_execucao', 'checkout' => 'concluida'];
     const ACTIVITY_LABELS = ['deslocamento' => 'A caminho da tarefa', 'checkin' => 'Check-in', 'pausa_inicio' => 'Início da pausa', 'pausa_fim' => 'Fim da pausa', 'checkout' => 'Check-out'];
     /** Sequência válida dos registros (de → para), usada ao ajustar o controle de horas. */
@@ -382,7 +382,7 @@ class OrderExec
             $rows[] = ['id' => (int)$e['id'], 'kind' => $k, 'label' => self::ACTIVITY_LABELS[$k], 'status' => $e['to_status'], 'at' => $e['created_at'],
                 'user_name' => $e['user_name'], 'reason' => $e['reason'], 'manual' => (int)$e['manual'], 'note' => $e['note'],
                 'original_at' => $e['original_at'], 'edited_by_name' => $e['edited_by_name'], 'edited_at' => $e['edited_at'],
-                // Tempo corrido: duração da pausa, mostrada no "Fim da pausa" (como no Auvo)
+                // Tempo corrido: duração da pausa, mostrada no "Fim da pausa"
                 'elapsed' => $k === 'pausa_fim' && $i > 0 ? max(0, strtotime($e['created_at']) - strtotime($ev[$i - 1]['created_at'])) : null];
             $last = $k;
         }
@@ -411,7 +411,7 @@ class OrderExec
     }
 
     /**
-     * Ajuste do controle de horas, como no Auvo. Em $in:
+     * Ajuste do controle de horas. Em $in:
      *  rows   = [{id, at, reason, note}]   horário/motivo/justificativa das atividades existentes
      *  delete = [{id, note}]               exclui uma atividade (fica guardada no histórico como excluída)
      *  add    = [{kind, at, reason, note}] inclui uma atividade (deslocamento, checkin, pausa_inicio, pausa_fim, checkout)

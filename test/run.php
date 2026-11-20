@@ -1477,7 +1477,7 @@ ok($h['rows'][2]['reason'] === 'Almoço', 'motivo da pausa gravado ao pausar');
 $hid = array_column($h['rows'], 'id', 'kind');
 $d0 = date('Y-m-d', strtotime('-1 day'));
 $set = fn($k, $at) => ['id' => $hid[$k], 'at' => "$d0 $at"];
-ok(OrderExec::saveHours($hOs, ['rows' => [$set('deslocamento', '07:30'), $set('checkin', '08:00'), $set('pausa_inicio', '12:00'), $set('pausa_fim', '13:00'), $set('checkout', '17:30')]], $uid) === 5, 'ajuste de cinco horários (justificativa opcional, como no Auvo)');
+ok(OrderExec::saveHours($hOs, ['rows' => [$set('deslocamento', '07:30'), $set('checkin', '08:00'), $set('pausa_inicio', '12:00'), $set('pausa_fim', '13:00'), $set('checkout', '17:30')]], $uid) === 5, 'ajuste de cinco horários (justificativa opcional)');
 $h = OrderExec::hours($hOs);
 ok($h['travel'] == 1800 && $h['work'] == 8.5 * 3600 && $h['pause'] == 3600, 'totais: 30 min de deslocamento, 8h30 de trabalho e 1h de pausa');
 ok($h['rows'][3]['elapsed'] == 3600 && $h['rows'][1]['elapsed'] === null, 'tempo corrido aparece no fim da pausa');

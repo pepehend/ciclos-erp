@@ -827,7 +827,7 @@ tr.sel td { background: var(--accent-soft); }
 .so-photos figure.del figcaption { text-decoration: line-through; }
 #itbody tr.del td { text-decoration: line-through; opacity: .55; }
 #itbody tr.del td:last-child { text-decoration: none; opacity: 1; }
-/* Controle de horas (modelo do Auvo) */
+/* Controle de horas */
 .hr-top { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 10px; }
 .hr-top svg, .hr-hist svg, .hr-el svg, .hr-totals svg, .hr-info svg, .hr-open svg { width: 14px; height: 14px; vertical-align: -2px; }
 .hr-dt { display: inline-flex; gap: 6px; }

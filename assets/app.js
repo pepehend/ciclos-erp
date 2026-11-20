@@ -2899,7 +2899,7 @@ async function viewServiceOrderForm(v, id) {
     ${pend.length ? `<ul class="so-pendlist">${pend.map((p) => `<li>${icon('warn')}<span>${esc(p)}</span></li>`).join('')}</ul><p class="small muted">As pendências vêm das obrigatoriedades do tipo de tarefa e das perguntas obrigatórias dos questionários.</p>`
       : `<p class="so-ok">${icon('check')} Nada pendente${o.status === 'concluida' ? '.' : ': a ordem já pode ser concluída.'}</p>`}`;
 
-  // ---- Controle de horas (como no Auvo: atividades, "Adicionar atividade", totais de deslocamento, pausa e trabalho)
+  // ---- Controle de horas (atividades, "Adicionar atividade", totais de deslocamento, pausa e trabalho)
   const h = D.hours;
   const hp = pane('horas');
   const HR_LABEL = { deslocamento: 'A caminho da tarefa', checkin: 'Check-in', pausa_inicio: 'Início da pausa', pausa_fim: 'Fim da pausa', checkout: 'Check-out' };
@@ -3640,7 +3640,7 @@ async function viewQuestionnaireForm(v, id) {
 
   const box = $('#qlist', v);
   const earlierOf = (list, i) => list.slice(0, i).filter((x) => x.id);
-  // Como no Auvo: "Apresentar quando" só lista perguntas anteriores do tipo Itens (com opções).
+  // "Apresentar quando" só lista perguntas anteriores do tipo Itens (com opções).
   const condParents = (list, i) => earlierOf(list, i).filter((x) => x.type === 'itens' && x.options.length);
   // Condição que perdeu a pergunta de origem (removida, movida ou de outro tipo) ou a opção esperada é limpa.
   const fixConds = () => {
