@@ -157,6 +157,8 @@ class Quotes
         if (!$id && (int)($in['service_order_id'] ?? 0)) {
             $so = ServiceOrders::get((int)$in['service_order_id']);
             if (!$customerId || (int)$so['customer_id'] !== $customerId) throw new AppError('A ordem de serviço #' . $so['id'] . ' é de outro cliente');
+            $rev = (int)DB::val("SELECT COUNT(*) FROM so_items WHERE order_id = ? AND kind <> 'custo' AND product_id IS NULL", [$so['id']]);
+            if ($rev) throw new AppError("A ordem de serviço #{$so['id']} tem $rev item(ns) aguardando revisão do cadastro. Revise antes de abrir o orçamento.");
             $soId = (int)$so['id'];
         }
 

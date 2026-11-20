@@ -105,6 +105,8 @@ try {
             if (Auth::can('financeiro')) $d['finance'] = Finance::summary();
             $me = Auth::user();
             if (Auth::can('ordens')) $d['orders'] = ServiceOrders::dashboard((int)$me['id']);
+            $rk = array_values(array_filter([Auth::can('produtos') ? 'produto' : null, Auth::can('servicos') ? 'servico' : null]));
+            if ($rk) $d['items_review'] = count(OrderExec::reviewList($rk));
             if (Auth::can('orcamentos')) {
                 $d['quotes'] = [
                     'approved' => (int)DB::val("SELECT COUNT(*) FROM quotes WHERE status = 'aprovado'"),
@@ -653,6 +655,20 @@ try {
             $u = Auth::requirePerm('ordens');
             $in = input();
             return ['id' => OrderExec::saveItem((int)($in['id'] ?? 0), $in, (int)$u['id'])];
+        },
+        'POST so_item_review' => function () {
+            $u = Auth::requirePerm('produtos', 'servicos');
+            $in = input();
+            $it = DB::one('SELECT * FROM so_items WHERE id = ?', [(int)($in['item_id'] ?? 0)]);
+            if (!$it) throw new AppError('Item não encontrado', 404);
+            Auth::requirePerm(OrderExec::reviewPerm($it));
+            OrderExec::reviewItem((int)$it['id'], (string)($in['action'] ?? ''), $in, (int)$u['id']);
+            return ['ok' => true];
+        },
+        'GET so_items_review' => function () {
+            Auth::requirePerm('produtos', 'servicos');
+            $kinds = array_values(array_filter([Auth::can('produtos') ? 'produto' : null, Auth::can('servicos') ? 'servico' : null]));
+            return ['rows' => OrderExec::reviewList($kinds), 'kinds' => OrderExec::KINDS];
         },
         'POST so_item_delete' => function () {
             Auth::requirePerm('ordens');

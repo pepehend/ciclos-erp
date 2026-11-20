@@ -792,6 +792,8 @@ class DB
             try { self::pdo()->exec('CREATE INDEX idx_quotes_so ON quotes (service_order_id)'); } catch (PDOException $e2) {}
         }
         try { self::run("UPDATE service_orders SET status = 'concluida' WHERE status = 'faturada'"); } catch (PDOException $e) {}
+        // v3.0.0: o questionário não escolhe mais equipamento (fica nos Detalhes da OS)
+        try { self::run('UPDATE questionnaires SET allow_equipment = 0, equipment_required = 0 WHERE allow_equipment <> 0 OR equipment_required <> 0'); } catch (PDOException $e) { /* tabela ainda não existe */ }
         // v2.4.0: exclusão de clientes, fornecedores, equipamentos, tipos de tarefa e questionários (os já usados ficam
         // marcados com deleted_at e continuam aparecendo onde foram usados)
         foreach (['customers', 'suppliers', 'equipments', 'questionnaires', 'task_types'] as $t) {

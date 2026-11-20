@@ -57,7 +57,9 @@ class Questionnaires
     {
         $q['questions'] = json_decode((string)$q['questions'], true) ?: [];
         $q['questions_count'] = count($q['questions']);
-        foreach (['show_os', 'pairs', 'show_unanswered', 'allow_equipment', 'equipment_required', 'active'] as $k) $q[$k] = (int)$q[$k];
+        foreach (['show_os', 'pairs', 'show_unanswered', 'active'] as $k) $q[$k] = (int)$q[$k];
+        // v3.0.0: o equipamento é o da OS (Detalhes); o questionário não escolhe mais equipamento
+        $q['allow_equipment'] = 0; $q['equipment_required'] = 0;
         $q['per_line'] = (int)$q['per_line'];
         return $q;
     }
@@ -227,7 +229,6 @@ class Questionnaires
         if ($name === '') throw new AppError('Informe o nome do questionário');
         $perLine = (int)($in['per_line'] ?? 1);
         if (!in_array($perLine, [1, 2, 3, 4], true)) throw new AppError('Perguntas por linha deve ser de 1 a 4');
-        $allowEq = !empty($in['allow_equipment']);
         $data = [
             'name' => mb_substr($name, 0, 120),
             'questions' => json_encode(self::normalizeQuestions($in['questions'] ?? []), JSON_UNESCAPED_UNICODE),
@@ -235,8 +236,8 @@ class Questionnaires
             'per_line' => $perLine,
             'pairs' => !empty($in['pairs']) ? 1 : 0,
             'show_unanswered' => !empty($in['show_unanswered']) ? 1 : 0,
-            'allow_equipment' => $allowEq ? 1 : 0,
-            'equipment_required' => $allowEq && !empty($in['equipment_required']) ? 1 : 0,
+            'allow_equipment' => 0,
+            'equipment_required' => 0,
             'updated_at' => now(),
         ];
         if ($id) {
