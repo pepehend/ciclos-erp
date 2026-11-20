@@ -48,6 +48,7 @@ const ICONS = {
   image: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M20 16l-5-5-8.5 8.5"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   login: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
   moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
   send: '<path d="M21 3L10 14M21 3l-7 18-4-7-7-4z"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
@@ -6403,15 +6404,16 @@ function tkShell() {
   const link = (h, ic, l, cls = '') => `<a href="#/${h}" class="tk-dl ${cls}"><span class="tk-dli">${icon(ic)}</span>${l}</a>`;
   $('#app').innerHTML = `<div class="tk">
     <div class="tk-drawer" id="tkdrawer" hidden><div class="tk-dpanel">
-      <div class="tk-dhead">${avatarHtml(me, 'md')}<div><strong>${esc(me.name)}</strong><div class="small">${esc(me.role === 'admin' ? 'Administrador' : 'Técnico')}</div>
-        <div class="small tk-dco">${esc((state.brand && state.brand.name) || (state.meta && state.meta.company && state.meta.company.name) || '')}</div></div></div>
+      <div class="tk-dhead">${avatarHtml(me, 'md')}<div class="tk-dwho"><strong>${esc(me.name)}</strong><div class="small">${esc(me.role === 'admin' ? 'Administrador' : 'Técnico')}</div>
+        <div class="small tk-dco">${esc((state.brand && state.brand.name) || (state.meta && state.meta.company && state.meta.company.name) || '')}</div></div>
+        <a href="#" id="tkout" class="tk-dout" aria-label="Sair">${icon('logout')}<span>Sair</span></a></div>
       <nav class="tk-dnav">
         ${link('m', 'home', 'Início')}${link('m/agenda', 'calendar', 'Agenda')}
         ${can('clientes') ? link('clientes', 'users', 'Clientes') : ''}${can('orcamentos') ? link('orcamentos', 'quote', 'Orçamentos') : ''}
         ${can('produtos') ? link('produtos', 'box', 'Produtos') : ''}${can('servicos') ? link('servicos', 'tool', 'Serviços') : ''}
         ${can('equipamentos') ? link('equipamentos', 'gear', 'Equipamentos') : ''}${link('conta', 'user', 'Minha conta')}
       </nav>
-      <div class="tk-dfoot">${can('app.switch') ? `<a href="#/painel" id="tkfull">${icon('monitor')}Versão completa</a>` : ''}<a href="#" id="tkout">${icon('login')}Sair</a></div>
+      ${can('app.switch') ? `<div class="tk-dfoot"><a href="#/painel" id="tkfull">${icon('monitor')}Versão completa</a></div>` : ''}
     </div></div>
     <main class="tk-main" id="tkv"></main></div>`;
   const dr = $('#tkdrawer');
