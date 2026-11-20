@@ -5,7 +5,7 @@
 
 declare(strict_types=1);
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 define('APP_ROOT', dirname(__DIR__));
 define('CONFIG_FILE', __DIR__ . '/config.php');
 
@@ -28,6 +28,7 @@ require __DIR__ . '/lib/pdf.php';
 require __DIR__ . '/lib/finance.php';
 require __DIR__ . '/lib/purchases.php';
 require __DIR__ . '/lib/service_orders.php';
+require __DIR__ . '/lib/questionnaires.php';
 require __DIR__ . '/lib/auth.php';
 require __DIR__ . '/lib/backup.php';
 require __DIR__ . '/lib/gdrive.php';

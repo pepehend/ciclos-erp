@@ -722,3 +722,15 @@ tr.sel td { background: var(--accent-soft); }
 .lg-card .field-err { color: #ff9b9b; margin-top: -2px; }
 .lg-card .field-err::before { background: #ef4444; }
 .lg-card input.is-invalid { border-color: #ef4444 !important; box-shadow: 0 0 0 3px #ef444440 !important; }
+
+/* Editor de questionários */
+.qtitle { margin: 18px 0 8px; }
+.qcard { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; display: grid; gap: 8px; }
+.qhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.qnum { min-width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; }
+.qlabel { flex: 1 1 260px; min-width: 200px; }
+.qtype { flex: 0 1 200px; }
+.qdesc { width: 100%; }
+.qtools { display: inline-flex; gap: 2px; margin-left: auto; }
+.qcond { border-top: 1px dashed var(--line); padding-top: 8px; display: grid; gap: 8px; }
+.qcond .grid { margin: 0; }

@@ -1259,22 +1259,55 @@ throws(fn() => Equipments::save(['name' => 'X', 'customer_id' => $osCli, 'specs'
 Equipments::save(['name' => 'Secador 3HP', 'customer_id' => $osCli, 'warranty_until' => ''], $eqC);
 ok(Equipments::get($eqC)['warranty_until'] === null && Equipments::get($eqC)['specs'] === [], 'edição limpa datas e especificações vazias');
 
-$ckFull = ChecklistModels::save(['name' => 'Manutenção compressor', 'service_type' => 'preventiva', 'items' => "Trocar óleo\n\nVerificar pressão\nLimpar filtro"]);
-$ck = ChecklistModels::get($ckFull);
-ok(count($ck['items']) === 3 && $ck['items'][0]['label'] === 'Trocar óleo' && $ck['items'][0]['required'] === true, 'checklist: uma linha por item, linhas vazias ignoradas, obrigatório por padrão');
-throws(fn() => ChecklistModels::save(['name' => 'Vazio', 'items' => "\n  \n"]), 'pelo menos um item', 'checklist exige item');
-throws(fn() => ChecklistModels::save(['name' => 'Tipo', 'service_type' => 'xyz', 'items' => ['a']]), 'Tipo de serviço inválido', 'tipo de serviço validado');
+echo "\nQuestionários e tipos de tarefa\n";
+$qFull = Questionnaires::save(['name' => 'Manutenção compressor', 'show_os' => 1, 'per_line' => 2, 'questions' => [
+    ['label' => 'Relato antes', 'type' => 'texto', 'required' => true],
+    ['label' => 'Fotos antes', 'type' => 'foto', 'geo' => true],
+    ['label' => 'Situação', 'type' => 'itens', 'options' => "Funcionando\n\nCom defeito\nFuncionando", 'required' => true],
+    ['label' => 'Motivo do defeito', 'type' => 'area', 'cond' => ['question' => 'p3', 'value' => 'Com defeito']],
+    ['label' => 'Valor da peça', 'type' => 'monetaria'],
+]]);
+$qg = Questionnaires::get($qFull);
+ok(count($qg['questions']) === 5 && $qg['questions'][0]['id'] === 'p1' && $qg['questions_count'] === 5, 'questionário guarda as perguntas na ordem');
+ok($qg['questions'][2]['options'] === ['Funcionando', 'Com defeito'], 'opções: vazias e repetidas somem');
+ok($qg['questions'][1]['geo'] === true && $qg['questions'][3]['cond'] === ['question' => 'p3', 'value' => 'Com defeito'], 'foto com localização e condição são guardadas');
+throws(fn() => Questionnaires::save(['name' => 'Sem perguntas', 'questions' => []]), 'pelo menos uma pergunta', 'questionário exige pergunta');
+throws(fn() => Questionnaires::save(['name' => 'Tipo', 'questions' => [['label' => 'x', 'type' => 'xyz']]]), 'Tipo de resposta inválido', 'tipo de resposta validado');
+throws(fn() => Questionnaires::save(['name' => 'Opções', 'questions' => [['label' => 'Escolha', 'type' => 'multipla', 'options' => '']]]), 'opções', 'pergunta de itens exige opções');
+throws(fn() => Questionnaires::save(['name' => 'Cond', 'questions' => [['label' => 'Depende', 'type' => 'texto', 'cond' => ['question' => 'p9', 'value' => 'x']]]]), 'pergunta anterior', 'condição precisa de pergunta anterior');
+throws(fn() => Questionnaires::save(['name' => 'Linha', 'per_line' => 5, 'questions' => [['label' => 'x', 'type' => 'texto']]]), 'de 1 a 4', 'perguntas por linha de 1 a 4');
+
+$ttFull = TaskTypes::save(['name' => 'Preventiva mensal', 'tolerance' => '01:30', 'duration' => '2:15', 'questionnaire_ids' => [$qFull], 'requires' => ['relato', 'questionario', 'assinatura'], 'send_survey' => 1]);
+$tt = TaskTypes::get($ttFull);
+ok($tt['tolerance_min'] === 90 && $tt['duration'] === '02:15' && $tt['tolerance'] === '01:30', 'tipo de tarefa: tempos em minutos e de volta em HH:MM');
+ok($tt['questionnaire_ids'] === [$qFull] && in_array('questionario', $tt['requires'], true) && $tt['send_survey'] === 1, 'tipo de tarefa guarda questionários, obrigatoriedades e envio');
+throws(fn() => TaskTypes::save(['name' => 'Sem questionário', 'requires' => ['questionario']]), 'pelo menos um questionário', 'exigir questionário pede um questionário');
+throws(fn() => TaskTypes::save(['name' => 'Tempo', 'duration' => '12:7']), 'HH:MM', 'tempo fora do formato recusado');
+throws(fn() => TaskTypes::save(['name' => 'Obrig', 'requires' => ['xyz']]), 'Obrigatoriedade inválida', 'obrigatoriedade validada');
+throws(fn() => TaskTypes::save(['name' => '  ']), 'Informe', 'tipo sem nome recusado');
+Questionnaires::setActive($qFull, false);
+throws(fn() => TaskTypes::save(['name' => 'Inativo', 'questionnaire_ids' => [$qFull]]), 'inativo', 'questionário inativo não entra em tipo novo');
+Questionnaires::setActive($qFull, true);
+ok(TaskTypes::names()[$ttFull] === 'Preventiva mensal', 'nomes dos tipos para as listas de OS');
+ok(count(TaskTypes::list(false)) >= 6, 'tipos padrão da atualização existem');
+DB::run("INSERT INTO checklist_models (name, service_type, items, active, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)",
+    ['Legado teste', 'visita', json_encode([['label' => 'Verificar ruído', 'required' => true]]), now(), now()]);
+TaskTypes::importLegacy();
+$legacy = array_values(array_filter(Questionnaires::list(true), fn($q) => $q['name'] === 'Legado teste'));
+ok(count($legacy) === 1 && $legacy[0]['questions'][0]['type'] === 'check' && $legacy[0]['questions'][0]['required'] === true, 'checklist antigo vira questionário com perguntas de check');
+$visitas = array_filter(TaskTypes::list(true), fn($t) => $t['name'] === 'Visita técnica');
+ok(count(array_filter($visitas, fn($t) => in_array($legacy[0]['id'], $t['questionnaire_ids']))) >= 1, 'tipo "Visita técnica" aponta para o questionário do checklist antigo');
 
 throws(fn() => ServiceOrders::save(['customer_id' => $osCli, 'description' => 'Troca de filtro', 'equipment_id' => $eqB], $uid), 'não pertence', 'equipamento de outro cliente recusado');
 throws(fn() => ServiceOrders::save(['customer_id' => $osCli, 'description' => 'Troca de filtro', 'origin' => 'orcamento', 'quote_id' => 999], $uid), 'orçamento deste cliente', 'orçamento precisa ser do cliente');
 throws(fn() => ServiceOrders::save(['customer_id' => $osCli, 'description' => '  '], $uid), 'Descreva', 'descrição obrigatória');
-$osAvulsa = ServiceOrders::save(['customer_id' => $osCli, 'description' => 'Compressor não liga', 'equipment_id' => $eqA, 'origin' => 'chamado', 'service_type' => 'corretiva'], $uid);
+$osAvulsa = ServiceOrders::save(['customer_id' => $osCli, 'description' => 'Compressor não liga', 'equipment_id' => $eqA, 'origin' => 'chamado', 'task_type_id' => TaskTypes::names() ? array_key_first(TaskTypes::names()) : null], $uid);
 $osA = ServiceOrders::get($osAvulsa);
 ok($osA['status'] === 'aberta' && $osA['origin'] === 'chamado' && $osA['equipment_name'] === 'Compressor 5HP', 'chamado avulso nasce aberta, com equipamento');
-$osAg = ServiceOrders::save(['customer_id' => $osCli, 'description' => 'Preventiva mensal', 'scheduled_at' => date('Y-m-d', strtotime('+2 days')) . 'T08:30', 'technician_id' => $uid, 'checklist_model_id' => $ckFull], $uid);
+$osAg = ServiceOrders::save(['customer_id' => $osCli, 'description' => 'Preventiva mensal', 'scheduled_at' => date('Y-m-d', strtotime('+2 days')) . 'T08:30', 'technician_id' => $uid, 'task_type_id' => $ttFull], $uid);
 $osAgR = ServiceOrders::get($osAg);
-ok($osAgR['status'] === 'agendada' && $osAgR['scheduled_at'] !== null && (int)$osAgR['technician_id'] === $uid, 'com data vira agendada, com técnico e checklist');
-ServiceOrders::save(['customer_id' => $osCli, 'description' => 'Preventiva mensal', 'scheduled_at' => '', 'checklist_model_id' => $ckFull], $uid, $osAg);
+ok($osAgR['status'] === 'agendada' && $osAgR['scheduled_at'] !== null && (int)$osAgR['technician_id'] === $uid, 'com data vira agendada, com técnico e tipo de tarefa');
+ServiceOrders::save(['customer_id' => $osCli, 'description' => 'Preventiva mensal', 'scheduled_at' => '', 'task_type_id' => $ttFull], $uid, $osAg);
 ok(ServiceOrders::get($osAg)['status'] === 'aberta', 'tirar a data volta para aberta');
 ServiceOrders::save(['customer_id' => $osCli, 'description' => 'Preventiva mensal', 'scheduled_at' => date('Y-m-d H:i', strtotime('+2 days'))], $uid, $osAg);
 

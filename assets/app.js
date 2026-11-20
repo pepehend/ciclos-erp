@@ -847,7 +847,7 @@ const NAV = [
     ['produtos', 'Produtos', 'box', 'produtos'], ['servicos', 'Serviços', 'tool', 'servicos'],
     ['clientes', 'Clientes', 'id', 'clientes'], ['fornecedores', 'Fornecedores', 'truck', 'fornecedores'],
     ['formas-pagamento', 'Formas de pagamento', 'wallet', 'formas_pagamento'], ['condicoes-pagamento', 'Condições de pagamento', 'wallet', 'admin'],
-    ['equipamentos', 'Equipamentos', 'box', 'ordens'], ['checklists', 'Modelos de checklist', 'check', 'ordens']] },
+    ['equipamentos', 'Equipamentos', 'box', 'ordens'], ['tipos-tarefa', 'Tipos de tarefa', 'tool', 'ordens'], ['questionarios', 'Questionários', 'check', 'ordens']] },
   { g: 'financeiro', label: 'Financeiro', icon: 'wallet', items: [
     ['financeiro', 'Pagamentos e recebimentos', 'wallet', 'financeiro'], ['fluxo-caixa', 'Fluxo de caixa', 'flow', 'financeiro']] },
   { g: 'relatorios', label: 'Relatórios', icon: 'chart', items: [
@@ -992,7 +992,10 @@ const ROUTES = [
   [/^ordem\/nova$/, (v) => viewServiceOrderForm(v, null), 'ordens'],
   [/^ordem\/(\d+)$/, viewServiceOrderForm, 'ordens'],
   [/^equipamentos$/, viewEquipments, 'ordens'],
-  [/^checklists$/, viewChecklists, 'ordens'],
+  [/^tipos-tarefa$/, viewTaskTypes, 'ordens'],
+  [/^questionarios$/, viewQuestionnaires, 'ordens'],
+  [/^questionario\/nova$/, (v) => viewQuestionnaireForm(v, null), 'ordens'],
+  [/^questionario\/(\d+)$/, viewQuestionnaireForm, 'ordens'],
   [/^financeiro$/, viewFinance, 'financeiro'],
   [/^fluxo-caixa$/, viewCashflow, 'financeiro'],
   [/^conta$/, viewAccount],
@@ -2292,7 +2295,7 @@ const soDate = (s) => (s ? String(s).split('-').reverse().join('/') : '—');
 function soTableHtml(rows, statuses, types, { withEquipment = true } = {}) {
   return `<div class="table-wrap"><table><thead><tr><th>Ordem</th><th>Status</th><th>Tipo</th>${withEquipment ? '<th>Equipamento</th>' : ''}<th>Agenda</th><th>Técnico</th></tr></thead><tbody>
     ${rows.map((o) => `<tr class="click" data-so="${o.id}"><td><strong>#${o.id}</strong><div class="small muted">${esc(o.description || '')}</div></td>
-      <td>${soStatusHtml(o.status, statuses)}</td><td>${esc(types[o.service_type] || 'Qualquer')}</td>
+      <td>${soStatusHtml(o.status, statuses)}</td><td>${esc(types[o.task_type_id] || '—')}</td>
       ${withEquipment ? `<td>${esc(o.equipment_name || '—')}</td>` : ''}
       <td class="nowrap">${o.scheduled_at ? dt(o.scheduled_at) : '—'}</td><td>${esc(o.technician_name || '—')}</td></tr>`).join('')}</tbody></table></div>`;
 }
@@ -2442,7 +2445,7 @@ async function viewServiceOrders(v) {
     labels = d.statuses;
     $('#list', v).innerHTML = d.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Nº</th><th>Cliente</th><th>Equipamento</th><th>Tipo</th><th>Técnico</th><th>Agendada</th><th>Status</th></tr></thead><tbody>
       ${d.rows.map((r) => `<tr class="click" data-id="${r.id}"><td class="nowrap">#${r.id}</td><td><strong>${soCustomer(r)}</strong></td><td>${esc(r.equipment_name || '—')}</td>
-        <td>${esc(d.types[r.service_type] || '—')}</td><td>${esc(r.technician_name || '—')}</td><td class="nowrap">${r.scheduled_at ? dt(r.scheduled_at) : '—'}</td>
+        <td>${esc(r.task_type_name || '—')}</td><td>${esc(r.technician_name || '—')}</td><td class="nowrap">${r.scheduled_at ? dt(r.scheduled_at) : '—'}</td>
         <td>${soStatusHtml(r.status, labels)}</td></tr>`).join('')}</tbody></table></div>`
       : '<div class="empty">Nenhuma ordem de serviço aqui. Clique em <strong>Nova ordem</strong>.</div>';
   };
@@ -2463,18 +2466,23 @@ async function viewServiceOrderForm(v, id) {
     $('#qts', v).innerHTML = sel('quote_id', f.quotes, 'id', (q) => `Orçamento #${q.id}${q.lead_name ? ' · ' + q.lead_name : ''} (${dOnly(q.created_at)})`, o.quote_id, 'Selecione um orçamento');
   };
   const orig = o.origin || 'chamado';
+  const taskOpts = (() => {
+    const list = form.task_types.map((t) => ({ id: t.id, name: t.name }));
+    if (o.task_type_id && !list.some((t) => +t.id === +o.task_type_id)) list.push({ id: o.task_type_id, name: `${o.task_type_name || 'Tipo removido'} (inativo)` });
+    return list.map((t) => `<option value="${t.id}" ${+o.task_type_id === +t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
+  })();
   v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/ordens">← Ordens de serviço</a></p><h1>${isNew ? 'Nova ordem de serviço' : 'Ordem de serviço #' + o.id}</h1>
       ${isNew ? '' : `<p class="muted">${soStatusHtml(o.status, form.statuses)} ${o.origin_label ? `· ${esc(o.origin_label)}` : ''}</p>`}</div></div>
     <div class="card"><form class="form" id="soform">
       <label>Cliente * <select name="customer_id" id="cust" required><option value="">Selecione…</option>${customers.rows.map((c) => `<option value="${c.id}" ${+o.customer_id === +c.id ? 'selected' : ''}>${esc(custName(c))}</option>`).join('')}</select></label>
       <div class="grid two"><label>Equipamento <span id="eqs"></span></label>
-        <label>Tipo de serviço <select name="service_type"><option value="">Não definido</option>${Object.entries(form.service_types).map(([k, l]) => `<option value="${k}" ${o.service_type === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
+        <label>Tipo de tarefa <select name="task_type_id" required><option value="">Selecione…</option>${taskOpts}</select></label></div>
       <fieldset class="fset"><legend>Origem</legend>
         <label class="check"><input type="radio" name="origin" value="chamado" ${orig === 'chamado' ? 'checked' : ''}> Chamado avulso</label>
         <label class="check"><input type="radio" name="origin" value="orcamento" ${orig === 'orcamento' ? 'checked' : ''}> Orçamento do cliente</label>
         <div id="qts-wrap" ${orig === 'orcamento' ? '' : 'hidden'}><span id="qts"></span></div></fieldset>
       <label>Descrição do serviço * <textarea name="description" required rows="3" maxlength="2000" placeholder="O que o cliente pediu ou relatou">${esc(o.description)}</textarea></label>
-      <div class="grid two"><label>Checklist <select name="checklist_model_id"><option value="">Sem checklist</option>${form.checklists.map((c) => `<option value="${c.id}" ${+o.checklist_model_id === +c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+      <div class="grid two">
         <label>Técnico <select name="technician_id"><option value="">Sem técnico</option>${form.technicians.map((t) => `<option value="${t.id}" ${+o.technician_id === +t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label></div>
       <div class="grid two"><label>Agendar para <input type="datetime-local" name="scheduled_at" value="${dtLocal(o.scheduled_at)}"></label>
         <label>Prazo <input type="date" name="due_date" value="${esc(o.due_date || '')}"></label></div>
@@ -2612,59 +2620,263 @@ async function equipmentForm(eq, onSaved) {
   });
 }
 
-async function viewChecklists(v) {
+// ============ Tipos de tarefa ============
+async function viewTaskTypes(v) {
   const f = { all: false };
-  v.innerHTML = `<div class="page-head"><div><h1>Modelos de checklist</h1><p class="muted">Itens que o técnico confere em cada tipo de atendimento.</p></div>
-      <div class="actions"><button class="btn primary" id="new">${icon('plus')}Novo modelo</button></div></div>
+  v.innerHTML = `<div class="page-head"><div><h1>Tipos de tarefa</h1><p class="muted">Cada tipo escolhe os questionários que o técnico responde e o que é obrigatório na ordem.</p></div>
+      <div class="actions"><button class="btn primary" id="new">${icon('plus')}Novo tipo</button></div></div>
     <div class="card"><div class="filters"><label class="check"><input type="checkbox" id="all"> Mostrar inativos</label></div><div id="list"></div></div>`;
-  let types = {};
+  let rows = [];
+  let qRows = [];
+  let meta = null;
   const load = async () => {
-    const d = await api('checklist_models', { params: { all: f.all ? 1 : '' } });
-    types = d.service_types;
-    $('#list', v).innerHTML = d.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Modelo</th><th>Tipo de serviço</th><th class="num">Itens</th><th></th></tr></thead><tbody>
-      ${d.rows.map((m) => `<tr class="click" data-id="${m.id}"><td><strong>${esc(m.name)}</strong></td><td>${esc(types[m.service_type] || 'Qualquer')}</td><td class="num">${m.items.length}</td>
-        <td>${+m.active ? '' : '<span class="badge">inativo</span>'}</td></tr>`).join('')}</tbody></table></div>`
-      : '<div class="empty">Nenhum modelo de checklist. Clique em <strong>Novo modelo</strong>.</div>';
-    $('#list', v).dataset.rows = JSON.stringify(d.rows);
+    meta = await api('task_types', { params: { all: f.all ? 1 : '' } });
+    qRows = (await api('questionnaires', { params: { all: 1 } })).rows;
+    rows = meta.rows;
+    const qName = Object.fromEntries(qRows.map((q) => [q.id, q.name]));
+    $('#list', v).innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Tipo de tarefa</th><th>Questionários</th><th>Tolerância</th><th>Duração</th><th></th></tr></thead><tbody>
+      ${rows.map((t) => `<tr class="click" data-id="${t.id}"><td><strong>${esc(t.name)}</strong></td>
+        <td>${t.questionnaire_ids.length ? esc(t.questionnaire_ids.map((id) => qName[id] || '—').join(', ')) : '<span class="muted">Nenhum</span>'}</td>
+        <td>${esc(t.tolerance || '—')}</td><td>${esc(t.duration || '—')}</td><td>${+t.active ? '' : '<span class="badge">inativo</span>'}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">Nenhum tipo de tarefa. Clique em <strong>Novo tipo</strong>.</div>';
   };
   $('#all', v).onchange = (e) => { f.all = e.target.checked; load().catch(fail); };
-  $('#new', v).onclick = () => checklistForm(null, types, load);
+  $('#new', v).onclick = () => taskTypeForm(null, meta, qRows, load);
   $('#list', v).onclick = (e) => {
     const r = e.target.closest('[data-id]');
-    if (!r) return;
-    const m = JSON.parse($('#list', v).dataset.rows || '[]').find((x) => x.id == r.dataset.id);
-    checklistForm(m, types, load);
+    if (r) taskTypeForm(rows.find((x) => x.id == r.dataset.id), meta, qRows, load);
   };
   await load();
 }
 
-function checklistForm(m, types, onSaved) {
-  const isNew = !m;
+function taskTypeForm(t, meta, qRows, onSaved) {
+  const isNew = !t;
+  const chosen = new Set(t?.questionnaire_ids || []);
+  const reqs = new Set(t?.requires || []);
+  // Questionários ativos, mais os inativos que este tipo ainda usa (para não sumirem ao salvar).
+  const qList = qRows.filter((q) => +q.active || chosen.has(+q.id));
   const md = modal({
-    title: isNew ? 'Novo modelo de checklist' : 'Editar modelo de checklist',
-    body: `<form class="form" id="ckf"><label>Nome do modelo * <input name="name" required maxlength="120" value="${esc(m?.name)}" placeholder="Ex.: Manutenção preventiva do compressor"></label>
-      <label>Tipo de serviço <select name="service_type"><option value="">Qualquer tipo</option>${Object.entries(types).map(([k, l]) => `<option value="${k}" ${m?.service_type === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-      <label>Itens * <textarea name="items" required rows="8" placeholder="Um item por linha">${esc((m?.items || []).map((i) => i.label).join('\n'))}</textarea></label>
-      <p class="small muted">Escreva um item por linha. Linhas vazias são ignoradas.</p></form>`,
-    foot: `${!isNew ? `<button class="btn ghost" id="ckact" style="margin-right:auto">${+m.active ? 'Desativar' : 'Reativar'}</button>` : ''}<button class="btn" data-close>Cancelar</button><button class="btn primary" id="cksave">Salvar modelo</button>`,
+    title: isNew ? 'Novo tipo de tarefa' : 'Editar tipo de tarefa',
+    wide: true,
+    body: `<form class="form" id="ttf">
+      <label>Descrição * <input name="name" required maxlength="120" value="${esc(t?.name)}" placeholder="Ex.: Manutenção preventiva"></label>
+      <div class="grid two"><label>Tempo de tolerância <input name="tolerance" value="${esc(t?.tolerance || '')}" placeholder="HH:MM" inputmode="numeric"></label>
+        <label>Tempo estimado de duração <input name="duration" value="${esc(t?.duration || '')}" placeholder="HH:MM" inputmode="numeric"></label></div>
+      <fieldset class="fset"><legend>Questionários deste tipo</legend>
+        ${qList.length ? qList.map((q) => `<label class="check"><input type="checkbox" name="questionnaire_ids" value="${q.id}" ${chosen.has(+q.id) ? 'checked' : ''}> ${esc(q.name)}${+q.active ? '' : ' <span class="badge">inativo</span>'}</label>`).join('')
+          : '<p class="small muted">Nenhum questionário cadastrado. Crie em Cadastros → Questionários.</p>'}</fieldset>
+      <fieldset class="fset"><legend>Obrigatoriedades</legend>
+        ${Object.entries(meta.requires).map(([k, l]) => `<label class="check"><input type="checkbox" name="requires" value="${k}" ${reqs.has(k) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</fieldset>
+      <fieldset class="fset"><legend>Envio ao cliente</legend>
+        <label class="check"><input type="checkbox" name="send_survey" ${t && +t.send_survey ? 'checked' : ''}> Enviar pesquisa de satisfação</label>
+        <label class="check"><input type="checkbox" name="send_os_email" ${t && +t.send_os_email ? 'checked' : ''}> Enviar OS digital por e-mail</label></fieldset>
+    </form>`,
+    foot: `${!isNew ? `<button class="btn ghost" id="ttact" style="margin-right:auto">${+t.active ? 'Desativar' : 'Reativar'}</button>` : ''}<button class="btn" data-close>Cancelar</button><button class="btn primary" id="ttsave">Salvar tipo</button>`,
   });
-  const f = $('#ckf', md.el);
+  const f = $('#ttf', md.el);
   const save = (btn) => busy(btn, async () => {
     const d = formData(f);
-    if (!d.name.trim()) throw new Error('Informe o nome do modelo');
-    if (!d.items.trim()) throw new Error('Inclua pelo menos um item no checklist');
-    await api('checklist_model_save', { body: { ...d, id: m?.id } });
-    md.close(); toast('Modelo salvo'); onSaved && onSaved();
+    if (!d.name.trim()) throw new Error('Informe a descrição do tipo de tarefa');
+    await api('task_type_save', { body: {
+      id: t?.id,
+      name: d.name,
+      tolerance: d.tolerance,
+      duration: d.duration,
+      send_survey: d.send_survey,
+      send_os_email: d.send_os_email,
+      questionnaire_ids: $$('[name=questionnaire_ids]:checked', f).map((i) => +i.value),
+      requires: $$('[name=requires]:checked', f).map((i) => i.value),
+    } });
+    md.close(); toast('Tipo salvo'); onSaved && onSaved();
   });
-  $('#cksave', md.el).onclick = (e) => save(e.currentTarget);
-  f.onsubmit = (e) => { e.preventDefault(); save($('#cksave', md.el)); };
-  const act = $('#ckact', md.el);
+  $('#ttsave', md.el).onclick = (e) => save(e.currentTarget);
+  f.onsubmit = (e) => { e.preventDefault(); save($('#ttsave', md.el)); };
+  const act = $('#ttact', md.el);
   if (act) act.onclick = () => busy(act, async () => {
-    const to = !+m.active;
-    if (!to && !(await confirmBox(`Desativar o modelo "${m.name}"? Ordens antigas continuam com ele.`, { ok: 'Desativar', danger: true }))) return;
-    await api('checklist_model_active', { body: { id: m.id, active: to } });
-    md.close(); toast(to ? 'Modelo reativado' : 'Modelo desativado'); onSaved && onSaved();
+    const to = !+t.active;
+    if (!to && !(await confirmBox(`Desativar o tipo "${t.name}"? Ordens antigas continuam com ele.`, { ok: 'Desativar', danger: true }))) return;
+    await api('task_type_active', { body: { id: t.id, active: to } });
+    md.close(); toast(to ? 'Tipo reativado' : 'Tipo desativado'); onSaved && onSaved();
   });
+}
+
+// ============ Questionários ============
+async function viewQuestionnaires(v) {
+  const f = { all: false };
+  v.innerHTML = `<div class="page-head"><div><h1>Questionários</h1><p class="muted">Perguntas que o técnico responde na ordem. Um questionário pode ser usado em vários tipos de tarefa.</p></div>
+      <div class="actions"><button class="btn primary" id="new">${icon('plus')}Novo questionário</button></div></div>
+    <div class="card"><div class="filters"><label class="check"><input type="checkbox" id="all"> Mostrar inativos</label></div><div id="list"></div></div>`;
+  const load = async () => {
+    const d = await api('questionnaires', { params: { all: f.all ? 1 : '' } });
+    $('#list', v).innerHTML = d.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Questionário</th><th class="num">Perguntas</th><th>Equipamento</th><th></th></tr></thead><tbody>
+      ${d.rows.map((q) => `<tr class="click" data-id="${q.id}"><td><strong>${esc(q.name)}</strong></td><td class="num">${q.questions_count}</td>
+        <td>${q.allow_equipment ? (q.equipment_required ? 'Obrigatório' : 'Opcional') : '—'}</td>
+        <td>${+q.active ? '' : '<span class="badge">inativo</span>'}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">Nenhum questionário. Clique em <strong>Novo questionário</strong>.</div>';
+  };
+  $('#all', v).onchange = (e) => { f.all = e.target.checked; load().catch(fail); };
+  $('#new', v).onclick = () => go('questionario/nova');
+  $('#list', v).onclick = (e) => { const r = e.target.closest('[data-id]'); if (r) go('questionario/' + r.dataset.id); };
+  await load();
+}
+
+const Q_OPTION_TYPES = ['itens', 'multipla'];
+const newQid = () => 'p' + Math.random().toString(36).slice(2, 9);
+
+async function viewQuestionnaireForm(v, id) {
+  const isNew = !id;
+  const q = isNew
+    ? { name: '', per_line: 1, show_os: 1, pairs: 0, show_unanswered: 0, allow_equipment: 0, equipment_required: 0, active: 1, questions: [] }
+    : await api('questionnaire', { params: { id } });
+  let qs = (q.questions || []).map((x) => ({ ...x, options: x.options || [] }));
+  const typeOpts = (cur) => Object.entries(types).map(([k, l]) => `<option value="${k}" ${cur === k ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  const types = (await api('questionnaires', { params: { all: 1 } })).types; // lista de tipos de resposta
+
+  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/questionarios">← Questionários</a></p><h1>${isNew ? 'Novo questionário' : esc(q.name)}</h1>
+      ${isNew ? '' : `<p class="muted">${+q.active ? '' : '<span class="badge">inativo</span>'} ${q.questions_count} pergunta(s)</p>`}</div>
+      <div class="actions">${isNew ? '' : `<button class="btn ghost" id="qact">${+q.active ? 'Desativar' : 'Reativar'}</button>`}<button class="btn primary" id="qsave">${icon('check')}Salvar questionário</button></div></div>
+    <div class="card"><form class="form" id="qform">
+      <label>Nome * <input name="name" required maxlength="120" value="${esc(q.name)}" placeholder="Ex.: Checklist de compressor"></label>
+      <div class="grid two"><label>Perguntas por linha <select name="per_line">${[1, 2, 3, 4].map((n) => `<option value="${n}" ${+q.per_line === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
+      <fieldset class="fset"><legend>Comportamento</legend>
+        <label class="check"><input type="checkbox" name="show_os" ${+q.show_os ? 'checked' : ''}> Mostrar as respostas na OS</label>
+        <label class="check"><input type="checkbox" name="pairs" ${+q.pairs ? 'checked' : ''}> Agrupar perguntas em pares</label>
+        <label class="check"><input type="checkbox" name="show_unanswered" ${+q.show_unanswered ? 'checked' : ''}> Mostrar perguntas sem resposta</label>
+        <label class="check"><input type="checkbox" name="allow_equipment" id="qeq" ${+q.allow_equipment ? 'checked' : ''}> Permitir vincular um equipamento</label>
+        <label class="check"><input type="checkbox" name="equipment_required" id="qeqr" ${+q.equipment_required ? 'checked' : ''} ${+q.allow_equipment ? '' : 'disabled'}> Equipamento obrigatório</label></fieldset>
+    </form></div>
+    <h2 class="qtitle">Perguntas</h2>
+    <div id="qlist"></div>
+    <div class="actions"><button class="btn" id="qadd">${icon('plus')}Adicionar pergunta</button></div>`;
+
+  const box = $('#qlist', v);
+  const earlierOf = (list, i) => list.slice(0, i).filter((x) => x.id);
+
+  // Lê o que está na tela para o estado, antes de qualquer mudança estrutural.
+  const readQs = () => {
+    const out = [];
+    $$('.qcard', box).forEach((card, i) => {
+      const val = (k) => card.querySelector(`[data-k="${k}"]`);
+      const type = val('type').value;
+      const item = {
+        id: card.dataset.qid,
+        label: val('label').value.trim(),
+        type,
+        required: val('required').checked,
+        description: val('description').value.trim(),
+        options: Q_OPTION_TYPES.includes(type) ? val('options').value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) : [],
+        cond: null,
+      };
+      if (type === 'foto') item.geo = val('geo').checked;
+      if (val('hascond') && val('hascond').checked && val('condq')) {
+        item.cond = { question: val('condq').value, value: val('condv').value };
+      }
+      out.push(item);
+    });
+    qs = out;
+  };
+
+  const render = () => {
+    box.innerHTML = qs.length ? qs.map((x, i) => {
+      const earlier = earlierOf(qs, i);
+      const condQ = x.cond ? earlier.find((e) => e.id === x.cond.question) : null;
+      const hasCond = !!x.cond;
+      return `<div class="qcard" data-qid="${esc(x.id)}">
+        <div class="qhead"><span class="qnum">${i + 1}</span>
+          <input data-k="label" maxlength="200" placeholder="Texto da pergunta" value="${esc(x.label)}" class="qlabel">
+          <select data-k="type" class="qtype">${typeOpts(x.type)}</select>
+          <label class="check"><input type="checkbox" data-k="required" ${x.required ? 'checked' : ''}> Obrigatória</label>
+          <span class="qtools">
+            <button class="icon-btn" data-act="up" title="Subir" aria-label="Subir" ${i === 0 ? 'disabled' : ''}>▲</button>
+            <button class="icon-btn" data-act="down" title="Descer" aria-label="Descer" ${i === qs.length - 1 ? 'disabled' : ''}>▼</button>
+            <button class="icon-btn" data-act="dup" title="Duplicar" aria-label="Duplicar">${icon('copy')}</button>
+            <button class="icon-btn" data-act="del" title="Remover" aria-label="Remover">${icon('trash')}</button>
+          </span></div>
+        <input data-k="description" maxlength="300" placeholder="Ajuda para o técnico (opcional)" value="${esc(x.description || '')}" class="qdesc">
+        ${Q_OPTION_TYPES.includes(x.type) ? `<label>Opções <textarea data-k="options" rows="4" placeholder="Uma opção por linha">${esc(x.options.join('\n'))}</textarea></label>` : ''}
+        ${x.type === 'foto' ? `<label class="check"><input type="checkbox" data-k="geo" ${x.geo ? 'checked' : ''}> Registrar a localização da foto</label>` : ''}
+        <div class="qcond">
+          <label class="check"><input type="checkbox" data-k="hascond" ${hasCond ? 'checked' : ''} ${earlier.length ? '' : 'disabled'}> Mostrar só quando a pergunta anterior tiver uma resposta</label>
+          ${hasCond ? `<div class="grid two">
+            <label>Pergunta anterior <select data-k="condq">${earlier.map((e) => `<option value="${esc(e.id)}" ${x.cond.question === e.id ? 'selected' : ''}>${esc(e.label || '(sem texto)')}</option>`).join('')}</select></label>
+            <label>Resposta que mostra esta pergunta ${condQ && condQ.options.length
+              ? `<select data-k="condv">${condQ.options.map((o) => `<option value="${esc(o)}" ${x.cond.value === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`
+              : `<input data-k="condv" maxlength="120" value="${esc(x.cond.value)}">`}</label></div>` : ''}
+        </div></div>`;
+    }).join('') : '<div class="empty">Nenhuma pergunta. Clique em <strong>Adicionar pergunta</strong>.</div>';
+  };
+
+  // Mudanças de estrutura: lê a tela, muda o estado e redesenha.
+  box.onclick = (e) => {
+    const b = e.target.closest('[data-act]');
+    if (!b) return;
+    readQs();
+    const i = $$('.qcard', box).indexOf(b.closest('.qcard'));
+    const act = b.dataset.act;
+    if (act === 'del') qs.splice(i, 1);
+    if (act === 'up' && i > 0) [qs[i - 1], qs[i]] = [qs[i], qs[i - 1]];
+    if (act === 'down' && i < qs.length - 1) [qs[i + 1], qs[i]] = [qs[i], qs[i + 1]];
+    if (act === 'dup') qs.splice(i + 1, 0, { ...qs[i], id: newQid(), options: [...qs[i].options] });
+    // Perguntas que dependiam de uma pergunta removida perdem a condição.
+    qs = qs.map((x, j) => (x.cond && !earlierOf(qs, j).some((e) => e.id === x.cond.question) ? { ...x, cond: null } : x));
+    render();
+  };
+  box.onchange = (e) => {
+    const k = e.target.dataset.k;
+    if (!k) return;
+    // Trocar o tipo, marcar condição ou escolher pergunta anterior muda a tela: relê e redesenha.
+    if (['type', 'hascond', 'condq'].includes(k)) {
+      readQs();
+      const i = $$('.qcard', box).indexOf(e.target.closest('.qcard'));
+      if (k === 'hascond') {
+        const first = earlierOf(qs, i)[0];
+        qs[i].cond = e.target.checked && first ? { question: first.id, value: first.options[0] || '' } : null;
+      }
+      if (k === 'condq') {
+        const pq = earlierOf(qs, i).find((x) => x.id === e.target.value);
+        qs[i].cond = { question: e.target.value, value: pq?.options[0] || '' };
+      }
+      if (k === 'type') {
+        qs[i].type = e.target.value;
+        if (!Q_OPTION_TYPES.includes(qs[i].type)) qs[i].options = [];
+      }
+      render();
+    }
+  };
+
+  $('#qeq', v).onchange = (e) => { $('#qeqr', v).disabled = !e.target.checked; if (!e.target.checked) $('#qeqr', v).checked = false; };
+  $('#qadd', v).onclick = () => { readQs(); qs.push({ id: newQid(), label: '', type: 'texto', required: false, description: '', options: [], cond: null }); render(); $$('.qlabel', box).at(-1)?.focus(); };
+
+  const save = (btn) => busy(btn, async () => {
+    readQs();
+    const d = formData($('#qform', v));
+    if (!d.name.trim()) throw new Error('Informe o nome do questionário');
+    const body = {
+      id: isNew ? undefined : id,
+      name: d.name,
+      per_line: d.per_line,
+      show_os: d.show_os,
+      pairs: d.pairs,
+      show_unanswered: d.show_unanswered,
+      allow_equipment: d.allow_equipment,
+      equipment_required: d.equipment_required,
+      questions: qs.map((x) => ({ ...x, options: x.options || [] })),
+    };
+    const res = await api('questionnaire_save', { body });
+    toast('Questionário salvo');
+    if (isNew) go('questionario/' + res.id); else route();
+  });
+  $('#qsave', v).onclick = (e) => save(e.currentTarget).catch(fail);
+
+  const act = $('#qact', v);
+  if (act) act.onclick = () => busy(act, async () => {
+    const to = !+q.active;
+    if (!to && !(await confirmBox(`Desativar o questionário "${q.name}"? Tipos de tarefa que o usam deixam de receber ele.`, { ok: 'Desativar', danger: true }))) return;
+    await api('questionnaire_active', { body: { id, active: to } });
+    toast(to ? 'Questionário reativado' : 'Questionário desativado'); route();
+  });
+
+  render();
 }
 
 // ============ Fornecedores ============

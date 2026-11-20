@@ -1,6 +1,6 @@
 <?php
 /**
- * Ordens de serviço (OS): atendimento técnico ao cliente, com equipamento, modelo de checklist e técnico.
+ * Ordens de serviço (OS): atendimento técnico ao cliente, com equipamento, tipo de tarefa e técnico.
  * Origem: chamado avulso ou orçamento do mesmo cliente. Ainda não mexe no estoque nem no financeiro
  * (isso entra nas fases de execução e faturamento).
  */
@@ -102,66 +102,6 @@ class Equipments
     }
 }
 
-class ChecklistModels
-{
-    const SERVICE_TYPES = [
-        'corretiva' => 'Corretiva', 'preventiva' => 'Preventiva', 'instalacao' => 'Instalação',
-        'inspecao' => 'Inspeção', 'visita' => 'Visita técnica',
-    ];
-
-    public static function get(int $id): array
-    {
-        $m = DB::one('SELECT * FROM checklist_models WHERE id = ?', [$id]);
-        if (!$m) throw new AppError('Modelo de checklist não encontrado', 404);
-        $m['items'] = json_decode((string)$m['items'], true) ?: [];
-        return $m;
-    }
-
-    public static function list(bool $all = false): array
-    {
-        $rows = DB::all('SELECT * FROM checklist_models' . ($all ? '' : ' WHERE active = 1') . ' ORDER BY name');
-        foreach ($rows as &$m) $m['items'] = json_decode((string)$m['items'], true) ?: [];
-        unset($m);
-        return $rows;
-    }
-
-    /** $in['items'] aceita uma lista ou um texto com um item por linha. */
-    public static function save(array $in, ?int $id = null): int
-    {
-        $name = trim((string)($in['name'] ?? ''));
-        if ($name === '') throw new AppError('Informe o nome do modelo de checklist');
-        $type = (string)($in['service_type'] ?? '');
-        if ($type !== '' && !isset(self::SERVICE_TYPES[$type])) throw new AppError('Tipo de serviço inválido');
-        $raw = $in['items'] ?? [];
-        if (is_string($raw)) $raw = preg_split('/\R/', $raw);
-        $items = [];
-        foreach ((array)$raw as $line) {
-            $label = trim((string)(is_array($line) ? ($line['label'] ?? '') : $line));
-            if ($label !== '') $items[] = ['label' => mb_substr($label, 0, 200), 'required' => !is_array($line) || !empty($line['required'])];
-        }
-        if (!$items) throw new AppError('Inclua pelo menos um item no checklist');
-        $data = [
-            'name' => mb_substr($name, 0, 120),
-            'service_type' => $type ?: null,
-            'items' => json_encode($items, JSON_UNESCAPED_UNICODE),
-            'updated_at' => now(),
-        ];
-        if ($id) {
-            self::get($id);
-            DB::update('checklist_models', $id, $data);
-            return $id;
-        }
-        $data += ['active' => 1, 'created_at' => now()];
-        return DB::insert('checklist_models', $data);
-    }
-
-    public static function setActive(int $id, bool $active): void
-    {
-        self::get($id);
-        DB::update('checklist_models', $id, ['active' => $active ? 1 : 0, 'updated_at' => now()]);
-    }
-}
-
 class ServiceOrders
 {
     const STATUSES = [
@@ -190,13 +130,14 @@ class ServiceOrders
     {
         $o = DB::one('SELECT o.*, c.name customer_name, c.trade_name customer_trade_name, c.phone customer_phone,
                 e.name equipment_name, e.brand equipment_brand, e.model equipment_model, e.serial equipment_serial,
-                t.name technician_name, u.name user_name, q.id quote_ref
+                t.name technician_name, u.name user_name, q.id quote_ref, tt.name task_type_name
             FROM service_orders o
             JOIN customers c ON c.id = o.customer_id
             LEFT JOIN equipments e ON e.id = o.equipment_id
             LEFT JOIN users t ON t.id = o.technician_id
             LEFT JOIN users u ON u.id = o.user_id
             LEFT JOIN quotes q ON q.id = o.quote_id
+            LEFT JOIN task_types tt ON tt.id = o.task_type_id
             WHERE o.id = ?', [$id]);
         if (!$o) throw new AppError('Ordem de serviço não encontrada', 404);
         $o['status_label'] = self::label($o['status']);
@@ -221,12 +162,13 @@ class ServiceOrders
             $w[] = '(LOWER(c.name) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(o.description) LIKE ? OR o.id = ?)';
             array_push($p, $like, $like, $like, (int)$s);
         }
-        return DB::all("SELECT o.id, o.status, o.origin, o.service_type, o.scheduled_at, o.due_date, o.created_at, o.description, o.customer_id, o.equipment_id,
-                c.name customer_name, c.trade_name customer_trade_name, e.name equipment_name, t.name technician_name
+        return DB::all("SELECT o.id, o.status, o.origin, o.task_type_id, o.scheduled_at, o.due_date, o.created_at, o.description, o.customer_id, o.equipment_id,
+                c.name customer_name, c.trade_name customer_trade_name, e.name equipment_name, t.name technician_name, tt.name task_type_name
             FROM service_orders o
             JOIN customers c ON c.id = o.customer_id
             LEFT JOIN equipments e ON e.id = o.equipment_id
             LEFT JOIN users t ON t.id = o.technician_id
+            LEFT JOIN task_types tt ON tt.id = o.task_type_id
             WHERE " . implode(' AND ', $w) . ' ORDER BY (o.scheduled_at IS NULL), o.scheduled_at, o.id DESC LIMIT 300', $p);
     }
 
@@ -237,8 +179,7 @@ class ServiceOrders
             'equipments' => $customerId ? Equipments::list(['customer_id' => $customerId]) : [],
             'quotes' => $customerId ? DB::all('SELECT id, status, lead_name, created_at FROM quotes WHERE customer_id = ? ORDER BY id DESC LIMIT 100', [$customerId]) : [],
             'technicians' => DB::all("SELECT id, name FROM users WHERE active = 1 ORDER BY name"),
-            'checklists' => ChecklistModels::list(),
-            'service_types' => ChecklistModels::SERVICE_TYPES,
+            'task_types' => TaskTypes::list(),
             'statuses' => self::STATUSES,
             'origins' => self::ORIGINS,
         ];
@@ -270,11 +211,12 @@ class ServiceOrders
             if ((int)$eq['customer_id'] !== $customerId) throw new AppError('O equipamento não pertence a este cliente');
         }
 
-        $type = (string)($in['service_type'] ?? '');
-        if ($type !== '' && !isset(ChecklistModels::SERVICE_TYPES[$type])) throw new AppError('Tipo de serviço inválido');
-
-        $checklistId = (int)($in['checklist_model_id'] ?? 0) ?: null;
-        if ($checklistId) ChecklistModels::get($checklistId);
+        // Tipo de tarefa: só tipos ativos (um tipo já usado pela OS continua aceito ao editar)
+        $taskTypeId = (int)($in['task_type_id'] ?? 0) ?: null;
+        if ($taskTypeId && (!$old || (int)$old['task_type_id'] !== $taskTypeId)) {
+            $tt = TaskTypes::get($taskTypeId);
+            if (!(int)$tt['active']) throw new AppError('Este tipo de tarefa está inativo');
+        }
 
         $technicianId = (int)($in['technician_id'] ?? 0) ?: null;
         if ($technicianId && !DB::val('SELECT id FROM users WHERE id = ? AND active = 1', [$technicianId])) {
@@ -290,8 +232,7 @@ class ServiceOrders
             'equipment_id' => $equipmentId,
             'origin' => $origin,
             'quote_id' => $quoteId,
-            'service_type' => $type ?: null,
-            'checklist_model_id' => $checklistId,
+            'task_type_id' => $taskTypeId,
             'technician_id' => $technicianId,
             'scheduled_at' => $scheduled,
             'due_date' => $due,
