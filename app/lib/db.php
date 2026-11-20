@@ -356,6 +356,7 @@ class DB
                 internal_notes TEXT NULL,
                 public_token VARCHAR(40) NOT NULL UNIQUE,
                 sale_id $fk NULL,
+                service_order_id $fk NULL,
                 client_response VARCHAR(500) NULL,
                 status_changed_at $dt NULL,
                 sent_at $dt NULL,
@@ -654,6 +655,7 @@ class DB
             "CREATE INDEX idx_so_customer ON service_orders (customer_id)",
             "CREATE INDEX idx_so_technician ON service_orders (technician_id)",
             "CREATE INDEX idx_so_token ON service_orders (public_token)",
+            "CREATE INDEX idx_quotes_so ON quotes (service_order_id)",
             "CREATE INDEX idx_soa_order ON so_answers (order_id)",
             "CREATE INDEX idx_sop_order ON so_photos (order_id)",
             "CREATE INDEX idx_soi_order ON so_items (order_id)",
@@ -776,6 +778,15 @@ class DB
         }
         // Tipos de tarefa ainda não criados (atualização ou instalação nova): cria os padrões e converte os checklists antigos
         if (!(int)self::val('SELECT COUNT(*) FROM task_types')) TaskTypes::importLegacy();
+        // v2.0.0: OS não fatura (só o orçamento); "faturada" vira "concluída". Orçamento guarda a OS de onde nasceu.
+        try {
+            self::pdo()->query('SELECT service_order_id FROM quotes LIMIT 1');
+        } catch (PDOException $e) {
+            $fkc = self::$driver === 'mysql' ? 'INT UNSIGNED' : 'INTEGER';
+            try { self::pdo()->exec("ALTER TABLE quotes ADD COLUMN service_order_id $fkc NULL"); } catch (PDOException $e2) {}
+            try { self::pdo()->exec('CREATE INDEX idx_quotes_so ON quotes (service_order_id)'); } catch (PDOException $e2) {}
+        }
+        try { self::run("UPDATE service_orders SET status = 'concluida' WHERE status = 'faturada'"); } catch (PDOException $e) {}
         // v1.10.0: ajuste manual do controle de horas (horário original, justificativa, motivo da pausa, inclusão e exclusão de pausas)
         try {
             self::pdo()->query('SELECT deleted_at FROM so_events LIMIT 1');

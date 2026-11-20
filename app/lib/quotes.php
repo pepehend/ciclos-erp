@@ -21,6 +21,11 @@ class Quotes
             FROM quote_items i JOIN products p ON p.id = i.product_id WHERE i.quote_id = ? ORDER BY i.sort, i.id', [$id]);
         $q['extras'] = DB::all('SELECT * FROM quote_extras WHERE quote_id = ? ORDER BY id', [$id]);
         $q['status_label'] = QuoteStatuses::label($q['status']);
+        // Ordens de serviço ligadas: geradas a partir deste orçamento e a OS de onde ele nasceu
+        $q['service_orders'] = DB::all('SELECT o.id, o.status, o.created_at, o.quote_id, tt.name task_type_name FROM service_orders o
+            LEFT JOIN task_types tt ON tt.id = o.task_type_id WHERE o.quote_id = ? OR o.id = ? ORDER BY o.id', [$id, (int)$q['service_order_id']]);
+        foreach ($q['service_orders'] as &$so) $so['status_label'] = ServiceOrders::label($so['status']);
+        unset($so);
         return $q;
     }
 
@@ -146,7 +151,15 @@ class Quotes
             'updated_at' => now(),
         ];
 
-        return DB::tx(function () use ($data, $items, $extras, $id, $userId) {
+        // Orçamento aberto a partir de uma OS (só ao criar): a OS precisa ser do mesmo cliente
+        $soId = null;
+        if (!$id && (int)($in['service_order_id'] ?? 0)) {
+            $so = ServiceOrders::get((int)$in['service_order_id']);
+            if (!$customerId || (int)$so['customer_id'] !== $customerId) throw new AppError('A ordem de serviço #' . $so['id'] . ' é de outro cliente');
+            $soId = (int)$so['id'];
+        }
+
+        return DB::tx(function () use ($data, $items, $extras, $id, $userId, $soId) {
             if ($id) {
                 $old = DB::one('SELECT * FROM quotes WHERE id = ?' . DB::lockSuffix(), [$id]);
                 if (!$old) throw new AppError('Orçamento não encontrado', 404);
@@ -158,6 +171,7 @@ class Quotes
             } else {
                 self::stamp($data, null);
                 $data['created_by'] = $userId;
+                $data['service_order_id'] = $soId;
                 $data['public_token'] = bin2hex(random_bytes(16));
                 $data['created_at'] = now();
                 $id = DB::insert('quotes', $data);

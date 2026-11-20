@@ -106,16 +106,15 @@ class ServiceOrders
 {
     const STATUSES = [
         'aberta' => 'Aberta', 'agendada' => 'Agendada', 'em_execucao' => 'Em execução',
-        'pausada' => 'Pausada', 'concluida' => 'Concluída', 'faturada' => 'Faturada',
+        'pausada' => 'Pausada', 'concluida' => 'Concluída',
     ];
-    /** Andamento permitido: de → para. "faturada" é o fim do fluxo. */
+    /** Andamento permitido: de → para. "concluida" é o fim do fluxo (a OS não fatura; quem fatura é o orçamento). */
     const TRANSITIONS = [
         'aberta' => ['agendada'],
         'agendada' => ['aberta', 'em_execucao'],
         'em_execucao' => ['pausada', 'concluida'],
         'pausada' => ['em_execucao'],
-        'concluida' => ['faturada'],
-        'faturada' => [],
+        'concluida' => [],
     ];
     const ORIGINS = ['chamado' => 'Chamado avulso', 'orcamento' => 'Orçamento'];
     /** Abas da lista: "abertas" são as que ainda não foram concluídas. */
@@ -188,7 +187,6 @@ class ServiceOrders
     public static function save(array $in, int $userId, ?int $id = null): int
     {
         $old = $id ? self::get($id) : null;
-        if ($old && $old['status'] === 'faturada') throw new AppError('Ordem faturada não pode ser alterada');
         $customerId = (int)($in['customer_id'] ?? 0);
         if (!$customerId) throw new AppError('Selecione o cliente');
         Customers::get($customerId);

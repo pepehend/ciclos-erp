@@ -819,3 +819,11 @@ tr.sel td { background: var(--accent-soft); }
 .hr-add-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 2fr auto; gap: 10px; align-items: end; }
 .so-kpis + p svg, [data-pane=horas] > p svg { width: 14px; height: 14px; vertical-align: -2px; }
 @media (max-width: 760px) { .hr-add-grid { grid-template-columns: 1fr; } }
+/* Edição única da OS e ligação com orçamento */
+.alert.info { background: var(--accent-soft); color: var(--text); border-color: transparent; }
+.so-editing, .q-os { display: flex; gap: 8px; align-items: center; }
+.so-editing svg, .q-os svg { width: 18px; height: 18px; flex: none; color: var(--accent); }
+.so-photos figure.del img { opacity: .3; }
+.so-photos figure.del figcaption { text-decoration: line-through; }
+#itbody tr.del td { text-decoration: line-through; opacity: .55; }
+#itbody tr.del td:last-child { text-decoration: none; opacity: 1; }

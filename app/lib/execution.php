@@ -589,6 +589,18 @@ class OrderExec
         DB::update('service_orders', (int)$o['id'], ['survey_rating' => $r, 'survey_comment' => mb_substr(trim($comment), 0, 1000) ?: null, 'survey_at' => now()]);
     }
 
+    /** Orçamentos ligados à OS: o de origem e os abertos a partir dela. */
+    public static function quotes(array $o): array
+    {
+        $rows = DB::all('SELECT id, status, total, created_at, service_order_id FROM quotes WHERE id = ? OR service_order_id = ? ORDER BY id', [(int)$o['quote_id'], (int)$o['id']]);
+        foreach ($rows as &$r) {
+            $r['status_label'] = QuoteStatuses::label($r['status']);
+            $r['relation'] = (int)$r['service_order_id'] === (int)$o['id'] ? 'aberto pela OS' : 'origem da OS';
+        }
+        unset($r);
+        return $rows;
+    }
+
     // ---------------- Tudo da OS (ficha) ----------------
 
     public static function detail(int $id): array
@@ -603,7 +615,8 @@ class OrderExec
             'items' => self::items($id),
             'hours' => self::hours($id),
             'sends' => DB::all('SELECT s.*, u.name user_name FROM so_sends s LEFT JOIN users u ON u.id = s.user_id WHERE s.order_id = ? ORDER BY s.id DESC', [$id]),
-            'pending' => $o['status'] === 'faturada' ? [] : self::pending($o),
+            'pending' => self::pending($o),
+            'quotes' => self::quotes($o),
             'equipments' => DB::all('SELECT id, name, serial FROM equipments WHERE customer_id = ? ORDER BY name', [$o['customer_id']]),
             'kinds' => self::KINDS,
             'types' => Questionnaires::TYPES,
