@@ -157,6 +157,52 @@ class ServiceOrders
         ];
     }
 
+    /**
+     * Tarefas do app do técnico: OS agendadas no período (Y-m-d), do técnico ou de todos, com o número de pendências.
+     */
+    public static function techTasks(string $from, string $to, ?int $techId): array
+    {
+        $from = self::agendaDay($from, 'Período inicial');
+        $to = self::agendaDay($to, 'Período final');
+        if ($to < $from || (strtotime($to) - strtotime($from)) > 62 * 86400) throw new AppError('Período inválido');
+        $next = (new DateTime($to))->modify('+1 day')->format('Y-m-d');
+        $w = 'o.scheduled_at >= ? AND o.scheduled_at < ?'; $p = [$from . ' 00:00:00', $next . ' 00:00:00'];
+        if ($techId) { $w .= ' AND o.technician_id = ?'; $p[] = $techId; }
+        $rows = DB::all("SELECT o.id, o.status, o.scheduled_at, o.due_date, o.description, o.technician_id,
+                c.name customer_name, c.trade_name customer_trade_name, t.name technician_name, tt.name task_type_name
+            FROM service_orders o JOIN customers c ON c.id = o.customer_id LEFT JOIN users t ON t.id = o.technician_id
+            LEFT JOIN task_types tt ON tt.id = o.task_type_id WHERE $w ORDER BY o.scheduled_at, o.id LIMIT 300", $p);
+        foreach ($rows as &$r) {
+            $r['status_label'] = self::label($r['status']);
+            $r['pending'] = $r['status'] === 'concluida' ? 0 : count(OrderExec::pending(self::get((int)$r['id'])));
+        }
+        unset($r);
+        return $rows;
+    }
+
+    /** Início do app do técnico: OS de hoje, atrasadas, em execução e orçamentos lançados hoje. */
+    public static function techHome(int $userId, bool $mine): array
+    {
+        $today = date('Y-m-d');
+        $tech = $mine ? $userId : null;
+        $rows = self::techTasks($today, $today, $tech);
+        $in = implode(',', array_fill(0, count(self::OPEN), '?'));
+        $tw = $tech ? ' AND technician_id = ?' : '';
+        $tp = $tech ? [$tech] : [];
+        $late = (int)DB::val("SELECT COUNT(*) FROM service_orders WHERE status IN ($in) AND ((due_date IS NOT NULL AND due_date < ?)
+            OR (status IN ('aberta','agendada') AND scheduled_at IS NOT NULL AND scheduled_at < ?))$tw", array_merge(self::OPEN, [$today, now()], $tp));
+        $exec = (int)DB::val("SELECT COUNT(*) FROM service_orders WHERE status IN ('a_caminho','em_execucao')$tw", $tp);
+        $q = DB::one('SELECT COUNT(*) n, COALESCE(SUM(total),0) total FROM quotes WHERE created_at >= ? AND created_at <= ?' . ($tech ? ' AND user_id = ?' : ''),
+            array_merge([$today . ' 00:00:00', $today . ' 23:59:59'], $tp));
+        return [
+            'today' => $rows,
+            'done' => count(array_filter($rows, fn($r) => $r['status'] === 'concluida')),
+            'late' => $late,
+            'running' => $exec,
+            'quotes' => ['count' => (int)$q['n'], 'total' => (float)$q['total']],
+        ];
+    }
+
     /** Abas da lista: "abertas" são as que ainda não foram concluídas. */
     const OPEN = ['aberta', 'agendada', 'a_caminho', 'em_execucao', 'pausada'];
 
@@ -169,7 +215,9 @@ class ServiceOrders
     {
         $o = DB::one('SELECT o.*, c.name customer_name, c.trade_name customer_trade_name, c.phone customer_phone, c.email customer_email, c.document customer_document,
                 e.name equipment_name, e.brand equipment_brand, e.model equipment_model, e.serial equipment_serial,
-                t.name technician_name, u.name user_name, q.id quote_ref, tt.name task_type_name
+                t.name technician_name, u.name user_name, q.id quote_ref, tt.name task_type_name, tt.duration_min task_type_duration,
+                c.street customer_street, c.number customer_number, c.complement customer_complement, c.district customer_district,
+                c.city customer_city, c.state customer_state, c.cep customer_cep
             FROM service_orders o
             JOIN customers c ON c.id = o.customer_id
             LEFT JOIN equipments e ON e.id = o.equipment_id

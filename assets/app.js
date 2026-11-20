@@ -77,6 +77,16 @@ const ICONS = {
   dollar: '<path d="M12 3v18"/><path d="M16.5 7.5c-.8-1.3-2.4-2-4.3-2-2.6 0-4.2 1.3-4.2 3.1 0 4.2 8.6 2.4 8.6 6.6 0 1.9-1.8 3.3-4.5 3.3-2 0-3.7-.8-4.5-2.2"/>',
   tag: '<path d="M3.5 12.2V4.5a1 1 0 0 1 1-1h7.7l8.3 8.3a1.4 1.4 0 0 1 0 2l-6.6 6.6a1.4 1.4 0 0 1-2 0z"/><circle cx="8" cy="8" r="1.4"/>',
   calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  phone: '<path d="M5 4h3.5l1.7 4.3-2.2 1.4a11 11 0 0 0 6.3 6.3l1.4-2.2L20 15.5V19a1.5 1.5 0 0 1-1.6 1.5A16 16 0 0 1 3.5 5.6 1.5 1.5 0 0 1 5 4z"/>',
+  pin: '<path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.4"/>',
+  refresh: '<path d="M20 11a8 8 0 0 0-14.3-4.4L4 8.5M4 4v4.5h4.5M4 13a8 8 0 0 0 14.3 4.4L20 15.5M20 20v-4.5h-4.5"/>',
+  play: '<path d="M7 4.5v15l12-7.5z"/>',
+  pause: '<path d="M8 5v14M16 5v14"/>',
+  back: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
+  share: '<circle cx="18" cy="5.5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="18.5" r="2.5"/><path d="M8.2 10.8l7.6-4M8.2 13.2l7.6 4"/>',
+  nav: '<path d="M21 3 3 10.5l7.5 3 3 7.5z"/>',
+  sign: '<path d="M3 17c3-1 4.5-6 6.5-6s.5 5 2.5 5 2.5-3 4-3 1 2 2.5 2M3 21h18"/>',
+  km: '<path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-6"/>',
 };
 const icon = (n) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[n] || ''}</svg>`;
 
@@ -963,6 +973,7 @@ function renderShell() {
       <nav class="nav">${html}</nav>
       <div class="foot"><div class="foot-row"><a href="#/conta" class="foot-user" title="Minha conta">${avatarHtml(state.me, 'sm')}<strong>${esc(state.me.name)}</strong></a><button type="button" class="theme-btn" id="themebtn" aria-label="Alternar tema: claro, escuro ou automático"></button></div>
         <div class="actions" style="margin-top:6px"><a href="#/conta">Minha conta</a> · <a href="#" id="logout">Sair</a></div>
+        ${can('ordens') ? `<a href="#/m" class="tk-applink">${icon('phone')}App do técnico</a>` : ''}
         ${state.version ? `<div class="ver" title="Versão do sistema">Versão ${esc(state.version)}</div>` : ''}</div>
     </aside>
     <div>
@@ -1038,6 +1049,8 @@ const ROUTES = [
 let routeToken = 0;
 async function route() {
   if (!state.me) return renderLogin();
+  const mpath = (location.hash.replace(/^#\/?/, '') || '').split('?')[0];
+  if (/^m(\/|$)/.test(mpath)) return tkRoute(mpath);
   if (!$('.shell')) renderShell();
   $('.shell').classList.remove('menu-open');
   const path = (location.hash.replace(/^#\/?/, '') || 'painel').split('?')[0];
@@ -1110,6 +1123,7 @@ function renderLogin() {
       try {
         const d = await api('login', { body: formData(f) });
         state.me = d.user; state.csrf = d.csrf; state.meta = null; invalidateProducts(); applyAccent(state.me?.accent_color);
+        if (TK_MOBILE() && tkMode() !== 'off' && can('ordens')) { $('#app').innerHTML = ''; if (location.hash === '#/m') route(); else location.hash = '#/m'; return; }
         renderShell(); route();
       } catch (err) { $('#login-err').innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
     });
@@ -6200,11 +6214,525 @@ async function viewAccount(v) {
   };
 }
 
+// ============ App do técnico (celular) ============
+// Telas pensadas para o celular: Início, Minha agenda e a OS (Detalhes, Relatório e Pendências), com
+// questionários respondidos em Todas / Foco / Sem resposta. Rotas #/m, #/m/agenda, #/m/os/ID[/página].
+// Abre sozinho no celular (tela estreita) para quem tem acesso às ordens; "Versão completa" no menu volta ao sistema.
+const TK_MOBILE = () => window.matchMedia && window.matchMedia('(max-width: 760px)').matches;
+const tkMode = (v) => { try { if (v === undefined) return localStorage.getItem('tkMode') || ''; localStorage.setItem('tkMode', v); } catch (_) { return ''; } return v; };
+const tkHello = () => { const h = new Date().getHours(); return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'; };
+const tkYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const tkToday = () => tkYmd(new Date());
+const TK_WD = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const TK_MONTHS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+const tkMonthName = (d) => d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+// Filtros de situação da agenda (como no app): grupos de status
+const TK_FILTERS = [['todas', 'Todas', null], ['aberto', 'Em aberto', ['aberta', 'agendada']], ['execucao', 'Em execução', ['a_caminho', 'em_execucao']],
+  ['pausa', 'Em pausa', ['pausada']], ['finalizadas', 'Finalizadas', ['concluida']]];
+const tkStatusCls = (s) => ({ concluida: 'done', pausada: 'pause', em_execucao: 'run', a_caminho: 'run', agendada: 'sched' }[s] || 'open');
+
+/** Estrutura do app: menu lateral (gaveta) e área da tela. */
+function tkShell() {
+  if ($('#tkv')) return;
+  const me = state.me;
+  const link = (h, ic, l, cls = '') => `<a href="#/${h}" class="tk-dl ${cls}"><span class="tk-dli">${icon(ic)}</span>${l}</a>`;
+  $('#app').innerHTML = `<div class="tk">
+    <div class="tk-drawer" id="tkdrawer" hidden><div class="tk-dpanel">
+      <div class="tk-dhead">${avatarHtml(me, 'md')}<div><strong>${esc(me.name)}</strong><div class="small">${esc(me.role === 'admin' ? 'Administrador' : 'Técnico')}</div>
+        <div class="small tk-dco">${esc((state.brand && state.brand.name) || (state.meta && state.meta.company && state.meta.company.name) || '')}</div></div></div>
+      <nav class="tk-dnav">
+        ${link('m', 'home', 'Início')}${link('m/agenda', 'calendar', 'Agenda')}
+        ${can('clientes') ? link('clientes', 'users', 'Clientes') : ''}${can('orcamentos') ? link('orcamentos', 'quote', 'Orçamentos') : ''}
+        ${can('produtos') ? link('produtos', 'box', 'Produtos') : ''}${can('servicos') ? link('servicos', 'tool', 'Serviços') : ''}
+        ${link('equipamentos', 'gear', 'Equipamentos')}${link('conta', 'user', 'Minha conta')}
+      </nav>
+      <div class="tk-dfoot"><a href="#/painel" id="tkfull">${icon('monitor')}Versão completa</a><a href="#" id="tkout">${icon('login')}Sair</a></div>
+    </div></div>
+    <main class="tk-main" id="tkv"></main></div>`;
+  const dr = $('#tkdrawer');
+  dr.onclick = (e) => { if (e.target === dr || e.target.closest('a')) dr.hidden = true; };
+  $('#tkfull').onclick = () => tkMode('off');
+  $('#tkout').onclick = async (e) => { e.preventDefault(); try { await api('logout', { body: {} }); } catch (_) {} await loadMe(); renderLogin(); };
+}
+const tkMenuBtn = () => `<button class="tk-ib" data-tkmenu aria-label="Menu">${icon('menu')}</button>`;
+const tkBackBtn = (to) => `<button class="tk-ib" data-tkback="${esc(to)}" aria-label="Voltar">${icon('back')}</button>`;
+function tkBindTop(v) {
+  v.addEventListener('click', (e) => {
+    if (e.target.closest('[data-tkmenu]')) { $('#tkdrawer').hidden = false; return; }
+    const b = e.target.closest('[data-tkback]');
+    if (b) { if (v._dirty && !confirm('Sair sem salvar as alterações?')) return; go(b.dataset.tkback); }
+    const g = e.target.closest('[data-tkgo]');
+    if (g) { if (v._dirty && !confirm('Sair sem salvar as alterações?')) return; go(g.dataset.tkgo); }
+  });
+}
+
+/** Cartão de tarefa (agenda e início). */
+function tkTaskCard(r) {
+  const when = String(r.scheduled_at || '');
+  const day = when.slice(0, 10) === tkToday() ? 'HOJE' : dOnly(when).slice(0, 5);
+  return `<button class="tk-task" data-tkgo="m/os/${r.id}"><div class="tk-tt"><b>${esc(when.slice(11, 16))}</b><span>${day}</span></div>
+    <div class="tk-tb"><div class="tk-th"><strong>${soCustomer(r)}</strong><span class="tk-st ${tkStatusCls(r.status)}">${esc((r.status_label || r.status).toLowerCase())}</span></div>
+      <div class="tk-td">${esc(r.task_type_name || r.description || '')}</div>
+      <div class="tk-tags"><span class="tk-tag">ID: ${r.id}</span>${+r.pending ? `<span class="tk-tag warn">${r.pending} pendência${+r.pending > 1 ? 's' : ''}</span>` : ''}${r.technician_name && !r.mine ? `<span class="tk-tag">${esc(r.technician_name)}</span>` : ''}</div></div></button>`;
+}
+const tkProgress = (done, total, pctShow = true) => `<div class="tk-prog"><div class="tk-progl"><span>${done}/${total} OS finalizadas</span>${pctShow ? `<b>${total ? Math.round(done * 100 / total) : 0}%</b>` : ''}</div>
+  <div class="tk-bar"><i style="width:${total ? Math.round(done * 100 / total) : 0}%"></i></div></div>`;
+
+// ---- Início ----
+async function tkHome(v) {
+  const all = sessionStorage.getItem('tkAll') === '1';
+  const d = await api('tech_home', { params: { all: all ? 1 : '' } });
+  d.today.forEach((r) => (r.mine = +r.technician_id === +state.me.id));
+  const pend = d.today.filter((r) => r.status !== 'concluida');
+  const short = (h, ic, l, cls) => `<a class="tk-short" href="#/${h}"><span class="tk-si ${cls}">${icon(ic)}</span>${l}</a>`;
+  v.innerHTML = `<div class="tk-top">${tkMenuBtn()}</div>
+    <div class="tk-hello"><div><span>${tkHello()},</span><h1>${esc(state.me.name)}</h1></div><button class="tk-sync" id="tksync">${icon('refresh')}Sincronizar</button></div>
+    <div class="tk-shorts">${short('ordem/nova', 'plus', 'Nova Tarefa', 'p')}${can('clientes') ? short('clientes', 'users', 'Clientes', 'b') : ''}
+      ${can('orcamentos') ? short('orcamento/novo', 'quote', 'Orçamento', 'o') : ''}${can('produtos') ? short('produtos', 'box', 'Produto', 'g') : ''}${short('m/agenda', 'calendar', 'Agenda', 'b')}</div>
+    <div class="tk-kpis">
+      <a class="tk-kpi" href="#/m/agenda"><span class="tk-ki b">${icon('calendar')}</span><b>${d.today.length}</b><span>OS para hoje</span></a>
+      <div class="tk-kpi"><span class="tk-ki r">${icon('warn')}</span><b>${d.late}</b><span>OS atrasadas</span></div>
+      ${d.can_quotes ? `<a class="tk-kpi" href="#/orcamentos"><span class="tk-ki o">${icon('quote')}</span><b>${money(d.quotes.total)}</b><span>${d.quotes.count} orçamento${d.quotes.count === 1 ? '' : 's'} lançado${d.quotes.count === 1 ? '' : 's'}</span></a>` : ''}
+      <div class="tk-kpi"><span class="tk-ki g">${icon('play')}</span><b>${d.running}</b><span>em execução</span></div>
+    </div>
+    <div class="tk-sec"><h2>Agenda de hoje</h2><a href="#/m/agenda">Ver tudo ${icon('chevron')}</a></div>
+    <label class="tk-scope"><input type="checkbox" id="tkall" ${all ? 'checked' : ''}> Mostrar as tarefas de toda a equipe</label>
+    ${tkProgress(d.done, d.today.length)}
+    <div class="tk-list">${pend.length ? pend.map(tkTaskCard).join('') : '<p class="tk-empty">Nenhuma tarefa pendente para hoje</p>'}</div>`;
+  tkBindTop(v);
+  $('#tksync', v).onclick = () => route();
+  $('#tkall', v).onchange = (e) => { sessionStorage.setItem('tkAll', e.target.checked ? '1' : '0'); route(); };
+}
+
+// ---- Minha agenda (Calendário da semana ou lista do mês) ----
+async function tkAgenda(v) {
+  const st = JSON.parse(sessionStorage.getItem('tkAg') || 'null') || {};
+  st.mode = st.mode || 'cal'; st.day = st.day || tkToday(); st.filter = st.filter || 'todas'; st.all = !!st.all; st.q = st.q || '';
+  const save = () => sessionStorage.setItem('tkAg', JSON.stringify(st));
+  const dayD = new Date(st.day + 'T12:00:00');
+  const weekStart = new Date(dayD); weekStart.setDate(dayD.getDate() - dayD.getDay());
+  const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
+  const mStart = new Date(dayD.getFullYear(), dayD.getMonth(), 1), mEnd = new Date(dayD.getFullYear(), dayD.getMonth() + 1, 0);
+  const [from, to] = st.mode === 'cal' ? [tkYmd(weekStart), tkYmd(weekEnd)] : [tkYmd(mStart), tkYmd(mEnd)];
+  const d = await api('tech_tasks', { params: { from, to, all: st.all ? 1 : '' } });
+  const q = st.q.trim().toLowerCase();
+  const rows = d.rows.map((r) => ({ ...r, mine: +r.technician_id === +state.me.id }))
+    .filter((r) => !q || [r.customer_name, r.customer_trade_name, r.description, r.task_type_name, String(r.id)].some((x) => String(x || '').toLowerCase().includes(q)));
+  const byDay = (ymd) => rows.filter((r) => String(r.scheduled_at).slice(0, 10) === ymd);
+  const head = `<div class="tk-top">${tkMenuBtn()}</div>
+    <div class="tk-aghead"><select id="tkwho" class="tk-who"><option value="0">Minha Agenda</option><option value="1" ${st.all ? 'selected' : ''}>Agenda da equipe</option></select>
+      <div class="tk-toggle"><button data-mode="cal" class="${st.mode === 'cal' ? 'on' : ''}">Calendário</button><button data-mode="mes" class="${st.mode === 'mes' ? 'on' : ''}">Mês</button></div>
+      <button class="tk-ib" id="tksearch" aria-label="Buscar">${icon('search')}</button></div>
+    <div class="tk-searchbox" ${st.q ? '' : 'hidden'}><input id="tkq" type="search" placeholder="Cliente, descrição ou ID" value="${esc(st.q)}"></div>`;
+  if (st.mode === 'cal') {
+    const dayRows = byDay(st.day);
+    const counts = Object.fromEntries(TK_FILTERS.map(([k, , sts]) => [k, dayRows.filter((r) => !sts || sts.includes(r.status)).length]));
+    const fsts = TK_FILTERS.find(([k]) => k === st.filter)[2];
+    const shown = dayRows.filter((r) => !fsts || fsts.includes(r.status));
+    const done = dayRows.filter((r) => r.status === 'concluida').length;
+    const days = [...Array(7)].map((_, i) => { const x = new Date(weekStart); x.setDate(weekStart.getDate() + i); return x; });
+    v.innerHTML = `${head}
+      <div class="tk-card tk-week"><div class="tk-wnav"><button class="tk-ib" data-wk="-7" aria-label="Semana anterior">${icon('back')}</button>
+        <strong>${esc(tkMonthName(dayD))}</strong><button class="tk-ib tk-fwd" data-wk="7" aria-label="Próxima semana">${icon('back')}</button></div>
+        <div class="tk-days">${days.map((x) => { const y = tkYmd(x); return `<button data-day="${y}" class="${y === st.day ? 'on' : ''} ${y === tkToday() ? 'today' : ''}"><span>${TK_WD[x.getDay()]}</span><b>${x.getDate()}</b>${byDay(y).length ? '<i></i>' : '<i class="no"></i>'}</button>`; }).join('')}</div>
+        ${st.day !== tkToday() ? '<button class="tk-pill" data-day="' + tkToday() + '">Hoje</button>' : '<span class="tk-pill off">Hoje</span>'}
+        <div class="tk-chips">${TK_FILTERS.map(([k, l]) => `<button data-f="${k}" class="${st.filter === k ? 'on' : ''}">${l} (${counts[k]})</button>`).join('')}</div></div>
+      <div class="tk-btns"><a class="tk-btn p" href="#/ordem/nova">${icon('plus')}Nova Tarefa</a><button class="tk-sync" id="tksync">${icon('refresh')}Sincronizar</button></div>
+      ${dayRows.length ? tkProgress(done, dayRows.length, false) : ''}
+      <div class="tk-list">${shown.length ? shown.map(tkTaskCard).join('') : '<p class="tk-empty">Nenhuma tarefa encontrada</p>'}</div>`;
+  } else {
+    const groups = [...new Set(rows.map((r) => String(r.scheduled_at).slice(0, 10)))];
+    v.innerHTML = `${head}
+      <div class="tk-card tk-mhead"><button class="tk-mbtn" id="tkmonth">${icon('calendar')}<strong>${esc(tkMonthName(dayD))}</strong>${icon('chevron')}</button><button class="tk-pill" data-day="${tkToday()}">Hoje</button></div>
+      <div class="tk-mlist">${groups.length ? groups.map((g) => { const x = new Date(g + 'T12:00:00'); return `<div class="tk-mday"><div class="tk-mdl"><span>${TK_WD[x.getDay()].toLowerCase()}</span><b class="${g === tkToday() ? 'today' : ''}">${x.getDate()}</b></div>
+        <div class="tk-mdi">${byDay(g).map((r) => `<button class="tk-mi" data-tkgo="m/os/${r.id}"><strong>${soCustomer(r)}</strong><span>${esc(String(r.scheduled_at).slice(11, 16))} • ${esc(r.task_type_name || r.description || '')}</span><span>ID: ${r.id}</span></button>`).join('')}</div></div>`; }).join('')
+        : '<p class="tk-empty">Nenhuma tarefa encontrada</p>'}</div>`;
+  }
+  tkBindTop(v);
+  v.addEventListener('click', (e) => {
+    const m = e.target.closest('[data-mode]'); if (m) { st.mode = m.dataset.mode; save(); route(); return; }
+    const dy = e.target.closest('[data-day]'); if (dy) { st.day = dy.dataset.day; save(); route(); return; }
+    const wk = e.target.closest('[data-wk]'); if (wk) { const x = new Date(st.day + 'T12:00:00'); x.setDate(x.getDate() + +wk.dataset.wk); st.day = tkYmd(x); save(); route(); return; }
+    const f = e.target.closest('[data-f]'); if (f) { st.filter = f.dataset.f; save(); route(); }
+  });
+  $('#tkwho', v).onchange = (e) => { st.all = e.target.value === '1'; save(); route(); };
+  $('#tksearch', v).onclick = () => { const b = $('.tk-searchbox', v); b.hidden = !b.hidden; if (!b.hidden) $('#tkq', v).focus(); };
+  $('#tkq', v).oninput = debounce((e) => { st.q = e.target.value; save(); route(); }, 400);
+  const sy = $('#tksync', v); if (sy) sy.onclick = () => route();
+  const mb = $('#tkmonth', v);
+  if (mb) mb.onclick = () => {
+    let year = dayD.getFullYear();
+    const md = modal({ title: 'Escolha o mês', body: '<div class="tk-yr"><button class="tk-ib" data-y="-1">' + icon('back') + '</button><b id="tky"></b><button class="tk-ib tk-fwd" data-y="1">' + icon('back') + '</button></div><div class="tk-months" id="tkms"></div>' });
+    const paint = () => { $('#tky', md.el).textContent = year; $('#tkms', md.el).innerHTML = TK_MONTHS.map((n, i) => `<button data-mo="${i}" class="${year === dayD.getFullYear() && i === dayD.getMonth() ? 'on' : ''}">${n}</button>`).join(''); };
+    paint();
+    md.el.addEventListener('click', (e) => {
+      const y = e.target.closest('[data-y]'); if (y) { year += +y.dataset.y; paint(); return; }
+      const mo = e.target.closest('[data-mo]'); if (mo) { st.day = tkYmd(new Date(year, +mo.dataset.mo, 1)); save(); md.close(); route(); }
+    });
+  };
+}
+
+// ---- Ordem de serviço ----
+/** Itens do "Checklist do relatório" (concluído ou não) a partir do detalhe da OS. */
+function tkChecklist(D) {
+  const o = D.order, qs = D.questionnaires;
+  const qPend = qs.filter((q) => !q.answered || q.missing.length).length;
+  return [
+    ['fotos', 'Fotos', 'image', D.photos.length > 0, D.photos.length ? `${D.photos.length} foto(s)` : ''],
+    ['questionarios', 'Questionário', 'quote', qs.length > 0 && !qPend, qs.length ? (qPend ? `${qPend} questionário${qPend > 1 ? 's' : ''} pendente${qPend > 1 ? 's' : ''}` : 'Respondido') : 'Nenhum questionário', qPend > 0],
+    ['km', 'Quilometragem', 'km', o.km !== null && o.km !== undefined, o.km != null ? `${String(o.km).replace('.', ',')} km` : ''],
+    ['relato', 'Relato', 'pencil', !!(o.report || '').trim(), ''],
+    ['assinar', 'Assinar e enviar', 'sign', !!o.signature, o.signer_name ? esc(o.signer_name) : ''],
+  ];
+}
+const tkAddr = (o) => [[o.customer_street, o.customer_number].filter(Boolean).join(', '), o.customer_complement, o.customer_district, [o.customer_city, o.customer_state].filter(Boolean).join(' - '), o.customer_cep ? cepFmt(o.customer_cep) : ''].filter(Boolean).join(', ');
+const tkWhen = (s) => { if (!s) return 'Sem agendamento'; const d = String(s).slice(0, 10); return `${d === tkToday() ? 'Hoje' : dOnly(s)} às ${String(s).slice(11, 16)}`; };
+const tkHms = (s) => { s = Math.max(0, Math.round(+s || 0)); const p2 = (n) => String(n).padStart(2, '0'); return `${p2(Math.floor(s / 3600))}:${p2(Math.floor(s / 60) % 60)}:${p2(s % 60)}`; };
+const tkHM = (min) => (min ? `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}h` : '');
+const tkActTime = (h, kind) => { const r = (h.rows || []).filter((x) => x.kind === kind).pop(); return r ? String(r.at).slice(11, 16) + 'h' : '00:00h'; };
+
+async function tkOrder(v, id, page, sub) {
+  const D = await api('service_order_detail', { params: { id } });
+  const o = D.order;
+  const back = page ? `m/os/${id}` : 'm/agenda';
+  if (page) return tkOrderPage(v, D, page, sub);
+  const tabKey = 'tkTab:' + id;
+  const tab = sessionStorage.getItem(tabKey) || 'detalhes';
+  const cust = o.customer_trade_name || o.customer_name;
+  const phone = String(o.customer_phone || '').replace(/\D/g, '');
+  const addr = tkAddr(o);
+  const list = tkChecklist(D);
+  const doneN = list.filter((x) => x[3]).length;
+  const pend = D.pending;
+  const row = (go, ic, l, extra = '', cls = '') => `<button class="tk-row" data-tkgo="${go}"><span class="tk-ri ${cls}">${icon(ic)}</span><span class="tk-rl">${l}${extra ? `<small>${extra}</small>` : ''}</span>${icon('chevron')}</button>`;
+  const actions = (o.transitions || []).filter((s) => s !== 'aberta' && !(s === 'agendada' && o.status !== 'a_caminho') && !(s === 'agendada' && o.status === 'aberta')).map((s) => {
+    const l = s === 'a_caminho' ? 'A caminho' : s === 'em_execucao' ? (o.status === 'pausada' ? 'Retomar' : 'Check-in') : s === 'pausada' ? 'Pausar' : s === 'concluida' ? 'Check-out' : s === 'agendada' ? 'Cancelar deslocamento' : s;
+    const ic = s === 'a_caminho' ? 'truck' : s === 'pausada' ? 'pause' : s === 'concluida' ? 'check' : 'play';
+    return `<button class="tk-act ${s === 'concluida' || s === 'em_execucao' ? 'p' : ''}" data-to="${s}">${icon(ic)}${l}</button>`;
+  }).join('');
+  v.innerHTML = `<div class="tk-top">${tkBackBtn(back)}${tkMenuBtn()}</div>
+    <div class="tk-ohead"><div><h1>${esc(cust)}</h1><span class="tk-sub">Tarefa #${o.id}</span>
+      <div class="tk-tags"><span class="tk-st ${tkStatusCls(o.status)}">${esc(o.status_label.toLowerCase())}</span>${pend.length && o.status !== 'concluida' ? `<span class="tk-tag warn">${pend.length} pendência${pend.length > 1 ? 's' : ''}</span>` : ''}</div></div>
+      <div class="tk-oacts">${phone ? `<a class="tk-ib b" href="tel:${phone}" aria-label="Ligar">${icon('phone')}</a>` : ''}<a class="tk-ib b" href="#/ordem/${o.id}" id="tkedit" aria-label="Editar na versão completa">${icon('pencil')}</a><button class="tk-ib b" id="tkshare" aria-label="Compartilhar">${icon('share')}</button></div></div>
+    <div class="tk-tabs">${[['detalhes', 'Detalhes'], ['relatorio', 'Relatório'], ['pendencias', 'Pendências']].map(([k, l]) => `<button data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}${k === 'pendencias' && pend.length ? ` (${pend.length})` : ''}</button>`).join('')}</div>
+    <div data-pane="detalhes" ${tab === 'detalhes' ? '' : 'hidden'}>
+      <div class="tk-card">
+        <div class="tk-line"><span class="tk-ri b">${icon('pin')}</span><span>${addr ? esc(addr) : '<span class="muted">Cliente sem endereço</span>'}</span></div>
+        ${addr ? `<a class="tk-navbtn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}">${icon('nav')}Navegar até o local</a>` : ''}
+        ${o.customer_phone ? `<a class="tk-line" href="tel:${phone}"><span class="tk-ri g">${icon('phone')}</span><span>${esc(o.customer_phone)}</span></a>` : ''}
+        <div class="tk-line"><span class="tk-ri p">${icon('calendar')}</span><span>${esc(tkWhen(o.scheduled_at))}</span></div>
+        <details class="tk-line tk-det"><summary><span class="tk-ri">${icon('info')}</span><span>Orientação</span>${icon('chevron')}</summary><p>${esc(o.description || '—')}</p></details>
+        <div class="tk-line"><span class="tk-ri o">${icon('tag')}</span><span><b>Tipo:</b> ${esc(o.task_type_name || '—')}</span></div>
+        ${o.equipment_name ? `<div class="tk-line"><span class="tk-ri">${icon('gear')}</span><span><b>Equipamento:</b> ${esc(o.equipment_name)}${o.equipment_serial ? ' · ' + esc(o.equipment_serial) : ''}</span></div>` : ''}
+      </div>
+      ${o.task_type_duration ? `<div class="tk-card tk-dur">${icon('clock')}<b>${tkHM(+o.task_type_duration)}</b><span>Tempo para execução</span></div>` : ''}
+      <div class="tk-card tk-rows">
+        ${row(`m/os/${id}/relatorio`, 'quote', 'Relatório de tarefa', '', 'b')}
+        ${row(`m/os/${id}/cliente`, 'user', 'Detalhes do cliente', '', 'p')}
+        ${row(`m/os/${id}/valores`, 'dollar', 'Valores', D.items.rows.length ? `${D.items.rows.length} item(ns) · ${money(D.items.totals.total)}` : '', 'o')}
+        ${row(`m/os/${id}/orcamentos`, 'tag', 'Orçamentos', D.quotes.length ? `${D.quotes.length} orçamento(s)` : '', 'r')}
+      </div></div>
+    <div data-pane="relatorio" ${tab === 'relatorio' ? '' : 'hidden'}>
+      <div class="tk-card"><div class="tk-progl"><strong>Checklist do relatório</strong><b>${doneN} de ${list.length} concluídos</b></div><div class="tk-bar"><i style="width:${Math.round(doneN * 100 / list.length)}%"></i></div>
+        <p class="tk-hint">Complete os itens abaixo antes de assinar e enviar.</p></div>
+      <div class="tk-card tk-rows">${list.map(([k, l, ic, ok, extra, warn]) => `<button class="tk-row" data-tkgo="m/os/${id}/${k}"><span class="tk-chk ${ok ? 'ok' : warn ? 'warn' : ''}">${ok ? icon('check') : ''}</span><span class="tk-ri">${icon(ic)}</span><span class="tk-rl">${l}${extra ? `<small>${extra}</small>` : ''}</span>${icon('chevron')}</button>`).join('')}
+        <button class="tk-row" data-tkgo="m/os/${id}/pausas"><span class="tk-chk ${D.hours.running === 'pause' ? 'warn' : ''}"></span><span class="tk-ri r">${icon('pause')}</span><span class="tk-rl">Pausas${D.hours.pause ? `<small>${fmtDur(D.hours.pause)} em pausa</small>` : ''}</span>${icon('chevron')}</button></div>
+      <div class="tk-card tk-ck">${icon('clock')}<span>Check-in: ${tkActTime(D.hours, 'checkin')}</span><span>·</span><span>Check-out: ${tkActTime(D.hours, 'checkout')}</span></div></div>
+    <div data-pane="pendencias" ${tab === 'pendencias' ? '' : 'hidden'}>
+      ${pend.length && o.status !== 'concluida' ? `<div class="tk-pend"><strong>${icon('warn')} ${pend.length} pendência${pend.length > 1 ? 's' : ''}</strong>${pend.map((p) => `<button class="tk-pitem" data-tkgo="m/os/${id}/${/questionário/i.test(p) ? 'questionarios' : /relato/i.test(p) ? 'relato' : /assin|cpf|nome de quem/i.test(p) ? 'assinar' : /foto/i.test(p) ? 'fotos' : /km/i.test(p) ? 'km' : 'relatorio'}"><span>${esc(p)}</span>${icon('chevron')}</button>`).join('')}</div>`
+        : '<p class="tk-empty">Nenhuma pendência.</p>'}</div>
+    ${actions ? `<div class="tk-actbar">${actions}</div>` : ''}`;
+  tkBindTop(v);
+  v.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-tab]'); if (!t) return;
+    sessionStorage.setItem(tabKey, t.dataset.tab);
+    $$('.tk-tabs button', v).forEach((b) => b.classList.toggle('on', b === t));
+    $$('[data-pane]', v).forEach((p) => (p.hidden = p.dataset.pane !== t.dataset.tab));
+  });
+  $('#tkedit', v).onclick = () => tkMode('off');
+  $('#tkshare', v).onclick = async () => {
+    try { if (navigator.share) await navigator.share({ title: `OS #${o.id}`, url: o.public_url }); else await copyLink(o.public_url, 'Link da OS digital copiado'); } catch (_) {}
+  };
+  $$('[data-to]', v).forEach((b) => (b.onclick = () => busy(b, async () => {
+    const to = b.dataset.to;
+    let reason = null;
+    if (to === 'pausada') { reason = await tkPauseReason(); if (reason === null) return; }
+    if (to === 'concluida' && pend.length) { sessionStorage.setItem(tabKey, 'pendencias'); route(); throw new Error('Resolva as pendências antes do check-out'); }
+    await api('service_order_status', { body: { id: o.id, status: to, reason } });
+    toast(to === 'concluida' ? 'Check-out feito: ordem concluída' : to === 'em_execucao' ? (o.status === 'pausada' ? 'Atendimento retomado' : 'Check-in feito') : to === 'pausada' ? 'Atendimento pausado' : 'Status atualizado');
+    route();
+  }).catch(fail)));
+}
+
+/** Motivo da pausa (lista do controle de horas ou texto livre). */
+function tkPauseReason() {
+  return new Promise((resolve) => {
+    let done = false;
+    const opts = ['Almoço', 'Fim do expediente', 'Aguardando peça', 'Aguardando cliente', 'Deslocamento', 'Outro'];
+    const m = modal({ title: 'Pausar atendimento', body: `<div class="tk-reasons">${opts.map((x) => `<button type="button" data-r="${esc(x)}">${esc(x)}</button>`).join('')}</div>` });
+    m.el.addEventListener('click', (e) => { const b = e.target.closest('[data-r]'); if (b) { done = true; m.close(); resolve(b.dataset.r); } });
+    const obs = new MutationObserver(() => { if (!document.body.contains(m.el)) { obs.disconnect(); if (!done) resolve(null); } });
+    obs.observe(document.body, { childList: true, subtree: true });
+  });
+}
+
+/** Páginas de dentro da OS: fotos, questionários, quilometragem, relato, assinatura, pausas, cliente, valores e orçamentos. */
+async function tkOrderPage(v, D, page, sub) {
+  const o = D.order, id = o.id;
+  const top = (title, saveBtn = false) => `<div class="tk-top">${tkBackBtn(page === 'questionario' ? `m/os/${id}/questionarios` : page === 'relatorio' ? `m/os/${id}` : `m/os/${id}`)}${saveBtn ? '<button class="tk-save" id="tksave">Salvar</button>' : tkMenuBtn()}</div>${title ? `<h1 class="tk-ptitle">${title}</h1>` : ''}`;
+  tkBindTop(v);
+  const report = (extra) => api('so_report_save', { body: { id, report: o.report || '', km: o.km != null ? String(o.km).replace('.', ',') : '', signer_name: o.signer_name || '', signer_doc: o.signer_doc || '', ...extra } });
+  if (page === 'relatorio') { sessionStorage.setItem('tkTab:' + id, 'relatorio'); return go(`m/os/${id}`); }
+  if (page === 'fotos') {
+    v.innerHTML = `${top('Fotos')}<button class="tk-btn p sm" id="tkphadd">${icon('camera')}Adicionar fotos</button>
+      <div class="tk-photos">${D.photos.length ? D.photos.map((p) => `<figure><img src="${esc(p.image)}" alt="Foto"><button class="tk-ib" data-phdel="${p.id}" aria-label="Remover foto">${icon('trash')}</button></figure>`).join('') : `<div class="tk-empty tk-noph">${icon('image')}<span>Nenhuma foto adicionada</span></div>`}</div>`;
+    $('#tkphadd', v).onclick = (e) => busy(e.currentTarget, async () => {
+      const imgs = await pickImages(true); if (!imgs.length) return;
+      for (const img of imgs) await api('so_photo_add', { body: { id, image: img } });
+      toast(imgs.length > 1 ? `${imgs.length} fotos adicionadas` : 'Foto adicionada'); route();
+    }).catch(fail);
+    v.addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-phdel]'); if (!b) return;
+      if (!(await confirmBox('Remover esta foto?', { ok: 'Remover', danger: true }))) return;
+      try { await api('so_photo_delete', { body: { photo_id: +b.dataset.phdel } }); route(); } catch (err) { fail(err); }
+    });
+    return;
+  }
+  if (page === 'km') {
+    v.innerHTML = `${top('Quilometragem', true)}<div class="tk-card"><label class="tk-field">Km rodado<input id="tkkm" data-num="dec" inputmode="decimal" value="${o.km != null ? esc(String(o.km).replace('.', ',')) : ''}" placeholder="0"></label></div>`;
+    $('#tkkm', v).oninput = () => (v._dirty = true);
+    $('#tksave', v).onclick = (e) => busy(e.currentTarget, async () => { await report({ km: $('#tkkm', v).value }); v._dirty = false; toast('Quilometragem salva'); go(`m/os/${id}`); }).catch(fail);
+    return;
+  }
+  if (page === 'relato') {
+    v.innerHTML = `${top('Relato', true)}<div class="tk-card"><label class="tk-field">O que foi feito<textarea id="tkrel" rows="10" maxlength="10000" placeholder="Descreva o atendimento">${esc(o.report || '')}</textarea></label></div>`;
+    $('#tkrel', v).oninput = () => (v._dirty = true);
+    $('#tksave', v).onclick = (e) => busy(e.currentTarget, async () => { await report({ report: $('#tkrel', v).value }); v._dirty = false; toast('Relato salvo'); go(`m/os/${id}`); }).catch(fail);
+    return;
+  }
+  if (page === 'assinar') {
+    let sig = o.signature || '';
+    const paint = () => { $('#tksig', v).innerHTML = sig ? `<img src="${esc(sig)}" alt="Assinatura">` : `<span class="muted">${icon('sign')} Toque para colher a assinatura</span>`; };
+    const pend = D.pending.filter((p) => !/assinatura|nome de quem|CPF\/CNPJ de quem/i.test(p));
+    v.innerHTML = `${top('Assinar e enviar', true)}
+      ${pend.length ? `<div class="tk-pend"><strong>${icon('warn')} Antes de enviar falta:</strong>${pend.map((p) => `<span class="tk-pline">${esc(p)}</span>`).join('')}</div>` : ''}
+      <div class="tk-card"><button class="tk-sigbox" id="tksig"></button>${sig ? '<button class="tk-link" id="tksigdel">Remover assinatura</button>' : ''}
+        <label class="tk-field">Nome de quem assinou<input id="tksn" maxlength="120" value="${esc(o.signer_name || '')}"></label>
+        <label class="tk-field">CPF/CNPJ de quem assinou<input id="tksd" data-mask="doc" inputmode="numeric" value="${esc(o.signer_doc ? docFmt(o.signer_doc) : '')}"></label></div>
+      <div class="tk-card"><label class="tk-field">Enviar a OS digital para o e-mail<input id="tkmail" type="email" value="${esc(o.customer_email || '')}" placeholder="email@cliente.com"></label>
+        <button class="tk-btn" id="tksend">${icon('mail')}Enviar por e-mail</button>
+        <a class="tk-btn" target="_blank" rel="noopener" href="https://wa.me/${String(o.customer_phone || '').replace(/\D/g, '').length >= 10 ? '55' + String(o.customer_phone).replace(/\D/g, '') : ''}?text=${encodeURIComponent(`Ordem de serviço #${o.id}: ${o.public_url}`)}">${icon('whats')}Enviar pelo WhatsApp</a></div>`;
+    paint();
+    $('#tksig', v).onclick = async () => { const s = await signaturePad('Assinatura do cliente'); if (s) { sig = s; v._dirty = true; paint(); } };
+    const sd = $('#tksigdel', v); if (sd) sd.onclick = () => { sig = ''; v._dirty = true; paint(); sd.remove(); };
+    v.addEventListener('input', () => (v._dirty = true));
+    $('#tksave', v).onclick = (e) => busy(e.currentTarget, async () => { await report({ signature: sig, signer_name: $('#tksn', v).value, signer_doc: $('#tksd', v).value }); v._dirty = false; toast('Assinatura salva'); go(`m/os/${id}`); }).catch(fail);
+    $('#tksend', v).onclick = (e) => busy(e.currentTarget, async () => {
+      if (v._dirty) { await report({ signature: sig, signer_name: $('#tksn', v).value, signer_doc: $('#tksd', v).value }); v._dirty = false; }
+      await api('so_send', { body: { id, kind: 'os', to: $('#tkmail', v).value } }); toast('OS enviada por e-mail');
+    }).catch(fail);
+    return;
+  }
+  if (page === 'pausas') {
+    const h = D.hours;
+    const rows = h.rows || [];
+    v.innerHTML = `${top('Pausas')}<div class="tk-card tk-tot"><div><span>Deslocamento</span><b>${tkHms(h.travel)}</b></div><div><span>Pausa</span><b>${tkHms(h.pause)}</b></div><div><span>Trabalho</span><b>${tkHms(h.work)}</b></div></div>
+      <div class="tk-card tk-acts">${rows.length ? rows.map((r) => `<div class="tk-arow"><span class="tk-ri ${r.kind === 'pausa_inicio' || r.kind === 'pausa_fim' ? 'r' : 'b'}">${icon(r.kind === 'pausa_inicio' ? 'pause' : r.kind === 'pausa_fim' || r.kind === 'checkin' ? 'play' : r.kind === 'checkout' ? 'check' : 'truck')}</span>
+        <div><strong>${esc(r.label)}</strong><small>${dt(r.at)}${r.reason ? ' · ' + esc(r.reason) : ''}</small></div></div>`).join('') : '<p class="tk-empty">Nenhuma atividade registrada.</p>'}</div>
+      ${o.status === 'em_execucao' ? `<button class="tk-btn" data-pz="pausada">${icon('pause')}Pausar atendimento</button>` : o.status === 'pausada' ? `<button class="tk-btn p" data-pz="em_execucao">${icon('play')}Retomar atendimento</button>` : ''}`;
+    $$('[data-pz]', v).forEach((b) => (b.onclick = () => busy(b, async () => {
+      let reason = null;
+      if (b.dataset.pz === 'pausada') { reason = await tkPauseReason(); if (reason === null) return; }
+      await api('service_order_status', { body: { id, status: b.dataset.pz, reason } }); toast(b.dataset.pz === 'pausada' ? 'Atendimento pausado' : 'Atendimento retomado'); route();
+    }).catch(fail)));
+    return;
+  }
+  if (page === 'cliente') {
+    const addr = tkAddr(o), phone = String(o.customer_phone || '').replace(/\D/g, '');
+    v.innerHTML = `${top('Detalhes do cliente')}<div class="tk-card">
+      <div class="tk-line"><span class="tk-ri p">${icon('user')}</span><span><b>${esc(o.customer_trade_name || o.customer_name)}</b>${o.customer_trade_name ? `<small>${esc(o.customer_name)}</small>` : ''}</span></div>
+      ${o.customer_document ? `<div class="tk-line"><span class="tk-ri">${icon('id')}</span><span>${esc(docFmt(o.customer_document))}</span></div>` : ''}
+      ${phone ? `<a class="tk-line" href="tel:${phone}"><span class="tk-ri g">${icon('phone')}</span><span>${esc(o.customer_phone)}</span></a>` : ''}
+      ${o.customer_email ? `<a class="tk-line" href="mailto:${esc(o.customer_email)}"><span class="tk-ri b">${icon('mail')}</span><span>${esc(o.customer_email)}</span></a>` : ''}
+      ${addr ? `<div class="tk-line"><span class="tk-ri b">${icon('pin')}</span><span>${esc(addr)}</span></div><a class="tk-navbtn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}">${icon('nav')}Navegar até o local</a>` : ''}
+    </div>`;
+    return;
+  }
+  if (page === 'valores') {
+    const it = D.items;
+    v.innerHTML = `${top('Valores')}<div class="tk-card tk-acts">${it.rows.length ? it.rows.map((x) => `<div class="tk-arow"><div><strong>${esc(x.description || '')}</strong><small>${esc(D.kinds[x.kind] || x.kind)} · ${qty(x.quantity)} × ${money(x.unit_price)}</small></div><b>${money(x.total)}</b></div>`).join('')
+      + `<div class="tk-arow tot"><strong>Total</strong><b>${money(it.totals.total)}</b></div>` : '<p class="tk-empty">Nenhum valor lançado.</p>'}</div>
+      <p class="tk-hint">Para lançar produtos, serviços e custos, use a versão completa (lápis no topo da tarefa).</p>`;
+    return;
+  }
+  if (page === 'orcamentos') {
+    v.innerHTML = `${top('Orçamentos')}<div class="tk-card tk-acts">${D.quotes.length ? D.quotes.map((q) => `<a class="tk-arow" href="#/orcamento/${q.id}"><div><strong>Orçamento #${q.id}</strong><small>${esc(q.relation || '')}${q.status_label ? ' · ' + esc(q.status_label) : ''}</small></div><b>${money(q.total)}</b></a>`).join('') : '<p class="tk-empty">Nenhum orçamento ligado a esta tarefa.</p>'}</div>`;
+    return;
+  }
+  if (page === 'questionarios') return tkQuestionnaires(v, D, top);
+  if (page === 'questionario') return tkAnswer(v, D, +sub, top);
+  v.innerHTML = `${top('')}<p class="tk-empty">Página não encontrada.</p>`;
+}
+
+/** Lista dos questionários da tarefa, com filtro e progresso de cada um. */
+function tkQuestionnaires(v, D, top) {
+  const id = D.order.id;
+  const f = sessionStorage.getItem('tkQf') || 'todos';
+  const info = D.questionnaires.map((q) => {
+    const vis = qVisible(q.questions, q.answers || {});
+    const shown = q.questions.filter((x) => vis[x.id]);
+    const filled = shown.filter((x) => qFilled(x, (q.answers || {})[x.id])).length;
+    const st = !filled ? 'nao' : q.missing.length || (+q.allow_equipment && +q.equipment_required && !q.answer_equipment_id) ? 'and' : 'fin';
+    return { q, filled, total: shown.length, st };
+  });
+  const cnt = { todos: info.length, pendentes: info.filter((x) => x.st !== 'fin').length, andamento: info.filter((x) => x.st === 'and').length, finalizados: info.filter((x) => x.st === 'fin').length };
+  const shown = info.filter((x) => f === 'todos' || (f === 'pendentes' ? x.st !== 'fin' : f === 'andamento' ? x.st === 'and' : x.st === 'fin'));
+  const lab = { nao: 'Não iniciado', and: 'Em andamento', fin: 'Finalizado' };
+  v.innerHTML = `${top('Questionários')}
+    <div class="tk-chips dark">${[['todos', 'Todos'], ['pendentes', 'Pendentes'], ['andamento', 'Em andamento'], ['finalizados', 'Finalizados']].map(([k, l]) => `<button data-qf="${k}" class="${f === k ? 'on' : ''}">${l} <i>${cnt[k]}</i></button>`).join('')}</div>
+    <div class="tk-list">${shown.length ? shown.map(({ q, filled, total, st }) => `<button class="tk-qcard" data-tkgo="m/os/${id}/questionario/${q.id}">
+      <div class="tk-qh"><span class="tk-ri p">${icon('quote')}</span><div><strong>${esc(q.name)}</strong><small>${st === 'fin' ? 1 : 0} de 1 finalizado</small></div>${icon('chevron')}</div>
+      <div class="tk-qe"><span>${icon('gear')} ${q.answer_equipment_id ? esc((D.equipments.find((e) => +e.id === +q.answer_equipment_id) || {}).name || 'Equipamento') : 'Sem equipamento vinculado'}</span>
+        ${q.answered && q.answered_at ? `<small>${esc(tkWhen(q.answered_at))}</small>` : ''}
+        <div class="tk-qp"><div class="tk-bar"><i style="width:${total ? Math.round(filled * 100 / total) : 0}%"></i></div><b>${total ? Math.round(filled * 100 / total) : 0}%</b><span class="tk-qs ${st}">• ${lab[st]}</span></div></div></button>`).join('')
+      : `<p class="tk-empty">${D.questionnaires.length ? 'Nenhum questionário neste filtro.' : 'Esta tarefa não tem questionários.'}</p>`}</div>`;
+  v.addEventListener('click', (e) => { const b = e.target.closest('[data-qf]'); if (b) { sessionStorage.setItem('tkQf', b.dataset.qf); route(); } });
+}
+
+/** Responder um questionário: Todas (lista), Foco (uma pergunta por vez) e Sem resposta. */
+function tkAnswer(v, D, qid, top) {
+  const id = D.order.id;
+  const q = D.questionnaires.find((x) => +x.id === qid);
+  if (!q) { v.innerHTML = `${top('')}<p class="tk-empty">Questionário não encontrado.</p>`; return; }
+  const ans = JSON.parse(JSON.stringify(q.answers || {}));
+  let eqId = q.answer_equipment_id || '';
+  let mode = 'todas', idx = 0;
+  const fieldHtml = (x) => {
+    const val = ans[x.id], qid2 = esc(x.id);
+    if (x.type === 'itens') return `<div class="tk-opts">${x.options.map((o) => `<label class="tk-opt ${val === o ? 'on' : ''}"><input type="radio" name="r_${qid2}" data-q="${qid2}" value="${esc(o)}" ${val === o ? 'checked' : ''}><span>${esc(o)}</span></label>`).join('')}</div>`;
+    if (x.type === 'multipla') return `<div class="tk-opts">${x.options.map((o) => `<label class="tk-opt sq ${(val || []).includes(o) ? 'on' : ''}"><input type="checkbox" data-q="${qid2}" value="${esc(o)}" ${(val || []).includes(o) ? 'checked' : ''}><span>${esc(o)}</span></label>`).join('')}</div>`;
+    if (x.type === 'check') return `<label class="tk-opt sq ${val === 'Sim' ? 'on' : ''}"><input type="checkbox" data-q="${qid2}" ${val === 'Sim' ? 'checked' : ''}><span>Sim</span></label>`;
+    if (x.type === 'foto') return `<div class="tk-qph">${(val || []).map((p, i) => `<figure><img src="${esc(p.src)}" alt="Foto"><button type="button" class="tk-ib" data-phdel="${qid2}" data-i="${i}" aria-label="Remover">${icon('x')}</button></figure>`).join('')}<button type="button" class="tk-phadd" data-phadd="${qid2}">${icon('camera')}<span>Adicionar</span></button></div>`;
+    if (x.type === 'assinatura') return `<button type="button" class="tk-sigbox sm" data-sig="${qid2}">${val ? `<img src="${esc(val)}" alt="Assinatura">` : `<span class="muted">${icon('sign')} Toque para assinar</span>`}</button>`;
+    if (x.type === 'texto') return `<input data-q="${qid2}" maxlength="1000" placeholder="Resposta" value="${esc(val || '')}">`;
+    if (x.type === 'area') return `<textarea data-q="${qid2}" rows="4" maxlength="5000" placeholder="Resposta">${esc(val || '')}</textarea>`;
+    return qFieldHtml(x, val);
+  };
+  const visibleQs = () => { const vis = qVisible(q.questions, ans); return q.questions.filter((x) => vis[x.id]); };
+  const qCard = (x, n) => `<div class="tk-qq ${x.required && !qFilled(x, ans[x.id]) ? 'req' : qFilled(x, ans[x.id]) ? 'ok' : ''}" data-qid="${esc(x.id)}">
+    <div class="tk-ql">${n}. ${esc(x.label)}${x.required ? '*' : ''}</div>${x.description ? `<small class="tk-qd">${esc(x.description)}</small>` : ''}${fieldHtml(x)}</div>`;
+  const paint = () => {
+    const vq = visibleQs();
+    const filled = vq.filter((x) => qFilled(x, ans[x.id])).length;
+    const num = (x) => q.questions.indexOf(x) + 1;
+    let body = '';
+    if (mode === 'todas') body = vq.map((x) => qCard(x, num(x))).join('');
+    if (mode === 'sem') { const list = vq.filter((x) => !qFilled(x, ans[x.id])); body = list.length ? list.map((x) => qCard(x, num(x))).join('') : '<p class="tk-empty">Todas as perguntas foram respondidas.</p>'; }
+    if (mode === 'foco') {
+      idx = Math.max(0, Math.min(idx, vq.length - 1));
+      const x = vq[idx];
+      body = x ? `<div class="tk-fhead">PERGUNTA ${idx + 1} DE ${vq.length}</div><div class="tk-bar thin"><i style="width:${Math.round((idx + 1) * 100 / vq.length)}%"></i></div>${qCard(x, num(x))}
+        <div class="tk-fnav"><button class="tk-btn" data-fo="-1" ${idx === 0 ? 'disabled' : ''}>‹ Anterior</button><button class="tk-btn p" data-fo="1">${idx === vq.length - 1 ? 'Concluir' : 'Próxima ›'}</button></div>` : '<p class="tk-empty">Nenhuma pergunta.</p>';
+    }
+    $('#tkqbody', v).innerHTML = body;
+    $('#tkqcount', v).textContent = `${filled} de ${vq.length}`;
+    $('#tkqbar', v).style.width = `${vq.length ? Math.round(filled * 100 / vq.length) : 0}%`;
+    $$('.tk-qtabs button', v).forEach((b) => b.classList.toggle('on', b.dataset.m === mode));
+  };
+  v.innerHTML = `${top(esc(q.name), true)}
+    <div class="tk-qprog"><div class="tk-bar"><i id="tkqbar"></i></div><span id="tkqcount"></span></div>
+    ${+q.allow_equipment ? `<label class="tk-eq">${icon('gear')}<select id="tkeq"><option value="">${+q.equipment_required ? 'Escolha o equipamento *' : 'Escolha o equipamento'}</option>${D.equipments.map((e) => `<option value="${e.id}" ${+eqId === +e.id ? 'selected' : ''}>${esc(e.name)}${e.serial ? ' · ' + esc(e.serial) : ''}</option>`).join('')}</select></label>` : ''}
+    <div class="tk-tabs tk-qtabs"><button data-m="todas">Todas</button><button data-m="foco">Foco</button><button data-m="sem">Sem resposta</button></div>
+    <div id="tkqbody"></div>`;
+  const read = (el) => {
+    const x = q.questions.find((y) => y.id === el.dataset.q); if (!x) return;
+    if (x.type === 'multipla') ans[x.id] = $$(`[data-q="${CSS.escape(x.id)}"]:checked`, v).map((c) => c.value);
+    else if (x.type === 'check') ans[x.id] = el.checked ? 'Sim' : '';
+    else ans[x.id] = el.value;
+    v._dirty = true;
+  };
+  // Itens, múltipla e check mudam a visibilidade e o destaque: redesenha; campos de texto só atualizam o progresso
+  v.addEventListener('change', (e) => {
+    if (e.target.id === 'tkeq') { eqId = e.target.value; v._dirty = true; return; }
+    if (!e.target.dataset.q) return;
+    read(e.target);
+    // Itens/múltipla/check (e campos de data, hora e número ao sair) podem mostrar ou esconder condicionais
+    const keep = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.q : null;
+    paint();
+    if (keep && e.target.type !== 'radio' && e.target.type !== 'checkbox') { const el = $(`[data-q="${CSS.escape(keep)}"]`, v); if (el && el !== e.target) el.focus(); }
+  });
+  v.addEventListener('input', (e) => {
+    if (!e.target.dataset.q || e.target.type === 'radio' || e.target.type === 'checkbox') return;
+    read(e.target);
+    const vq = visibleQs(), filled = vq.filter((x) => qFilled(x, ans[x.id])).length;
+    $('#tkqcount', v).textContent = `${filled} de ${vq.length}`;
+    $('#tkqbar', v).style.width = `${vq.length ? Math.round(filled * 100 / vq.length) : 0}%`;
+    const card = e.target.closest('.tk-qq'); const x = q.questions.find((y) => y.id === e.target.dataset.q);
+    if (card && x) { card.classList.toggle('req', !!x.required && !qFilled(x, ans[x.id])); card.classList.toggle('ok', qFilled(x, ans[x.id])); }
+  });
+  v.addEventListener('click', async (e) => {
+    const t = e.target.closest('[data-m]'); if (t) { mode = t.dataset.m; if (mode === 'foco') idx = 0; paint(); window.scrollTo(0, 0); return; }
+    const fo = e.target.closest('[data-fo]');
+    if (fo) { const vq = visibleQs(); if (+fo.dataset.fo > 0 && idx >= vq.length - 1) { $('#tksave', v).click(); return; } idx += +fo.dataset.fo; paint(); return; }
+    const add = e.target.closest('[data-phadd]'), del = e.target.closest('[data-phdel]'), sg = e.target.closest('[data-sig]');
+    if (add) {
+      const x = q.questions.find((y) => y.id === add.dataset.phadd);
+      const imgs = await pickImages(true); if (!imgs.length) return;
+      const geo = x.geo ? await getGeo() : null;
+      const n = new Date(), at = `${tkYmd(n)} ${n.toTimeString().slice(0, 8)}`;
+      ans[x.id] = [...(ans[x.id] || []), ...imgs.map((src) => ({ src, at, ...(geo || {}) }))];
+      v._dirty = true; paint();
+    }
+    if (del) { ans[del.dataset.phdel].splice(+del.dataset.i, 1); v._dirty = true; paint(); }
+    if (sg) { const s = await signaturePad(q.questions.find((y) => y.id === sg.dataset.sig).label); if (s) { ans[sg.dataset.sig] = s; v._dirty = true; paint(); } }
+  });
+  $('#tksave', v).onclick = (e) => busy(e.currentTarget, async () => {
+    if (+q.allow_equipment && +q.equipment_required && !eqId) throw new Error('Escolha o equipamento');
+    const vis = qVisible(q.questions, ans);
+    const out = {}; for (const x of q.questions) if (vis[x.id] && ans[x.id] !== undefined) out[x.id] = ans[x.id];
+    const r = await api('so_answers_save', { body: { id, questionnaire_id: q.id, answers: out, equipment_id: eqId || null } });
+    v._dirty = false;
+    toast(r.missing && r.missing.length ? `Salvo. Falta responder ${r.missing.length} obrigatória(s)` : 'Questionário salvo');
+    go(`m/os/${id}/questionarios`);
+  }).catch(fail);
+  paint();
+}
+
+const TK_ROUTES = [
+  [/^m$/, tkHome],
+  [/^m\/agenda$/, tkAgenda],
+  [/^m\/os\/(\d+)$/, (v, id) => tkOrder(v, id)],
+  [/^m\/os\/(\d+)\/(questionario)\/(\d+)$/, (v, id, p, s) => tkOrder(v, id, p, s)],
+  [/^m\/os\/(\d+)\/([a-z]+)$/, (v, id, p) => tkOrder(v, id, p)],
+];
+async function tkRoute(path) {
+  if (!can('ordens')) { tkMode('off'); return go('painel'); }
+  tkMode('on');
+  tkShell();
+  $('#tkdrawer').hidden = true;
+  const old = $('#tkv'); const view = old.cloneNode(false); old.replaceWith(view);
+  const token = ++routeToken;
+  view.innerHTML = '<p class="tk-empty">Carregando…</p>';
+  const [re, fn] = TK_ROUTES.find(([r]) => r.test(path)) || [/^m$/, tkHome];
+  try {
+    if (!state.meta) { state.meta = await api('meta'); paintBrand(); }
+    if (token !== routeToken) return;
+    await fn(view, ...(path.match(re) || []).slice(1));
+  } catch (e) {
+    if (token === routeToken) view.innerHTML = `<div class="tk-top">${tkMenuBtn()}</div><div class="alert err">${esc(e.message)}</div>`;
+    tkBindTop(view);
+  }
+  window.scrollTo(0, 0);
+}
+
 // ============ Início ============
 applyTheme();
 window.addEventListener('hashchange', route);
 (async () => {
   try { await loadMe(); } catch (e) { $('#app').innerHTML = `<div class="boot">${esc(e.message)}</div>`; return; }
-  if (state.me) renderShell();
+  // No celular, quem atende ordens entra direto no app do técnico (a não ser que tenha escolhido a versão completa)
+  const h0 = location.hash.replace(/^#\/?/, '');
+  if (state.me && TK_MOBILE() && tkMode() !== 'off' && can('ordens') && (h0 === '' || h0 === 'painel')) location.replace('#/m');
+  else if (state.me) renderShell();
   route();
 })();
