@@ -480,8 +480,64 @@ class DB
                 notes VARCHAR(500) NULL,
                 user_id $fk NULL,
                 finished_at $dt NULL,
+                started_at $dt NULL,
+                report TEXT NULL,
+                signature $big NULL,
+                signer_name VARCHAR(120) NULL,
+                signer_doc VARCHAR(20) NULL,
+                km DECIMAL(10,1) NULL,
+                public_token VARCHAR(32) NULL,
+                survey_rating INT NULL,
+                survey_comment TEXT NULL,
+                survey_at $dt NULL,
                 created_at $dt NOT NULL,
                 updated_at $dt NOT NULL
+            )$end",
+            "CREATE TABLE IF NOT EXISTS so_answers (
+                id $pk,
+                order_id $fk NOT NULL,
+                questionnaire_id $fk NOT NULL,
+                equipment_id $fk NULL,
+                answers $big NOT NULL,
+                user_id $fk NULL,
+                updated_at $dt NOT NULL
+            )$end",
+            "CREATE TABLE IF NOT EXISTS so_photos (
+                id $pk,
+                order_id $fk NOT NULL,
+                image $big NOT NULL,
+                caption VARCHAR(200) NULL,
+                user_id $fk NULL,
+                created_at $dt NOT NULL
+            )$end",
+            "CREATE TABLE IF NOT EXISTS so_items (
+                id $pk,
+                order_id $fk NOT NULL,
+                kind VARCHAR(10) NOT NULL,
+                product_id $fk NULL,
+                description VARCHAR(200) NOT NULL,
+                quantity DECIMAL(12,3) NOT NULL DEFAULT 1,
+                unit_price DECIMAL(12,2) NOT NULL DEFAULT 0,
+                user_id $fk NULL,
+                created_at $dt NOT NULL
+            )$end",
+            "CREATE TABLE IF NOT EXISTS so_events (
+                id $pk,
+                order_id $fk NOT NULL,
+                from_status VARCHAR(20) NULL,
+                to_status VARCHAR(20) NOT NULL,
+                user_id $fk NULL,
+                created_at $dt NOT NULL
+            )$end",
+            "CREATE TABLE IF NOT EXISTS so_sends (
+                id $pk,
+                order_id $fk NOT NULL,
+                kind VARCHAR(12) NOT NULL,
+                recipient VARCHAR(200) NOT NULL,
+                ok INT NOT NULL DEFAULT 1,
+                error VARCHAR(300) NULL,
+                user_id $fk NULL,
+                created_at $dt NOT NULL
             )$end",
             "CREATE TABLE IF NOT EXISTS purchase_orders (
                 id $pk,
@@ -589,6 +645,12 @@ class DB
             "CREATE INDEX idx_so_status ON service_orders (status)",
             "CREATE INDEX idx_so_customer ON service_orders (customer_id)",
             "CREATE INDEX idx_so_technician ON service_orders (technician_id)",
+            "CREATE INDEX idx_so_token ON service_orders (public_token)",
+            "CREATE INDEX idx_soa_order ON so_answers (order_id)",
+            "CREATE INDEX idx_sop_order ON so_photos (order_id)",
+            "CREATE INDEX idx_soi_order ON so_items (order_id)",
+            "CREATE INDEX idx_soe_order ON so_events (order_id)",
+            "CREATE INDEX idx_sos_order ON so_sends (order_id)",
         ];
     }
 
@@ -706,6 +768,22 @@ class DB
         }
         // Tipos de tarefa ainda não criados (atualização ou instalação nova): cria os padrões e converte os checklists antigos
         if (!(int)self::val('SELECT COUNT(*) FROM task_types')) TaskTypes::importLegacy();
+        // v1.8.0: execução da OS (relato, assinatura, km, link público, pesquisa) e tabelas de respostas, fotos, itens, histórico e envios
+        try {
+            self::pdo()->query('SELECT public_token FROM service_orders LIMIT 1');
+        } catch (PDOException $e) {
+            $bigc = self::$driver === 'mysql' ? 'MEDIUMTEXT' : 'TEXT';
+            $dtc = self::$driver === 'mysql' ? 'DATETIME' : 'TEXT';
+            foreach (["started_at $dtc NULL", 'report TEXT NULL', "signature $bigc NULL", 'signer_name VARCHAR(120) NULL', 'signer_doc VARCHAR(20) NULL',
+                      'km DECIMAL(10,1) NULL', 'public_token VARCHAR(32) NULL', 'survey_rating INT NULL', 'survey_comment TEXT NULL', "survey_at $dtc NULL"] as $col) {
+                try { self::pdo()->exec("ALTER TABLE service_orders ADD COLUMN $col"); } catch (PDOException $e2) { /* já existe */ }
+            }
+        }
+        try {
+            self::pdo()->query('SELECT id FROM so_sends LIMIT 1');
+        } catch (PDOException $e) {
+            self::migrate();
+        }
         // v1.8.5: telefone dos usuários (aparece como contato do responsável no orçamento)
         try {
             self::pdo()->query('SELECT phone FROM users LIMIT 1');

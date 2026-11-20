@@ -128,7 +128,7 @@ class ServiceOrders
 
     public static function get(int $id): array
     {
-        $o = DB::one('SELECT o.*, c.name customer_name, c.trade_name customer_trade_name, c.phone customer_phone,
+        $o = DB::one('SELECT o.*, c.name customer_name, c.trade_name customer_trade_name, c.phone customer_phone, c.email customer_email, c.document customer_document,
                 e.name equipment_name, e.brand equipment_brand, e.model equipment_model, e.serial equipment_serial,
                 t.name technician_name, u.name user_name, q.id quote_ref, tt.name task_type_name
             FROM service_orders o
@@ -245,13 +245,16 @@ class ServiceOrders
             if ($old['status'] === 'aberta' && $scheduled) $data['status'] = 'agendada';
             if ($old['status'] === 'agendada' && !$scheduled) $data['status'] = 'aberta';
             DB::update('service_orders', $id, $data);
+            if (isset($data['status'])) OrderExec::logEvent($id, $old['status'], $data['status'], $userId);
             return $id;
         }
-        $data += ['status' => $scheduled ? 'agendada' : 'aberta', 'user_id' => $userId, 'created_at' => now()];
-        return DB::insert('service_orders', $data);
+        $data += ['status' => $scheduled ? 'agendada' : 'aberta', 'user_id' => $userId, 'public_token' => bin2hex(random_bytes(16)), 'created_at' => now()];
+        $newId = DB::insert('service_orders', $data);
+        OrderExec::logEvent($newId, null, $data['status'], $userId);
+        return $newId;
     }
 
-    public static function setStatus(int $id, string $to): void
+    public static function setStatus(int $id, string $to, int $userId = 0): void
     {
         $o = self::get($id);
         if (!isset(self::STATUSES[$to])) throw new AppError('Status inválido');
@@ -259,9 +262,16 @@ class ServiceOrders
         if (!in_array($to, self::TRANSITIONS[$o['status']] ?? [], true)) {
             throw new AppError('Não é possível mudar de "' . $o['status_label'] . '" para "' . self::label($to) . '"');
         }
+        // Concluir exige as obrigatoriedades do tipo de tarefa e as perguntas obrigatórias respondidas
+        if ($to === 'concluida' && ($pend = OrderExec::pending($o))) {
+            throw new AppError('Para concluir falta: ' . implode('; ', $pend) . '.');
+        }
         $data = ['status' => $to, 'updated_at' => now()];
         if ($to === 'concluida') $data['finished_at'] = now();
+        if ($to === 'em_execucao' && !$o['started_at']) $data['started_at'] = now();
         DB::update('service_orders', $id, $data);
+        OrderExec::logEvent($id, $o['status'], $to, $userId);
+        if ($to === 'concluida') OrderExec::onConcluded($id, $userId);
     }
 
     /**
@@ -348,7 +358,7 @@ class ServiceOrders
      * Reagenda pela agenda (arrastar ou escolher data): só data, horário e técnico.
      * Sem data volta a OS para "aberta". Só ordens abertas ou agendadas.
      */
-    public static function reschedule(int $id, string $when, $technicianId): void
+    public static function reschedule(int $id, string $when, $technicianId, int $userId = 0): void
     {
         $o = self::get($id);
         if (!in_array($o['status'], ['aberta', 'agendada'], true)) {
@@ -369,5 +379,6 @@ class ServiceOrders
         if ($o['status'] === 'aberta' && $sched) $data['status'] = 'agendada';
         if ($o['status'] === 'agendada' && !$sched) $data['status'] = 'aberta';
         DB::update('service_orders', $id, $data);
+        if (isset($data['status'])) OrderExec::logEvent($id, $o['status'], $data['status'], $userId);
     }
 }

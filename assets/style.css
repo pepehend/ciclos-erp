@@ -778,3 +778,32 @@ tr.sel td { background: var(--accent-soft); }
 .ag-dh.today { color: var(--accent); }
 .ag-cell { min-height: 44px; padding: 3px; border-left: 1px solid var(--line); }
 .ag-day.drop, .ag-cell.drop, .ag-track.drop { outline: 2px dashed var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+
+/* Ficha da OS (execução) */
+.badge.red { background: var(--danger-soft); color: var(--danger); }
+.so-tabs { margin-bottom: 14px; }
+.so-tabs .badge { margin-left: 4px; font-size: .7rem; padding: 1px 6px; }
+.so-pend { display: flex; gap: 8px; align-items: center; }
+.so-pend svg { flex: none; }
+.so-pendlist { list-style: none; padding: 0; margin: 0 0 10px; display: grid; gap: 6px; }
+.so-pendlist li { display: flex; gap: 8px; align-items: flex-start; }
+.so-pendlist svg { color: var(--warn); flex: none; margin-top: 2px; }
+.qgrid { display: grid; grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr)); gap: 12px 18px; }
+.qf { display: grid; gap: 6px; align-content: start; padding-bottom: 10px; border-bottom: 1px dashed var(--line); }
+.qf-l { display: grid; gap: 2px; }
+.qmulti { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.qsig { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.qsig img { max-width: 260px; max-height: 110px; background: #fff; border: 1px solid var(--line); border-radius: 6px; }
+.qph, .so-photos { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+.qph figure, .so-photos figure { margin: 0; position: relative; }
+.qph img { width: 110px; height: 110px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
+.so-photos img { width: 150px; height: 150px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); display: block; }
+.so-photos figcaption { display: grid; font-size: .8rem; max-width: 150px; }
+.qph figure .icon-btn, .so-photos figure .icon-btn { position: absolute; top: 4px; right: 4px; background: var(--surface); border-radius: 50%; }
+.qph figure .icon-btn:disabled, .so-photos figure .icon-btn:disabled { display: none; }
+.sigpad { width: 100%; height: auto; border: 1px dashed var(--line); border-radius: 8px; touch-action: none; background: #fff; cursor: crosshair; }
+.so-itgrid { display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 12px; }
+.so-kpis { margin-top: 12px; }
+.stars-v { color: #f5a524; font-size: 1.2rem; }
+.stars-v .off { color: var(--line); }
+@media (max-width: 760px) { .qgrid { grid-template-columns: 1fr; } .so-itgrid { grid-template-columns: 1fr; } }

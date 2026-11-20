@@ -51,6 +51,9 @@ Sistema de estoque, vendas e lucro em PHP 8 + MySQL, feito para hospedagem compa
 - Mudanças de banco: novas colunas/tabelas entram em `DB::schema()` **e** num bloco de `DB::upgrade()` (bancos já instalados se atualizam sozinhos).
 - A importação de notas segue o fluxo: `parseXml`/`parseDanfePdf`/`fetchNfce` → `suggest()` (casa itens via `supplier_map`, código de barras ou nome) → o usuário confere → `confirm()`.
 
+- Execução da OS (`OrderExec`, `app/lib/execution.php`): respostas dos questionários em `so_answers` (JSON por questionário; `normalizeAnswers` valida pelo tipo e descarta perguntas escondidas pela condição; `visibleMap` = `qVisible` no `app.js`), relato/assinatura/km/assinante em `service_orders`, fotos em `so_photos`, itens (produto/serviço/custo, não mexem em estoque) em `so_items`, histórico de status em `so_events` (todo `setStatus`/`save`/`reschedule` grava; `hours()` monta o controle de horas) e envios em `so_sends`. Concluir chama `OrderExec::pending()` (obrigatoriedades do tipo de tarefa + perguntas obrigatórias) e bloqueia se houver pendência; depois `onConcluded` envia OS/pesquisa por e-mail (falha fica registrada e não bloqueia). `os.php` é público pelo `public_token` (OS digital + pesquisa de satisfação, `&pesquisa=1`). E-mail pelo servidor: `Mailer::send` (`mail()`; `Mailer::$transport` nos testes).
+- Ficha da OS (`viewServiceOrderForm`): abas Detalhes, Relato, Questionários, Valores, Pendências, Controle de horas e Envios; cada aba com campos abre travada e libera com "Editar" (`editLock`).
+
 ## Comandos
 - Testes: `php test/run.php` (precisa passar 100%)
 - Servidor local: `php -S 127.0.0.1:8088` e depois abrir `install.php` e escolher SQLite.
