@@ -12,6 +12,13 @@ DirectoryIndex index.php
   </IfModule>
 </FilesMatch>
 
+# Aplicativo: algumas hospedagens (PHP como CGI/FPM) não repassam o header Authorization ao PHP
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTP:Authorization} .
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+</IfModule>
+
 <IfModule mod_headers.c>
   Header always set X-Content-Type-Options "nosniff"
   Header always set X-Frame-Options "SAMEORIGIN"

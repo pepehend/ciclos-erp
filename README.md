@@ -54,6 +54,7 @@ Sistema web de controle de estoque, vendas e lucro, feito para rodar em hospedag
   ```
   Comandos: `listar`, `desativar`, `ativar`, `rebaixar` (administrador vira membro), `promover`, `excluir`, `senha` (gera uma senha nova e mostra na tela) e `email <e-mail> <novo-e-mail>`. O sistema nunca fica sem nenhum administrador ativo. Sem Terminal, dá para fazer pelo phpMyAdmin, tabela `users` (`active` = 0 desativa; `role` = `membro` rebaixa).
 - **Backup** em um clique (arquivo .sql) e **backup automático no Google Drive** (Configurações → Sistema → Backup).
+- **Aplicativo Android e integrações (API por token)**: o aplicativo entra com o e-mail e a senha do usuário (`POST api.php?r=token_login`) e recebe um token de acesso, que vai em todos os pedidos (`Authorization: Bearer <token>`). Ele usa as mesmas rotas, regras e permissões do sistema web (e o mesmo banco). O token fica valendo enquanto o aparelho for usado (expira depois de 60 dias sem uso) e cai ao sair do aplicativo, ao trocar a senha ou quando o usuário é desativado. Em **Minha conta → Aparelhos do aplicativo** você vê os celulares conectados e remove um aparelho perdido. Use HTTPS: o token vale como a senha enquanto estiver ativo.
 
 ## Requisitos da hospedagem
 
