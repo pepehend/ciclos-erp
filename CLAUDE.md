@@ -1,6 +1,6 @@
 # Sistema de Gestão de Serviços: guia para desenvolvimento
 
-Repositório `pepehend/sistema-gestao`. No cPanel, a pasta do clone continua `~/repositories/sistema-gestao`, e o `deploy/auto-deploy.sh` descobre a própria pasta sozinho.
+Repositório `pepehend/ciclos-erp` (antes `pepehend/sistema-gestao`; o GitHub redireciona o nome antigo). No cPanel, a pasta do clone continua `~/repositories/sistema-gestao`, e o `deploy/auto-deploy.sh` descobre a própria pasta sozinho.
 
 Sistema de estoque, vendas e lucro em PHP 8 + MySQL, feito para hospedagem compartilhada (cPanel). Não há Composer nem etapa de build: os arquivos são enviados como estão.
 
@@ -83,7 +83,7 @@ Sistema de estoque, vendas e lucro em PHP 8 + MySQL, feito para hospedagem compa
 - Antes de começar: `git fetch origin && git checkout development && git merge origin/main` (traz o que já foi aprovado).
 - Commite e envie para `development`. Existe sempre **um** pull request `development → main`; se já estiver aberto, os commits novos entram nele (atualize a descrição). Se não houver, abra um novo.
 - O Pedro aprova com **Merge** no GitHub; o Cron do cPanel publica a `main` em até ~15 minutos.
-- **Antes de dizer que um commit entrou num PR aberto, confira** com `gh api repos/pepehend/sistema-gestao/pulls/N --jq .state` (o PR pode ter sido aprovado nesse meio tempo). Se estiver fechado, abra um PR novo; nunca edite a descrição de um PR já fechado.
+- **Antes de dizer que um commit entrou num PR aberto, confira** com `gh api repos/pepehend/ciclos-erp/pulls/N --jq .state` (o PR pode ter sido aprovado nesse meio tempo). Se estiver fechado, abra um PR novo; nunca edite a descrição de um PR já fechado.
 
 ## Versionamento
 - A versão fica em `APP_VERSION` (`app/bootstrap.php`) e aparece no rodapé do menu. Começa em `1.0.0`.

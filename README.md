@@ -112,7 +112,7 @@ bash /opt/ciclos-erp/deploy/debian/install.sh --domain sistema.suaempresa.com.br
 
 ## Atualizações (GitHub + cPanel)
 
-O código fica no repositório privado `pepehend/sistema-gestao`. Toda alteração chega como *pull request*; ao aprovar (**Merge**), ela vai para a branch `main`.
+O código fica no repositório privado `pepehend/ciclos-erp`. Toda alteração chega como *pull request*; ao aprovar (**Merge**), ela vai para a branch `main`.
 
 **Publicação automática** (configurar uma vez): no cPanel → **Cron Jobs** → adicione:
 
