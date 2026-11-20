@@ -1270,7 +1270,17 @@ $qFull = Questionnaires::save(['name' => 'Manutenção compressor', 'show_os' =>
 $qg = Questionnaires::get($qFull);
 ok(count($qg['questions']) === 5 && $qg['questions'][0]['id'] === 'p1' && $qg['questions_count'] === 5, 'questionário guarda as perguntas na ordem');
 ok($qg['questions'][2]['options'] === ['Funcionando', 'Com defeito'], 'opções: vazias e repetidas somem');
-ok($qg['questions'][1]['geo'] === true && $qg['questions'][3]['cond'] === ['question' => 'p3', 'value' => 'Com defeito'], 'foto com localização e condição são guardadas');
+ok($qg['questions'][1]['geo'] === true && $qg['questions'][3]['cond'] === ['question' => 'p3', 'op' => 'igual', 'value' => 'Com defeito'], 'foto com localização e condição (Igual por padrão) são guardadas');
+$cBase = [['label' => 'Situação', 'type' => 'itens', 'options' => "Funcionando\nCom defeito"], ['label' => 'Obs', 'type' => 'texto']];
+throws(fn() => Questionnaires::save(['name' => 'C', 'questions' => [...$cBase, ['label' => 'Depende', 'type' => 'texto', 'cond' => ['question' => 'p2', 'value' => 'x']]]]), 'do tipo Itens', 'condição só aceita pergunta anterior do tipo Itens');
+throws(fn() => Questionnaires::save(['name' => 'C', 'questions' => [...$cBase, ['label' => 'Depende', 'type' => 'texto', 'cond' => ['question' => 'p1', 'value' => 'Quebrado']]]]), 'uma das opções', 'resposta esperada precisa ser uma opção da pergunta');
+throws(fn() => Questionnaires::save(['name' => 'C', 'questions' => [...$cBase, ['label' => 'Depende', 'type' => 'texto', 'cond' => ['question' => 'p1', 'op' => 'maior', 'value' => 'Funcionando']]]]), 'Igual ou Diferente', 'condição só Igual ou Diferente');
+$qDif = Questionnaires::get(Questionnaires::save(['name' => 'C', 'questions' => [...$cBase, ['label' => 'Por quê?', 'type' => 'texto', 'cond' => ['question' => 'p1', 'op' => 'diferente', 'value' => 'Funcionando']],
+    ['label' => 'Detalhe', 'type' => 'texto', 'cond' => ['question' => 'p1', 'op' => 'igual', 'value' => 'Com defeito']]]]))['questions'];
+$vm = fn($a) => array_keys(array_filter(OrderExec::visibleMap($qDif, $a)));
+ok($vm([]) === ['p1', 'p2'], 'condicional não aparece enquanto a pergunta de origem não foi respondida (Igual e Diferente)');
+ok($vm(['p1' => 'Com defeito']) === ['p1', 'p2', 'p3', 'p4'], 'Diferente de "Funcionando" e Igual a "Com defeito" aparecem');
+ok($vm(['p1' => 'Funcionando']) === ['p1', 'p2'], 'resposta igual à esperada esconde a condicional "Diferente"');
 throws(fn() => Questionnaires::save(['name' => 'Sem perguntas', 'questions' => []]), 'pelo menos uma pergunta', 'questionário exige pergunta');
 throws(fn() => Questionnaires::save(['name' => 'Tipo', 'questions' => [['label' => 'x', 'type' => 'xyz']]]), 'Tipo de resposta inválido', 'tipo de resposta validado');
 throws(fn() => Questionnaires::save(['name' => 'Opções', 'questions' => [['label' => 'Escolha', 'type' => 'multipla', 'options' => '']]]), 'opções', 'pergunta de itens exige opções');

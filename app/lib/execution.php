@@ -71,7 +71,10 @@ class OrderExec
 
     // ---------------- Questionários ----------------
 
-    /** A pergunta aparece? Depende da resposta da pergunta da condição (que também precisa aparecer). */
+    /**
+     * A pergunta aparece? Pergunta condicional (como no Auvo): só depois que a pergunta de "Apresentar quando"
+     * (que também precisa estar aparecendo) foi respondida, e se a resposta for Igual/Diferente da esperada.
+     */
     public static function visibleMap(array $questions, array $ans): array
     {
         $vis = [];
@@ -81,9 +84,9 @@ class OrderExec
                 $pid = $q['cond']['question'];
                 $want = mb_strtolower(trim((string)$q['cond']['value']));
                 $v = $ans[$pid] ?? null;
-                if (empty($vis[$pid])) $ok = false;
-                elseif (is_array($v)) $ok = in_array($want, array_map(fn($x) => mb_strtolower(trim((string)$x)), $v), true);
-                else $ok = mb_strtolower(trim((string)$v)) === $want;
+                $got = is_array($v) ? array_map(fn($x) => mb_strtolower(trim((string)$x)), $v) : (trim((string)$v) === '' ? [] : [mb_strtolower(trim((string)$v))]);
+                if (empty($vis[$pid]) || !$got) $ok = false;
+                else $ok = (($q['cond']['op'] ?? 'igual') === 'diferente') ? !in_array($want, $got, true) : in_array($want, $got, true);
             }
             $vis[$q['id']] = $ok;
         }
