@@ -12,6 +12,7 @@ class Equipments
         $e = DB::one('SELECT e.*, c.name customer_name, c.trade_name customer_trade_name FROM equipments e
             JOIN customers c ON c.id = e.customer_id WHERE e.id = ?', [$id]);
         if (!$e) throw new AppError('Equipamento não encontrado', 404);
+        $e['specs'] = self::specsList($e);
         return $e;
     }
 
@@ -25,8 +26,11 @@ class Equipments
             $w[] = '(LOWER(e.name) LIKE ? OR LOWER(e.brand) LIKE ? OR LOWER(e.model) LIKE ? OR LOWER(e.serial) LIKE ? OR LOWER(c.name) LIKE ?)';
             array_push($p, $like, $like, $like, $like, $like);
         }
-        return DB::all("SELECT e.*, c.name customer_name, c.trade_name customer_trade_name FROM equipments e
+        $rows = DB::all("SELECT e.*, c.name customer_name, c.trade_name customer_trade_name FROM equipments e
             JOIN customers c ON c.id = e.customer_id WHERE " . implode(' AND ', $w) . ' ORDER BY c.name, e.name LIMIT 500', $p);
+        foreach ($rows as &$e) { $e['specs'] = self::specsList($e); }
+        unset($e);
+        return $rows;
     }
 
     public static function save(array $in, ?int $id = null): int
@@ -42,6 +46,10 @@ class Equipments
             'brand' => mb_substr(trim((string)($in['brand'] ?? '')), 0, 80) ?: null,
             'model' => mb_substr(trim((string)($in['model'] ?? '')), 0, 80) ?: null,
             'serial' => mb_substr(trim((string)($in['serial'] ?? '')), 0, 80) ?: null,
+            'category' => mb_substr(trim((string)($in['category'] ?? '')), 0, 80) ?: null,
+            'valid_until' => self::date($in['valid_until'] ?? null, 'Data de validade'),
+            'warranty_until' => self::date($in['warranty_until'] ?? null, 'Garantia'),
+            'specs' => self::specs($in['specs'] ?? []),
             'notes' => mb_substr(trim((string)($in['notes'] ?? '')), 0, 500) ?: null,
             'updated_at' => now(),
         ];
@@ -52,6 +60,39 @@ class Equipments
         }
         $data += ['active' => 1, 'created_at' => now()];
         return DB::insert('equipments', $data);
+    }
+
+    /** Data no formato AAAA-MM-DD (ou vazia). */
+    private static function date($v, string $campo): ?string
+    {
+        $v = trim((string)$v);
+        if ($v === '') return null;
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $v) || !checkdate((int)substr($v, 5, 2), (int)substr($v, 8, 2), (int)substr($v, 0, 4))) {
+            throw new AppError("$campo inválida");
+        }
+        return $v;
+    }
+
+    /** Especificações: lista de {label, value}. Aceita lista ou JSON; descarta linhas vazias. */
+    public static function specs($raw): ?string
+    {
+        if (is_string($raw)) $raw = json_decode($raw, true) ?: [];
+        $out = [];
+        foreach ((array)$raw as $row) {
+            $label = trim((string)(is_array($row) ? ($row['label'] ?? '') : ''));
+            $value = trim((string)(is_array($row) ? ($row['value'] ?? '') : ''));
+            if ($label === '' && $value === '') continue;
+            if ($label === '') throw new AppError('Informe o nome de cada especificação');
+            $out[] = ['label' => mb_substr($label, 0, 80), 'value' => mb_substr($value, 0, 200)];
+            if (count($out) > 50) throw new AppError('Máximo de 50 especificações por equipamento');
+        }
+        return $out ? json_encode($out, JSON_UNESCAPED_UNICODE) : null;
+    }
+
+    /** Converte o campo specs guardado em lista. */
+    public static function specsList(array $e): array
+    {
+        return json_decode((string)($e['specs'] ?? ''), true) ?: [];
     }
 
     public static function setActive(int $id, bool $active): void

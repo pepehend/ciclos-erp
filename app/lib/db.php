@@ -418,6 +418,10 @@ class DB
                 brand VARCHAR(80) NULL,
                 model VARCHAR(80) NULL,
                 serial VARCHAR(80) NULL,
+                category VARCHAR(80) NULL,
+                valid_until VARCHAR(10) NULL,
+                warranty_until VARCHAR(10) NULL,
+                specs $big NULL,
                 notes VARCHAR(500) NULL,
                 active TINYINT NOT NULL DEFAULT 1,
                 created_at $dt NOT NULL,
@@ -647,6 +651,18 @@ class DB
             if ($p) self::update('permission_profiles', (int)$p['id'], ['permissions' => implode(',', array_keys(Auth::PERMS))]);
             // Vendas antigas entram no caixa como recebidas
             foreach (self::all("SELECT id FROM sales WHERE status = 'ok'") as $sl) Finance::fromSale((int)$sl['id']);
+        }
+        // v1.3.0: cadastro de equipamentos (categoria, validade, garantia e especificações)
+        try {
+            self::pdo()->query('SELECT warranty_until FROM equipments LIMIT 1');
+        } catch (PDOException $e) {
+            $big = self::$driver === 'mysql' ? 'MEDIUMTEXT' : 'TEXT';
+            foreach (["ALTER TABLE equipments ADD COLUMN category VARCHAR(80) NULL",
+                "ALTER TABLE equipments ADD COLUMN valid_until VARCHAR(10) NULL",
+                "ALTER TABLE equipments ADD COLUMN warranty_until VARCHAR(10) NULL",
+                "ALTER TABLE equipments ADD COLUMN specs $big NULL"] as $sql) {
+                try { self::pdo()->exec($sql); } catch (PDOException $e2) { /* já existe */ }
+            }
         }
         // v1.8.5: telefone dos usuários (aparece como contato do responsável no orçamento)
         try {
