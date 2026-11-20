@@ -299,8 +299,11 @@ class ServiceOrders
             LEFT JOIN task_types tt ON tt.id = o.task_type_id ";
 
         $next = (new DateTime($to))->modify('+1 day')->format('Y-m-d');
-        $rows = DB::all($select . "WHERE o.scheduled_at >= ? AND o.scheduled_at < ? AND $where ORDER BY o.scheduled_at, o.id",
-            array_merge([$from . ' 00:00:00', $next . ' 00:00:00'], $fp));
+        // Atrasadas: agendadas com horário já passado, de qualquer data (ignora o período)
+        $rows = !empty($f['late'])
+            ? DB::all($select . "WHERE o.status = 'agendada' AND o.scheduled_at < ? AND $where ORDER BY o.scheduled_at, o.id LIMIT 300", array_merge([now()], $fp))
+            : DB::all($select . "WHERE o.scheduled_at >= ? AND o.scheduled_at < ? AND $where ORDER BY o.scheduled_at, o.id",
+                array_merge([$from . ' 00:00:00', $next . ' 00:00:00'], $fp));
         $unscheduled = DB::all($select . "WHERE o.scheduled_at IS NULL AND o.status = 'aberta' AND $where ORDER BY o.id DESC LIMIT 200", $fp);
 
         $today = date('Y-m-d');

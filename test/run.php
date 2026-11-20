@@ -1371,6 +1371,10 @@ ServiceOrders::setStatus($ag4, 'em_execucao');
 throws(fn() => ServiceOrders::reschedule($ag4, '2030-03-20 09:00', null), 'abertas ou agendadas', 'OS em execução não pode ser reagendada');
 throws(fn() => ServiceOrders::reschedule($ag1, '2030-03-20 09:00', 999999), 'Técnico não encontrado', 'técnico inexistente recusado');
 
+$agLate = ServiceOrders::save(['customer_id' => $cf, 'description' => 'Atrasada', 'scheduled_at' => '2020-01-05T08:00'], $uid);
+$lateRows = array_map('intval', array_column(ServiceOrders::agenda(['from' => '2030-03-10', 'to' => '2030-03-10', 'late' => true])['rows'], 'id'));
+ok(in_array($agLate, $lateRows, true) && !in_array($ag1, $lateRows, true), 'filtro "atrasadas" traz agendadas vencidas de qualquer data, sem as futuras');
+
 @unlink($db);
 echo "\n$passes passaram, $fails falharam\n";
 exit($fails ? 1 : 0);

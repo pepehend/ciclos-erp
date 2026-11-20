@@ -566,7 +566,7 @@ try {
         // ---- Ordens de serviço ----
         'GET agenda' => function () {
             Auth::requirePerm('ordens');
-            return ServiceOrders::agenda(['from' => q('from'), 'to' => q('to'), 'tech' => q('tech'), 'task_type_id' => q('task_type_id'), 'status' => q('status'), 'q' => q('q')]);
+            return ServiceOrders::agenda(['from' => q('from'), 'to' => q('to'), 'tech' => q('tech'), 'task_type_id' => q('task_type_id'), 'status' => q('status'), 'q' => q('q'), 'late' => q('late') === '1']);
         },
         'POST agenda_move' => function () {
             Auth::requirePerm('ordens');

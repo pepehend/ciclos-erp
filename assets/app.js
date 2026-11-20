@@ -1265,7 +1265,7 @@ function editLock(root, form, startLocked, after) {
   return apply;
 }
 
-async function productForm(p, onSaved) {
+async function productForm(p, onSaved, { editing = false } = {}) {
   if (p && p.type === 'servico') return serviceForm(p, onSaved);
   const isNew = !p || !p.id;
   p = p || { type: 'produto', unit: 'un' };
@@ -1364,7 +1364,7 @@ async function productForm(p, onSaved) {
   if (f.elements.avg_cost) f.elements.avg_cost.oninput = pricing;
   pricing();
 
-  editLock(m.el, f, !isNew);
+  editLock(m.el, f, !isNew && !editing);
   $('#save', m.el).onclick = (e) => busy(e.target, async () => {
     const d = formData(f);
     d.type = type;
@@ -1436,7 +1436,7 @@ async function viewProduct(v, id) {
       </tbody></table></div>` : '<p class="muted">Nenhuma movimentação ainda.</p>'}</div>`;
   v.addEventListener('click', (e) => { const r = e.target.closest('[data-go]'); if (r) go(r.dataset.go); });
   $('#allmov', v).onclick = (e) => { e.preventDefault(); sessionStorage.setItem('movProduct', JSON.stringify({ id: p.id, name: p.name })); go('estoque'); };
-  if ($('#edit', v)) $('#edit', v).onclick = () => productForm(p, () => route());
+  if ($('#edit', v)) $('#edit', v).onclick = () => productForm(p, () => route(), { editing: true });
   if ($('#mov', v)) $('#mov', v).onclick = () => movementForm(p, () => route());
   if ($('#del', v)) $('#del', v).onclick = async (e) => {
     try { if (await deleteProduct(p)) go(svc ? 'servicos' : 'produtos'); } catch (err) { fail(err); }
@@ -2663,7 +2663,7 @@ const AG_OPEN = ['aberta', 'agendada'];
 
 async function viewAgenda(v) {
   const st = { view: prefGet('agendaView', 'lista'), period: prefGet('agendaPeriod', 'semana'), date: agYmd(new Date()),
-    tech: '', task: '', status: '', q: '', unOpen: true };
+    tech: '', task: '', status: '', q: '', unOpen: true, late: false };
   let data = null, R = null, filled = false;
   const today = () => agYmd(new Date());
 
@@ -2711,6 +2711,7 @@ async function viewAgenda(v) {
     else { d.setDate(1); d.setMonth(d.getMonth() + n); st.date = agYmd(d); }
   };
   const label = () => {
+    if (st.late) return 'OS atrasadas (todas as datas)';
     const eff = R.eff;
     if (eff === 'dia') return `${['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'][agParse(st.date).getDay()]}, ${agFmtDay(st.date)}`;
     if (eff === 'semana') return `${agFmtDay(R.from)} a ${agFmtDay(R.to)}`;
@@ -2718,7 +2719,7 @@ async function viewAgenda(v) {
     return s.charAt(0).toUpperCase() + s.slice(1);
   };
   const tip = (o) => `OS #${o.id}\nStatus: ${o.status_label}\nTipo: ${o.task_type_name || '—'}\nCliente: ${agCust(o)}\nTécnico: ${o.technician_name || '—'}\nDuração: ${agDur(o)} min`;
-  const chip = (o) => `<div class="ag-chip ${o.status}" ${AG_OPEN.includes(o.status) ? 'draggable="true"' : ''} data-id="${o.id}" data-tech="${o.technician_id || ''}" data-hm="${agHm(o.scheduled_at)}" title="${esc(tip(o))}">${o.scheduled_at ? `<b>${agHm(o.scheduled_at)}</b> ` : ''}${esc(agCust(o))}</div>`;
+  const chip = (o, showTech = true) => `<div class="ag-chip ${o.status}" ${AG_OPEN.includes(o.status) ? 'draggable="true"' : ''} data-id="${o.id}" data-tech="${o.technician_id || ''}" data-hm="${agHm(o.scheduled_at)}" title="${esc(tip(o))}">${o.scheduled_at ? `<b>${agHm(o.scheduled_at)}</b> ` : ''}${esc(agCust(o))}${showTech && o.technician_name ? ` – ${esc(o.technician_name)}` : ''}</div>`;
 
   // ---- Reagendar (arrastar ou escolher data)
   const reschedule = async (id, when, tech) => {
@@ -2774,7 +2775,7 @@ async function viewAgenda(v) {
       ${rows.map((o) => `<tr class="click" data-go="${o.id}"><td class="nowrap">#${o.id}</td><td class="nowrap">${o.scheduled_at ? dt(o.scheduled_at) : '—'}</td>
         <td><strong>${esc(agCust(o))}</strong></td><td>${esc(o.equipment_name || '—')}</td><td>${esc(o.task_type_name || '—')}</td>
         <td>${esc(o.technician_name || '—')}</td><td>${soStatusHtml(o.status, data.statuses)}</td></tr>`).join('')}</tbody></table></div>`
-      : '<div class="empty">Nenhuma OS agendada neste período.</div>';
+      : `<div class="empty">${st.late ? 'Nenhuma OS atrasada.' : 'Nenhuma OS agendada neste período.'}</div>`;
   };
   const paintCal = () => {
     const byDay = {};
@@ -2784,7 +2785,7 @@ async function viewAgenda(v) {
     for (let i = 0; i < 42; i++) {
       const day = agAdd(R.from, i), dd = agParse(day), list = byDay[day] || [];
       cells += `<div class="ag-day${dd.getMonth() !== month ? ' out' : ''}${day === now ? ' today' : ''}" data-drop="day" data-day="${day}">
-        <div class="dnum">${dd.getDate()}</div>${list.slice(0, 5).map(chip).join('')}
+        <div class="dnum">${dd.getDate()}</div>${list.slice(0, 5).map((o) => chip(o)).join('')}
         ${list.length > 5 ? `<button type="button" class="ag-more" data-goday="${day}">+${list.length - 5} na linha do tempo</button>` : ''}</div>`;
     }
     body.innerHTML = `<div class="ag-cal">${AG_WEEK.map((w) => `<div class="ag-wh">${w}</div>`).join('')}${cells}</div>`;
@@ -2819,7 +2820,7 @@ async function viewAgenda(v) {
       const head = `<div class="ag-row ag-head" style="${cols}"><div class="ag-name"></div>${days.map((d) => `<div class="ag-dh${d === today() ? ' today' : ''}">${AG_WEEK[agParse(d).getDay()]} ${agFmtDay(d).slice(0, 5)}</div>`).join('')}</div>`;
       const lines = techs.map((t) => `<div class="ag-row" style="${cols}"><div class="ag-name">${esc(t.name)}</div>${days.map((d) => {
         const list = rowsOf(t).filter((o) => o.scheduled_at.slice(0, 10) === d);
-        return `<div class="ag-cell" data-drop="cell" data-day="${d}" data-tech="${t.id}">${list.map(chip).join('')}</div>`;
+        return `<div class="ag-cell" data-drop="cell" data-day="${d}" data-tech="${t.id}">${list.map((o) => chip(o, false)).join('')}</div>`;
       }).join('')}</div>`).join('');
       body.innerHTML = `<div class="ag-tl ag-tl-week">${head}${lines}</div>`;
     }
@@ -2850,7 +2851,7 @@ async function viewAgenda(v) {
   const load = async () => {
     const my = ++seq;
     const r = range();
-    const d = await api('agenda', { params: { from: r.from, to: r.to, tech: st.tech, task_type_id: st.task, status: st.status, q: st.q } });
+    const d = await api('agenda', { params: { from: r.from, to: r.to, tech: st.tech, task_type_id: st.task, status: st.status, q: st.q, late: st.late ? 1 : '' } });
     if (my !== seq) return;
     R = r; data = d;
     fill();
@@ -2859,21 +2860,22 @@ async function viewAgenda(v) {
 
   // ---- Controles
   $('#ag-new', v).onclick = () => go('ordem/nova');
-  $('#ag-prev', v).onclick = () => { shift(-1); load().catch(fail); };
-  $('#ag-next', v).onclick = () => { shift(1); load().catch(fail); };
-  $('#ag-today', v).onclick = () => { st.date = today(); load().catch(fail); };
-  $$('#ag-views button', v).forEach((b) => (b.onclick = () => { st.view = b.dataset.v; prefSet('agendaView', st.view); load().catch(fail); }));
-  $('#ag-period', v).onchange = (e) => { st.period = e.target.value; prefSet('agendaPeriod', st.period); load().catch(fail); };
+  $('#ag-prev', v).onclick = () => { st.late = false; shift(-1); load().catch(fail); };
+  $('#ag-next', v).onclick = () => { st.late = false; shift(1); load().catch(fail); };
+  $('#ag-today', v).onclick = () => { st.late = false; st.date = today(); load().catch(fail); };
+  $$('#ag-views button', v).forEach((b) => (b.onclick = () => { st.late = false; st.view = b.dataset.v; prefSet('agendaView', st.view); load().catch(fail); }));
+  $('#ag-period', v).onchange = (e) => { st.late = false; st.period = e.target.value; prefSet('agendaPeriod', st.period); load().catch(fail); };
   $('#ag-tech', v).onchange = (e) => { st.tech = e.target.value; load().catch(fail); };
   $('#ag-task', v).onchange = (e) => { st.task = e.target.value; load().catch(fail); };
-  $('#ag-status', v).onchange = (e) => { st.status = e.target.value; load().catch(fail); };
+  $('#ag-status', v).onchange = (e) => { st.late = false; st.status = e.target.value; load().catch(fail); };
   $('#ag-q', v).oninput = debounce((e) => { st.q = e.target.value.trim(); load().catch(fail); });
   $('#ag-cards', v).onclick = (e) => {
     const b = e.target.closest('[data-card]'); if (!b) return;
     const k = b.dataset.card;
+    st.late = k === 'atrasadas';
     if (k === 'hoje') { st.view = 'linha'; st.period = 'dia'; st.date = today(); st.status = ''; }
     else if (k === 'sem_agendamento') { st.unOpen = true; paintUn(); unbox.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
-    else { st.view = 'lista'; st.status = { atrasadas: 'agendada', em_execucao: 'em_execucao', pausada: 'pausada', concluida: 'concluida' }[k]; }
+    else { st.view = 'lista'; st.status = { atrasadas: '', em_execucao: 'em_execucao', pausada: 'pausada', concluida: 'concluida' }[k]; }
     load().catch(fail);
   };
   unbox.onclick = (e) => {
@@ -4784,7 +4786,7 @@ function financeForm(e, meta, onSaved) {
         <label>${isNew ? 'Vencimento (1ª parcela)' : 'Vencimento'} * <input type="date" name="due_date" value="${esc(e.due_date || today())}" required></label></div>
       <div class="row"><label>Categoria <input name="category" list="fcats" value="${esc(e.category || '')}" maxlength="80" placeholder="Escolha ou digite"><datalist id="fcats">${(meta.categories[e.type] || []).map((c) => `<option value="${esc(c)}">`).join('')}</datalist></label>
         <label>Forma de pagamento <select name="payment_method">${pmOptions(e.payment_method)}</select></label></div>
-      <div><div class="qlabel-f">${rec ? 'Cliente' : 'Fornecedor'} (opcional)</div><div class="inline" style="flex-wrap:nowrap"><div id="party" style="flex:1"></div><button type="button" class="btn sm" id="pickp">${icon('search')}Selecionar</button><button type="button" class="btn sm" id="clrp" title="Remover">${icon('x')}</button></div></div>
+      <div><div class="qlabel-f">${rec ? 'Cliente' : 'Fornecedor'} (opcional)</div><div class="inline" style="flex-wrap:nowrap"><div id="party" style="flex:1"></div><button type="button" class="btn sm js-needs-edit" id="pickp">${icon('search')}Selecionar</button><button type="button" class="btn sm js-needs-edit" id="clrp" title="Remover">${icon('x')}</button></div></div>
       ${isNew ? `<div class="row"><label>Parcelas <input type="number" name="installments" min="1" max="120" value="1"></label>
         <label>Como lançar <select name="installment_mode"><option value="dividir">Dividir o valor nas parcelas</option><option value="repetir">Repetir o valor todo mês</option></select></label></div>
         <p class="help" id="instinfo" style="margin-top:-6px"></p>
@@ -4793,12 +4795,13 @@ function financeForm(e, meta, onSaved) {
       <label>Observação <textarea name="notes" rows="2" maxlength="500">${esc(e.notes || '')}</textarea></label>
     </form>`,
     foot: `${!isNew && !e.sale_id ? `<span style="margin-right:auto" class="inline">${e.status === 'pago' ? '<button class="btn sm" id="reopen">Reabrir</button>' : ''}${e.status === 'aberto' ? '<button class="btn sm danger" id="cancel">Cancelar conta</button>' : ''}${e.status !== 'pago' ? `<button class="btn sm danger" id="del">${icon('trash')}Excluir</button>` : ''}</span>` : ''}
-      <button class="btn" data-close>Fechar</button>${!isNew && e.status === 'aberto' ? `<button class="btn" id="pay">${rec ? 'Receber' : 'Pagar'}</button>` : ''}${locked ? '' : '<button class="btn primary" id="fsave">Salvar</button>'}`,
+      <button class="btn" data-close>Fechar</button>${!isNew && e.status === 'aberto' ? `<button class="btn" id="pay">${rec ? 'Receber' : 'Pagar'}</button>` : ''}${locked ? '' : `${isNew ? '' : `<button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button>`}<button class="btn primary js-edit-only" id="fsave">Salvar</button>`}`,
   });
   const fm = $('#ff', m.el);
   if (locked) $$('input,select,textarea,#pickp,#clrp', fm).forEach((x) => (x.disabled = true));
   const paintParty = () => { $('#party', m.el).innerHTML = party ? `<div class="cust-card" style="padding:8px 12px"><div class="cust-name">${esc(custName(party))}</div></div>` : '<span class="muted small">Nenhum</span>'; $('#clrp', m.el).hidden = !party || locked; };
   paintParty();
+  if (!locked) editLock(m.el, fm, !isNew);
   $('#pickp', m.el).onclick = () => customerBrowser({ entity: rec ? 'customer' : 'supplier', selected: party, onSelect: (c) => { party = c; paintParty(); } });
   $('#clrp', m.el).onclick = () => { party = null; paintParty(); };
   if (isNew) {
