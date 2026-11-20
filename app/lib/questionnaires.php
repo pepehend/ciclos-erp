@@ -15,8 +15,23 @@ class Questionnaires
     ];
     /** Tipos que pedem a lista de opções. */
     const OPTION_TYPES = ['itens', 'multipla'];
-    /** Condição da pergunta condicional: a resposta da pergunta escolhida é igual ou diferente da esperada. */
-    const COND_OPS = ['igual', 'diferente'];
+    /** Tipos que podem ser a pergunta de "Apresentar quando" (texto, área de texto, CPF/CNPJ, assinatura e foto não podem). */
+    const COND_PARENT_TYPES = ['numerica', 'check', 'monetaria', 'data', 'itens', 'hora', 'multipla'];
+    /** Condições da pergunta condicional. */
+    const COND_OPS = [
+        'menor' => 'Menor', 'maior' => 'Maior', 'menor_igual' => 'Menor ou igual', 'maior_igual' => 'Maior ou igual',
+        'igual' => 'Igual', 'diferente' => 'Diferente', 'contem_todos' => 'Contém todos', 'contem_um' => 'Contém um', 'nao_contem_um' => 'Não contém um',
+    ];
+    /** Condições de cada tipo da pergunta de origem. */
+    const COND_BY_TYPE = [
+        'numerica' => ['menor', 'maior', 'menor_igual', 'maior_igual', 'igual', 'diferente'],
+        'monetaria' => ['menor', 'maior', 'menor_igual', 'maior_igual', 'igual', 'diferente'],
+        'data' => ['menor', 'maior', 'menor_igual', 'maior_igual', 'igual', 'diferente'],
+        'hora' => ['menor', 'maior', 'menor_igual', 'maior_igual', 'igual', 'diferente'],
+        'check' => ['igual'],
+        'itens' => ['igual', 'diferente'],
+        'multipla' => ['contem_todos', 'contem_um', 'nao_contem_um'],
+    ];
     const MAX_QUESTIONS = 100;
 
     public static function get(int $id): array
@@ -49,15 +64,17 @@ class Questionnaires
 
     /**
      * Valida e arruma as perguntas. Cada pergunta: id, label, type, required, description,
-     * options (só itens/múltipla), geo (só foto) e cond = {question, op, value}: "Apresentar quando"
-     * uma pergunta anterior do tipo Itens for Igual/Diferente de uma das opções dela.
+     * options (só itens/múltipla), geo (só foto) e cond = {question, op, value}: "Apresentar quando" uma
+     * pergunta anterior (de um tipo de COND_PARENT_TYPES) atender à condição (COND_BY_TYPE) com a resposta esperada.
      */
     public static function normalizeQuestions($raw): array
     {
         if (is_string($raw)) $raw = json_decode($raw, true) ?: [];
         $out = [];
         $ids = [];
-        foreach ((array)$raw as $i => $q) {
+        $pos = [];
+        foreach (array_values((array)$raw) as $i => $q) if (is_array($q) && !empty($q['id'])) $pos[(string)$q['id']] = $i + 1;
+        foreach (array_values((array)$raw) as $i => $q) {
             if (!is_array($q)) continue;
             $label = trim((string)($q['label'] ?? ''));
             if ($label === '') throw new AppError('Informe o texto de todas as perguntas');
@@ -88,22 +105,120 @@ class Questionnaires
             }
             if ($type === 'foto') $item['geo'] = !empty($q['geo']);
             if (!empty($q['cond']) && is_array($q['cond'])) {
-                $cq = (string)($q['cond']['question'] ?? '');
-                $cv = trim((string)($q['cond']['value'] ?? ''));
-                $op = (string)($q['cond']['op'] ?? 'igual');
-                $parent = null;
-                foreach ($out as $p) if ($p['id'] === $cq) $parent = $p;
-                if (!$parent) throw new AppError('Pergunta condicional ' . $where . ': escolha em "Apresentar quando" uma pergunta anterior');
-                if ($parent['type'] !== 'itens') throw new AppError('Pergunta condicional ' . $where . ': "Apresentar quando" precisa ser uma pergunta anterior do tipo Itens');
-                if (!in_array($op, self::COND_OPS, true)) throw new AppError('Pergunta condicional ' . $where . ': escolha a condição (Igual ou Diferente)');
-                if (!in_array($cv, $parent['options'], true)) throw new AppError('Pergunta condicional ' . $where . ': a resposta esperada precisa ser uma das opções de "' . mb_substr($parent['label'], 0, 40) . '"');
-                $item['cond'] = ['question' => $cq, 'op' => $op, 'value' => $cv];
+                $item['cond'] = self::normalizeCond($q['cond'], $out, $i + 1, $pos, $where);
             }
             $out[] = $item;
             if (count($out) > self::MAX_QUESTIONS) throw new AppError('Máximo de ' . self::MAX_QUESTIONS . ' perguntas por questionário');
         }
         if (!$out) throw new AppError('Inclua pelo menos uma pergunta');
         return $out;
+    }
+
+    /** Condição de uma pergunta condicional; $earlier = perguntas anteriores já validadas. */
+    private static function normalizeCond(array $c, array $earlier, int $n, array $pos, string $where): array
+    {
+        $err = fn($m) => new AppError('Pergunta condicional ' . $where . ': ' . $m);
+        $cq = (string)($c['question'] ?? '');
+        $parent = null;
+        foreach ($earlier as $p) if ($p['id'] === $cq) $parent = $p;
+        if (!$parent) {
+            if ($cq !== '' && isset($pos[$cq]) && $pos[$cq] > $n) {
+                throw new AppError("A pergunta $n depende da pergunta {$pos[$cq]}, que está depois dela. Mova a pergunta mãe para antes da condicional ou escolha outra pergunta mãe.");
+            }
+            throw $err('preencha "Apresentar quando"');
+        }
+        if (!in_array($parent['type'], self::COND_PARENT_TYPES, true)) {
+            throw $err('o tipo de resposta de "' . mb_substr($parent['label'], 0, 40) . '" não suporta condições');
+        }
+        $allowed = self::COND_BY_TYPE[$parent['type']];
+        $op = (string)($c['op'] ?? '');
+        if (!array_key_exists('op', $c)) $op = in_array('igual', $allowed, true) ? 'igual' : 'contem_um'; // condição antiga, sem "op"
+        if (!in_array($op, $allowed, true)) throw $err('preencha "Condição"');
+        $value = self::condValue($parent, $c['value'] ?? null);
+        if ($value === null) throw $err('preencha "Resposta esperada"');
+        return ['question' => $cq, 'op' => $op, 'value' => $value];
+    }
+
+    /** Resposta esperada no formato guardado (o mesmo das respostas); null = vazia ou inválida. */
+    public static function condValue(array $parent, $v)
+    {
+        switch ($parent['type']) {
+            case 'multipla':
+                $list = is_array($v) ? $v : preg_split('/[§\n]/u', (string)$v);
+                $list = array_values(array_unique(array_filter(array_map(fn($x) => trim((string)$x), $list), fn($x) => $x !== '')));
+                foreach ($list as $x) if (!in_array($x, $parent['options'] ?? [], true)) return null;
+                return $list ?: null;
+            case 'check':
+                $t = mb_strtolower(trim((string)$v));
+                if (in_array($t, ['s', 'sim', 'verdadeiro', 'true', '1'], true)) return 'sim';
+                if (in_array($t, ['n', 'nao', 'não', 'falso', 'false', '0'], true)) return 'nao';
+                return null;
+        }
+        if (is_array($v)) return null;
+        $v = trim((string)$v);
+        if ($v === '') return null;
+        switch ($parent['type']) {
+            case 'itens':
+                return in_array($v, $parent['options'] ?? [], true) ? $v : null;
+            case 'numerica':
+            case 'monetaria':
+                $n = self::condNum($v);
+                return $n === null ? null : rtrim(rtrim(number_format($n, 4, '.', ''), '0'), '.');
+            case 'data':
+                if (preg_match('#^(\d{2})/(\d{2})/(\d{4})$#', $v, $m)) $v = "$m[3]-$m[2]-$m[1]";
+                return preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $v, $m) && checkdate((int)$m[2], (int)$m[3], (int)$m[1]) ? $v : null;
+            case 'hora':
+                if (preg_match('/^(\d{1,2}):(\d{2})$/', $v, $m)) $v = sprintf('%02d:%s', $m[1], $m[2]);
+                return preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $v) ? $v : null;
+        }
+        return null;
+    }
+
+    private static function condNum($v): ?float
+    {
+        $v = str_replace([' ', 'R$'], '', trim((string)$v));
+        if (str_contains($v, ',')) $v = str_replace(['.', ','], ['', '.'], $v);
+        return is_numeric($v) ? (float)$v : null;
+    }
+
+    /**
+     * A resposta da pergunta de origem atende à condição? Sem resposta não atende
+     * (Check sem marcar conta como "Falso"). Igual a qCondMatch no app.js.
+     */
+    public static function condMatch(array $parent, array $cond, $answer): bool
+    {
+        $type = $parent['type'];
+        $allowed = self::COND_BY_TYPE[$type] ?? [];
+        $op = (string)($cond['op'] ?? '');
+        if ($op === '') $op = in_array('igual', $allowed, true) ? 'igual' : 'contem_um';
+        if (!in_array($op, $allowed, true)) return false;
+        $want = self::condValue($parent, $cond['value'] ?? null);
+        if ($want === null) return false;
+        if ($type === 'check') return ($answer === 'Sim' ? 'sim' : 'nao') === $want;
+        if ($type === 'multipla') {
+            $got = array_map(fn($x) => mb_strtolower(trim((string)$x)), (array)($answer ?? []));
+            if (!$got) return false;
+            $hits = count(array_filter($want, fn($w) => in_array(mb_strtolower($w), $got, true)));
+            return $op === 'contem_todos' ? $hits === count($want) : ($op === 'contem_um' ? $hits > 0 : $hits === 0);
+        }
+        if (is_array($answer) || trim((string)$answer) === '') return false;
+        if ($type === 'itens') {
+            $eq = mb_strtolower(trim((string)$answer)) === mb_strtolower($want);
+            return $op === 'igual' ? $eq : !$eq;
+        }
+        if ($type === 'numerica' || $type === 'monetaria') {
+            $a = self::condNum($answer);
+            if ($a === null) return false;
+            $cmp = $a <=> (float)$want;
+        } else {
+            $a = self::condValue($parent, $answer);
+            if ($a === null) return false;
+            $cmp = strcmp($a, $want) <=> 0;
+        }
+        return match ($op) {
+            'menor' => $cmp < 0, 'maior' => $cmp > 0, 'menor_igual' => $cmp <= 0, 'maior_igual' => $cmp >= 0,
+            'igual' => $cmp === 0, 'diferente' => $cmp !== 0, default => false,
+        };
     }
 
     public static function save(array $in, ?int $id = null): int

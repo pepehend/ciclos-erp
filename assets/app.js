@@ -259,6 +259,12 @@ function modal({ title, body, foot = '', wide = false, onOpen }) {
   return m;
 }
 
+/** Aviso com um botão OK; html já escapado por quem chama. */
+function noticeBox(title, html) {
+  const m = modal({ title, body: `<p>${html}</p>`, foot: '<button class="btn primary" data-close>OK</button>' });
+  return m;
+}
+
 function confirmBox(text, { ok = 'Confirmar', danger = false } = {}) {
   return new Promise((resolve) => {
     const m = modal({
@@ -2531,18 +2537,48 @@ async function copyLink(url, msg = 'Link copiado') {
 }
 const fmtDur = (s) => { s = Math.max(0, Math.round(+s || 0)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h ? `${h}h ${String(m).padStart(2, '0')}min` : `${m}min`; };
 
+// Perguntas condicionais (iguais a Questionnaires::COND_* no servidor)
+const Q_COND_PARENTS = ['numerica', 'check', 'monetaria', 'data', 'itens', 'hora', 'multipla'];
+const Q_COND_OPS = { menor: 'Menor', maior: 'Maior', menor_igual: 'Menor ou igual', maior_igual: 'Maior ou igual', igual: 'Igual', diferente: 'Diferente', contem_todos: 'Contém todos', contem_um: 'Contém um', nao_contem_um: 'Não contém um' };
+const Q_COND_CMP = ['menor', 'maior', 'menor_igual', 'maior_igual', 'igual', 'diferente'];
+const Q_COND_BY_TYPE = { numerica: Q_COND_CMP, monetaria: Q_COND_CMP, data: Q_COND_CMP, hora: Q_COND_CMP, check: ['igual'], itens: ['igual', 'diferente'], multipla: ['contem_todos', 'contem_um', 'nao_contem_um'] };
+const qCondNum = (v) => { let t = String(v ?? '').replace(/\s|R\$/g, ''); if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.'); return t !== '' && isFinite(t) ? +t : null; };
+const qHora = (v) => { const m = String(v ?? '').trim().match(/^(\d{1,2}):(\d{2})$/); return m ? m[1].padStart(2, '0') + ':' + m[2] : null; };
+// A resposta da mãe atende à condição? Sem resposta não atende (Check sem marcar = Falso). Igual a Questionnaires::condMatch.
+function qCondMatch(parent, cond, a) {
+  const allowed = Q_COND_BY_TYPE[parent.type] || [];
+  const op = cond.op || (allowed.includes('igual') ? 'igual' : 'contem_um');
+  if (!allowed.includes(op)) return false;
+  const want = cond.value;
+  if (parent.type === 'check') return (a === 'Sim' ? 'sim' : 'nao') === String(want).toLowerCase();
+  if (parent.type === 'multipla') {
+    const exp = (Array.isArray(want) ? want : [want]).map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+    const got = (Array.isArray(a) ? a : []).map((x) => String(x).trim().toLowerCase());
+    if (!exp.length || !got.length) return false;
+    const hits = exp.filter((x) => got.includes(x)).length;
+    return op === 'contem_todos' ? hits === exp.length : op === 'contem_um' ? hits > 0 : hits === 0;
+  }
+  if (Array.isArray(a) || !String(a ?? '').trim() || want == null || String(want).trim() === '') return false;
+  if (parent.type === 'itens') { const eq = String(a).trim().toLowerCase() === String(want).trim().toLowerCase(); return op === 'igual' ? eq : !eq; }
+  let x, y;
+  if (parent.type === 'numerica' || parent.type === 'monetaria') { x = qCondNum(a); y = qCondNum(want); }
+  else if (parent.type === 'hora') { x = qHora(a); y = qHora(want); }
+  else { x = String(a).trim(); y = String(want).trim(); }
+  if (x == null || y == null) return false;
+  const c = x < y ? -1 : x > y ? 1 : 0;
+  return { menor: c < 0, maior: c > 0, menor_igual: c <= 0, maior_igual: c >= 0, igual: c === 0, diferente: c !== 0 }[op] || false;
+}
 // Visibilidade das perguntas (igual a OrderExec::visibleMap no servidor)
 function qVisible(questions, ans) {
-  const vis = {};
+  const vis = {}, byId = {};
   for (const q of questions) {
     let ok = true;
     if (q.cond) {
-      const want = String(q.cond.value).trim().toLowerCase(), v = ans[q.cond.question];
-      const got = Array.isArray(v) ? v.map((x) => String(x).trim().toLowerCase()) : (String(v ?? '').trim() ? [String(v).trim().toLowerCase()] : []);
-      if (!vis[q.cond.question] || !got.length) ok = false;
-      else ok = (q.cond.op || 'igual') === 'diferente' ? !got.includes(want) : got.includes(want);
+      const p = byId[q.cond.question];
+      ok = !!p && !!vis[p.id] && qCondMatch(p, q.cond, ans[p.id]);
     }
     vis[q.id] = ok;
+    byId[q.id] = q;
   }
   return vis;
 }
@@ -3639,24 +3675,55 @@ async function viewQuestionnaireForm(v, id) {
     <div class="actions"><button class="btn js-needs-edit" id="qadd">${icon('plus')}Adicionar pergunta</button></div>`;
 
   const box = $('#qlist', v);
-  const earlierOf = (list, i) => list.slice(0, i).filter((x) => x.id);
-  // "Apresentar quando" só lista perguntas anteriores do tipo Itens (com opções).
-  const condParents = (list, i) => earlierOf(list, i).filter((x) => x.type === 'itens' && x.options.length);
-  // Condição que perdeu a pergunta de origem (removida, movida ou de outro tipo) ou a opção esperada é limpa.
+  // Pergunta que pode ser "mãe" de uma condicional: tem texto e um tipo que aceita condições.
+  const canBeParent = (x) => !!(x && x.label && Q_COND_PARENTS.includes(x.type));
+  // "Apresentar quando": perguntas anteriores que podem ser mãe; a mãe já escolhida continua na lista mesmo depois de mover.
+  const condParents = (list, i) => list.filter((x, j) => (j < i && canBeParent(x)) || (list[i].cond && list[i].cond.question === x.id && j !== i && canBeParent(x)));
+  // A caixa "Essa é uma pergunta condicional" só aparece se houver pergunta anterior que possa ser mãe (ou se já for condicional).
+  const condAvail = (list, i) => list.slice(0, i).some(canBeParent) || !!list[i].cond;
+  // Mantém a condição coerente com a mãe: some a mãe → limpa a escolha; a resposta esperada que deixou de existir é limpa.
   const fixConds = () => {
     qs = qs.map((x, j) => {
       if (!x.cond) return x;
-      if (j === 0) return { ...x, cond: null };
-      const pq = condParents(qs, j).find((e) => e.id === x.cond.question);
-      if (!pq) return { ...x, cond: { question: '', op: x.cond.op, value: '' } };
-      return pq.options.includes(x.cond.value) ? x : { ...x, cond: { ...x.cond, value: '' } };
+      const pq = qs.find((e, k) => k !== j && e.id === x.cond.question);
+      if (!pq || !canBeParent(pq)) return { ...x, cond: { question: '', op: '', value: '' } };
+      const op = (Q_COND_BY_TYPE[pq.type] || []).includes(x.cond.op) ? x.cond.op : '';
+      let value = x.cond.value;
+      if (pq.type === 'itens' && !pq.options.includes(value)) value = '';
+      if (pq.type === 'multipla') value = (Array.isArray(value) ? value : []).filter((o) => pq.options.includes(o));
+      return { ...x, cond: { ...x.cond, op, value } };
     });
+  };
+  const condOrderErrors = () => qs.flatMap((x, j) => {
+    if (!x.cond || !x.cond.question) return [];
+    const m = qs.findIndex((e) => e.id === x.cond.question);
+    return m > j ? [`A pergunta ${j + 1} depende da pergunta ${m + 1}, que está depois dela.`] : [];
+  });
+  const warnOrder = () => {
+    const errs = condOrderErrors();
+    if (errs.length) noticeBox('Atenção!', errs.map(esc).join('<br>') + '<br><br>Mova a pergunta mãe para antes da condicional ou escolha outra pergunta mãe.');
+    return !errs.length;
+  };
+
+  // Campo de "Resposta esperada" conforme o tipo da pergunta mãe.
+  const condValueHtml = (pq, val, d) => {
+    if (!pq) return `<input ${d} data-k="condv" disabled>`;
+    const opt = (o, on) => `<option value="${esc(o)}" ${on ? 'selected' : ''}>${esc(o)}</option>`;
+    switch (pq.type) {
+      case 'itens': return `<select ${d} data-k="condv"><option value="">Selecione</option>${pq.options.map((o) => opt(o, val === o)).join('')}</select>`;
+      case 'multipla': return `<div class="qmulti" data-k="condv">${pq.options.map((o) => `<label class="check"><input type="checkbox" ${d} data-cv value="${esc(o)}" ${(Array.isArray(val) ? val : []).includes(o) ? 'checked' : ''}> ${esc(o)}</label>`).join('')}</div>`;
+      case 'check': return `<select ${d} data-k="condv"><option value="">Selecione</option><option value="sim" ${val === 'sim' ? 'selected' : ''}>Verdadeiro</option><option value="nao" ${val === 'nao' ? 'selected' : ''}>Falso</option></select>`;
+      case 'data': return `<input ${d} data-k="condv" type="date" value="${esc(val || '')}">`;
+      case 'hora': return `<input ${d} data-k="condv" type="time" value="${esc(val || '')}">`;
+      case 'monetaria': return `<input ${d} data-k="condv" inputmode="decimal" placeholder="R$ 0,00" value="${esc(String(val || '').replace('.', ','))}">`;
+      default: return `<input ${d} data-k="condv" inputmode="decimal" value="${esc(String(val || '').replace('.', ','))}">`;
+    }
   };
 
   // Lê o que está na tela para o estado, antes de qualquer mudança estrutural.
   const readQs = () => {
     const out = [];
-    $$('.qe-card', box).forEach((card, i) => {
+    $$('.qe-card', box).forEach((card) => {
       const val = (k) => card.querySelector(`[data-k="${k}"]`);
       const type = val('type').value;
       const item = {
@@ -3670,7 +3737,9 @@ async function viewQuestionnaireForm(v, id) {
       };
       if (type === 'foto') item.geo = !!val('geo')?.checked;
       if (val('hascond')?.checked) {
-        item.cond = { question: val('condq')?.value || '', op: val('condop')?.value || '', value: val('condv')?.value || '' };
+        const cv = val('condv');
+        const value = !cv ? '' : cv.matches('.qmulti') ? $$('[data-cv]:checked', cv).map((c) => c.value) : cv.value;
+        item.cond = { question: val('condq')?.value || '', op: val('condop')?.value || '', value };
       }
       out.push(item);
     });
@@ -3680,10 +3749,9 @@ async function viewQuestionnaireForm(v, id) {
   const render = () => {
     const d = locked ? 'disabled' : '';
     box.innerHTML = qs.length ? qs.map((x, i) => {
-      const earlier = earlierOf(qs, i);
-      const parents = condParents(qs, i);
-      const condQ = x.cond ? parents.find((e) => e.id === x.cond.question) : null;
-      const hasCond = !!x.cond;
+      const parents = x.cond ? condParents(qs, i) : [];
+      const pq = x.cond ? parents.find((e) => e.id === x.cond.question) : null;
+      const ops = pq ? Q_COND_BY_TYPE[pq.type] : [];
       return `<div class="qe-card" data-qid="${esc(x.id)}">
         <div class="qhead"><span class="qe-num">${i + 1}</span>
           <input ${d} data-k="label" maxlength="200" placeholder="Texto da pergunta" value="${esc(x.label)}" class="qe-label">
@@ -3698,17 +3766,27 @@ async function viewQuestionnaireForm(v, id) {
         <input ${d} data-k="description" maxlength="300" placeholder="Ajuda para o técnico (opcional)" value="${esc(x.description || '')}" class="qe-desc">
         ${Q_OPTION_TYPES.includes(x.type) ? `<label>Opções <textarea ${d} data-k="options" rows="4" placeholder="Uma opção por linha">${esc(x.options.join('\n'))}</textarea></label>` : ''}
         ${x.type === 'foto' ? `<label class="check"><input type="checkbox" ${d} data-k="geo" ${x.geo ? 'checked' : ''}> Registrar a localização da foto</label>` : ''}
-        ${i > 0 ? `<div class="qcond">
-          <label class="check"><input type="checkbox" ${d} data-k="hascond" ${hasCond ? 'checked' : ''}> Essa é uma pergunta condicional</label>
-          ${hasCond ? `<div class="grid three">
-            <label>Apresentar quando <select ${d} data-k="condq"><option value="">Selecione a pergunta</option>${parents.map((e) => `<option value="${esc(e.id)}" ${x.cond.question === e.id ? 'selected' : ''}>${esc(e.label || '(sem texto)')}</option>`).join('')}</select></label>
-            <label>Condição <select ${d} data-k="condop"><option value="">Selecione uma condição</option>${[['igual', 'Igual'], ['diferente', 'Diferente']].map(([c, l]) => `<option value="${c}" ${x.cond.op === c ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-            <label>Resposta esperada <select ${d} data-k="condv"><option value="">Selecione</option>${(condQ ? condQ.options : []).map((o) => `<option value="${esc(o)}" ${x.cond.value === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></label>
-          </div>${parents.length ? '' : '<p class="muted small">Adicione antes desta uma pergunta do tipo Itens para usar como condição.</p>'}` : ''}
-        </div>` : ''}
+        <div class="qcond" ${condAvail(qs, i) ? '' : 'hidden'}>
+          <label class="check"><input type="checkbox" ${d} data-k="hascond" ${x.cond ? 'checked' : ''}> Essa é uma pergunta condicional</label>
+          ${x.cond ? `<div class="grid three">
+            <label>Apresentar quando <select ${d} data-k="condq"><option value="">Selecione a pergunta</option>${parents.map((e) => `<option value="${esc(e.id)}" ${x.cond.question === e.id ? 'selected' : ''}>${esc(e.label)}</option>`).join('')}</select></label>
+            <label>Condição <select ${d} data-k="condop"><option value="">Selecione uma condição</option>${ops.map((c) => `<option value="${c}" ${x.cond.op === c ? 'selected' : ''}>${Q_COND_OPS[c]}</option>`).join('')}</select></label>
+            <div class="qcond-v"><span class="lbl">Resposta esperada</span>${condValueHtml(pq, x.cond.value, d)}</div>
+          </div>` : ''}
         </div></div>`;
     }).join('') : '<div class="empty">Nenhuma pergunta. Clique em <strong>Adicionar pergunta</strong>.</div>';
   };
+
+  // Texto da pergunta mudou: atualiza os nomes em "Apresentar quando" e onde a caixa de condicional aparece, sem redesenhar.
+  const refreshCondNames = () => {
+    const cards = $$('.qe-card', box);
+    const now = cards.map((c) => ({ id: c.dataset.qid, label: $('[data-k=label]', c).value.trim(), type: $('[data-k=type]', c).value, cond: $('[data-k=hascond]', c)?.checked ? {} : null }));
+    cards.forEach((c, i) => {
+      $('.qcond', c).hidden = !condAvail(now, i);
+      $$('[data-k=condq] option[value]:not([value=""])', c).forEach((o) => { const p = now.find((y) => y.id === o.value); if (p) o.textContent = p.label; });
+    });
+  };
+  box.addEventListener('input', (e) => { if (e.target.dataset.k === 'label') refreshCondNames(); });
 
   // Mudanças de estrutura: lê a tela, muda o estado e redesenha.
   box.onclick = (e) => {
@@ -3720,40 +3798,69 @@ async function viewQuestionnaireForm(v, id) {
     if (act === 'del') qs.splice(i, 1);
     if (act === 'up' && i > 0) [qs[i - 1], qs[i]] = [qs[i], qs[i - 1]];
     if (act === 'down' && i < qs.length - 1) [qs[i + 1], qs[i]] = [qs[i], qs[i + 1]];
-    if (act === 'dup') qs.splice(i + 1, 0, { ...qs[i], id: newQid(), options: [...qs[i].options] });
+    // Duplicar copia também a configuração condicional.
+    if (act === 'dup') qs.splice(i + 1, 0, { ...qs[i], id: newQid(), options: [...qs[i].options], cond: qs[i].cond ? JSON.parse(JSON.stringify(qs[i].cond)) : null });
     fixConds();
     render();
+    if (act === 'up' || act === 'down') warnOrder();
   };
   box.onchange = (e) => {
-    const k = e.target.dataset.k;
-    if (!k) return;
-    // Trocar o tipo, marcar condição ou escolher pergunta anterior muda a tela: relê e redesenha.
-    if (['type', 'hascond', 'condq', 'options'].includes(k)) {
-      readQs();
-      const i = $$('.qe-card', box).indexOf(e.target.closest('.qe-card'));
-      if (k === 'hascond') qs[i].cond = e.target.checked ? { question: '', op: '', value: '' } : null;
-      if (k === 'condq') qs[i].cond = { ...qs[i].cond, value: '' };
-      if (k === 'type') {
-        qs[i].type = e.target.value;
-        if (!Q_OPTION_TYPES.includes(qs[i].type)) qs[i].options = [];
-      }
-      fixConds();
-      render();
+    const k = e.target.dataset.k || (e.target.matches('[data-cv]') ? 'condv' : '');
+    if (['condop', 'condv'].includes(k)) e.target.closest('label, .qcond-v')?.querySelector('.field-err')?.remove();
+    if (!k || !['type', 'hascond', 'condq', 'options'].includes(k)) return;
+    // Trocar o tipo, marcar condição, escolher a mãe ou mudar as opções muda a tela: relê e redesenha.
+    readQs();
+    const i = $$('.qe-card', box).indexOf(e.target.closest('.qe-card'));
+    const notes = [];
+    if (k === 'hascond') qs[i].cond = e.target.checked ? { question: '', op: '', value: '' } : null;
+    if (k === 'condq') qs[i].cond = { question: e.target.value, op: '', value: '' };
+    if (k === 'type') {
+      qs[i].type = e.target.value;
+      if (!Q_OPTION_TYPES.includes(qs[i].type)) qs[i].options = [];
+      // Condicionais que dependem desta pergunta: tipo sem condições remove a condição; outro tipo refaz condição e resposta.
+      qs.forEach((x) => {
+        if (!x.cond || x.cond.question !== qs[i].id) return;
+        if (!Q_COND_PARENTS.includes(qs[i].type)) {
+          x.cond = null;
+          notes.push(`A pergunta "${qs[i].label || 'sem título'}" foi alterada para um tipo que não suporta condições. A pergunta "${x.label || 'sem título'}" teve sua configuração condicional removida.`);
+        } else {
+          x.cond = { question: x.cond.question, op: '', value: '' };
+          notes.push(`O tipo de resposta da pergunta "${qs[i].label || 'sem título'}" foi alterado. A condição e resposta esperada da pergunta "${x.label || 'sem título'}" foram atualizadas.`);
+        }
+      });
     }
+    fixConds();
+    render();
+    if (notes.length) noticeBox('Atenção!', notes.map(esc).join('<br><br>'));
   };
 
   $('#qeq', v).onchange = (e) => { $('#qeqr', v).disabled = !e.target.checked; if (!e.target.checked) $('#qeqr', v).checked = false; };
   $('#qadd', v).onclick = () => { readQs(); qs.push({ id: newQid(), label: '', type: 'texto', required: false, description: '', options: [], cond: null }); render(); $$('.qe-label', box).at(-1)?.focus(); };
 
+  // Campos da condicional sem preencher: "Este campo é obrigatório" embaixo de cada um.
+  const condMissing = () => {
+    $$('.qcond .field-err', box).forEach((s) => s.remove());
+    let n = 0;
+    $$('.qe-card', box).forEach((card, i) => {
+      const c = qs[i].cond;
+      if (!c) return;
+      const empty = { condq: !c.question, condop: !c.op, condv: Array.isArray(c.value) ? !c.value.length : !String(c.value || '').trim() };
+      Object.entries(empty).forEach(([k, on]) => {
+        if (!on) return;
+        n++;
+        const el = $(`[data-k="${k}"]`, card);
+        if (el) el.insertAdjacentHTML('afterend', '<span class="field-err" role="alert">Este campo é obrigatório</span>');
+      });
+    });
+    return n;
+  };
+
   const save = (btn) => busy(btn, async () => {
     readQs();
     const d = formData($('#qform', v));
     if (!d.name.trim()) throw new Error('Informe o nome do questionário');
-    qs.forEach((x, i) => {
-      if (!x.cond) return;
-      const miss = !x.cond.question ? 'Apresentar quando' : !x.cond.op ? 'Condição' : !x.cond.value ? 'Resposta esperada' : '';
-      if (miss) throw new Error(`Pergunta condicional ${i + 1}: preencha "${miss}"`);
-    });
+    if (condMissing()) throw new Error('Preencha os campos das perguntas condicionais');
+    if (!warnOrder()) return;
     const body = {
       id: isNew ? undefined : id,
       name: d.name,

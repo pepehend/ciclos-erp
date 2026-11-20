@@ -734,6 +734,9 @@ tr.sel td { background: var(--accent-soft); }
 .qtools { display: inline-flex; gap: 2px; margin-left: auto; }
 .qcond { border-top: 1px dashed var(--line); padding-top: 8px; display: grid; gap: 8px; }
 .qcond .grid { margin: 0; }
+.qcond-v { display: grid; gap: 5px; align-content: start; }
+.qcond-v .lbl { font-size: .86rem; font-weight: 550; }
+.qcond-v .qmulti { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 
 /* Agenda */
 .ag-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 16px; }

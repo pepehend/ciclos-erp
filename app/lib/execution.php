@@ -72,23 +72,22 @@ class OrderExec
     // ---------------- Questionários ----------------
 
     /**
-     * A pergunta aparece? Pergunta condicional: só depois que a pergunta de "Apresentar quando"
-     * (que também precisa estar aparecendo) foi respondida, e se a resposta for Igual/Diferente da esperada.
+     * A pergunta aparece? Pergunta condicional: só se a pergunta de "Apresentar quando" (que também precisa
+     * estar aparecendo) tiver resposta que atenda à condição (Questionnaires::condMatch; igual a qVisible no app.js).
      */
     public static function visibleMap(array $questions, array $ans): array
     {
         $vis = [];
+        $byId = [];
         foreach ($questions as $q) {
             $ok = true;
             if (!empty($q['cond'])) {
-                $pid = $q['cond']['question'];
-                $want = mb_strtolower(trim((string)$q['cond']['value']));
-                $v = $ans[$pid] ?? null;
-                $got = is_array($v) ? array_map(fn($x) => mb_strtolower(trim((string)$x)), $v) : (trim((string)$v) === '' ? [] : [mb_strtolower(trim((string)$v))]);
-                if (empty($vis[$pid]) || !$got) $ok = false;
-                else $ok = (($q['cond']['op'] ?? 'igual') === 'diferente') ? !in_array($want, $got, true) : in_array($want, $got, true);
+                $pid = $q['cond']['question'] ?? '';
+                $parent = $byId[$pid] ?? null;
+                $ok = $parent && !empty($vis[$pid]) && Questionnaires::condMatch($parent, $q['cond'], $ans[$pid] ?? null);
             }
             $vis[$q['id']] = $ok;
+            $byId[$q['id']] = $q;
         }
         return $vis;
     }
