@@ -1375,6 +1375,90 @@ $agLate = ServiceOrders::save(['customer_id' => $cf, 'description' => 'Atrasada'
 $lateRows = array_map('intval', array_column(ServiceOrders::agenda(['from' => '2030-03-10', 'to' => '2030-03-10', 'late' => true])['rows'], 'id'));
 ok(in_array($agLate, $lateRows, true) && !in_array($ag1, $lateRows, true), 'filtro "atrasadas" traz agendadas vencidas de qualquer data, sem as futuras');
 
+echo "\nExecução da OS\n";
+$mails = [];
+Mailer::$transport = function ($to, $subject, $html) use (&$mails) { $mails[] = [$to, $subject, $html]; return true; };
+$exCli = Customers::save(['type' => 'pf', 'name' => 'Cliente Execução', 'email' => 'cliente@example.com']);
+$exQ = Questionnaires::save(['name' => 'Checklist execução', 'questions' => [
+    ['id' => 'liga', 'label' => 'Equipamento liga?', 'type' => 'itens', 'options' => "Sim\nNão", 'required' => true],
+    ['id' => 'motivo', 'label' => 'Motivo', 'type' => 'texto', 'required' => true, 'cond' => ['question' => 'liga', 'value' => 'Não']],
+    ['id' => 'pressao', 'label' => 'Pressão', 'type' => 'numerica'],
+    ['id' => 'ok', 'label' => 'Conferido', 'type' => 'check'],
+    ['id' => 'pecas', 'label' => 'Peças', 'type' => 'multipla', 'options' => "Filtro\nÓleo"],
+]]);
+$exTT = TaskTypes::save(['name' => 'Execução completa', 'questionnaire_ids' => [$exQ], 'requires' => ['relato', 'questionario', 'assinatura', 'assinante_nome', 'fotos', 'km', 'servico'], 'send_survey' => 1, 'send_os_email' => 1]);
+$exOs = ServiceOrders::save(['customer_id' => $exCli, 'description' => 'Revisão completa', 'task_type_id' => $exTT], $uid);
+$exO = ServiceOrders::get($exOs);
+ok(strlen($exO['public_token']) === 32, 'OS nova já tem link público');
+ok(count(OrderExec::hours($exOs)['rows']) === 1, 'criação entra no histórico de status');
+$qs = OrderExec::questionnaires($exO);
+ok(count($qs) === 1 && $qs[0]['linked'] && !$qs[0]['answered'], 'OS traz o questionário do tipo de tarefa, ainda sem resposta');
+$p0 = OrderExec::pending($exO);
+ok(count($p0) === 7, 'pendências: relato, questionário, assinatura, nome, foto, km e serviço (' . count($p0) . ')');
+ServiceOrders::setStatus($exOs, 'agendada', $uid);
+ServiceOrders::setStatus($exOs, 'em_execucao', $uid);
+throws(fn() => ServiceOrders::setStatus($exOs, 'concluida', $uid), 'Para concluir falta', 'concluir com pendências é bloqueado');
+ok(ServiceOrders::get($exOs)['started_at'] !== null, 'check-in grava o início do atendimento');
+// respostas
+$r = OrderExec::saveAnswers($exOs, $exQ, ['liga' => 'Não', 'pressao' => '7,5', 'ok' => true, 'pecas' => ['Óleo', 'Filtro', 'Óleo']], null, $uid);
+ok($r['missing'] === ['Motivo'], 'pergunta condicional obrigatória passa a faltar quando a condição é atendida');
+$ans = OrderExec::questionnaires(ServiceOrders::get($exOs))[0]['answers'];
+ok($ans['pressao'] === '7.5' && $ans['ok'] === 'Sim' && $ans['pecas'] === ['Óleo', 'Filtro'], 'respostas normalizadas (número, check, múltipla sem repetir)');
+$r = OrderExec::saveAnswers($exOs, $exQ, ['liga' => 'Sim', 'motivo' => 'texto escondido'], null, $uid);
+$ans = OrderExec::questionnaires(ServiceOrders::get($exOs))[0]['answers'];
+ok($r['missing'] === [] && !isset($ans['motivo']), 'resposta de pergunta escondida é descartada');
+throws(fn() => OrderExec::saveAnswers($exOs, $exQ, ['liga' => 'Talvez'], null, $uid), 'Resposta inválida', 'opção fora da lista recusada');
+throws(fn() => OrderExec::saveAnswers($exOs, $exQ, ['pressao' => 'alta'], null, $uid), 'Resposta inválida', 'número inválido recusado');
+throws(fn() => OrderExec::saveAnswers($exOs, $q1 ?? 999999, [], null, $uid), 'não faz parte', 'questionário de fora da OS recusado');
+// relato, assinatura, fotos, itens
+$png = 'data:image/png;base64,' . base64_encode('fake-png');
+OrderExec::saveReport($exOs, ['report' => 'Troquei o filtro', 'signer_name' => 'João', 'km' => '12,5', 'signature' => $png]);
+$exO = ServiceOrders::get($exOs);
+ok($exO['report'] === 'Troquei o filtro' && (float)$exO['km'] === 12.5 && $exO['signature'] === $png, 'relato, km e assinatura salvos');
+OrderExec::saveReport($exOs, ['report' => 'Troquei o filtro', 'signer_name' => 'João', 'km' => '12,5']);
+ok(ServiceOrders::get($exOs)['signature'] === $png, 'salvar sem a assinatura mantém a atual');
+throws(fn() => OrderExec::saveReport($exOs, ['signer_doc' => '123']), 'CPF/CNPJ', 'documento do assinante inválido recusado');
+throws(fn() => OrderExec::addPhoto($exOs, 'data:text/html;base64,AAAA', '', $uid), 'imagem inválida', 'foto que não é imagem recusada');
+$ph = OrderExec::addPhoto($exOs, $png, 'Antes', $uid);
+$svc = DB::val("SELECT id FROM products WHERE type = 'servico' AND deleted_at IS NULL LIMIT 1") ?: Inventory::saveProduct(['type' => 'servico', 'name' => 'Mão de obra', 'unit' => 'un', 'sale_price' => '100']);
+throws(fn() => OrderExec::saveItem($exOs, ['kind' => 'produto', 'product_id' => $svc], $uid), 'Escolha um produto', 'serviço não entra como produto');
+OrderExec::saveItem($exOs, ['kind' => 'servico', 'product_id' => $svc, 'quantity' => '2', 'unit_price' => '150'], $uid);
+OrderExec::saveItem($exOs, ['kind' => 'custo', 'description' => 'Deslocamento', 'unit_price' => '40,50'], $uid);
+$it = OrderExec::items($exOs);
+ok($it['totals']['servico'] == 300 && $it['totals']['custo'] == 40.5 && $it['totals']['total'] == 340.5, 'totais dos valores por tipo');
+ok(OrderExec::pending(ServiceOrders::get($exOs)) === [], 'sem pendências depois de tudo preenchido');
+// pausa, conclusão, envios automáticos
+ServiceOrders::setStatus($exOs, 'pausada', $uid);
+ServiceOrders::setStatus($exOs, 'em_execucao', $uid);
+ServiceOrders::setStatus($exOs, 'concluida', $uid);
+$h = OrderExec::hours($exOs);
+ok(array_column($h['rows'], 'label') === ['Aberta', 'Agendada', 'Check-in', 'Início da pausa', 'Fim da pausa', 'Check-out'] && $h['running'] === null, 'controle de horas: check-in, pausa e check-out');
+ok(count($mails) === 2 && str_contains($mails[0][2], 'os.php?t=') && str_contains($mails[1][2], 'pesquisa=1') && $mails[0][0] === 'cliente@example.com', 'ao concluir, envia a OS digital e a pesquisa ao e-mail do cliente');
+ok((int)DB::val('SELECT COUNT(*) FROM so_sends WHERE order_id = ? AND ok = 1', [$exOs]) === 2, 'envios registrados');
+throws(fn() => OrderExec::send($exOs, 'os', 'nao-e-email', $uid), 'E-mail', 'envio manual para e-mail inválido mostra o erro');
+ok((int)DB::val('SELECT COUNT(*) FROM so_sends WHERE order_id = ? AND ok = 0', [$exOs]) === 1, 'falha de envio também fica registrada');
+// pesquisa
+$tok = ServiceOrders::get($exOs)['public_token'];
+throws(fn() => OrderExec::surveyRespond($tok, 9, ''), 'nota de 1 a 5', 'nota fora da escala recusada');
+OrderExec::surveyRespond($tok, 5, 'Ótimo atendimento');
+ok((int)ServiceOrders::get($exOs)['survey_rating'] === 5, 'avaliação do cliente gravada');
+throws(fn() => OrderExec::surveyRespond($tok, 4, ''), 'já foi avaliada', 'não avalia duas vezes');
+throws(fn() => OrderExec::byToken('abc'), 'não encontrada', 'link público inválido');
+ok(OrderExec::byToken($tok)['order']['id'] == $exOs, 'link público abre a OS');
+// pesquisa antes de concluir e envio automático com falha não bloqueia
+$exOs2 = ServiceOrders::save(['customer_id' => $cf, 'description' => 'Sem e-mail'], $uid);
+throws(fn() => OrderExec::send($exOs2, 'pesquisa', 'x@example.com', $uid), 'depois que a ordem é concluída', 'pesquisa só depois de concluir');
+$failTT = TaskTypes::save(['name' => 'Só envia OS', 'send_os_email' => 1]);
+$exOs3 = ServiceOrders::save(['customer_id' => $cf, 'description' => 'Cliente sem e-mail', 'task_type_id' => $failTT], $uid);
+ServiceOrders::setStatus($exOs3, 'agendada', $uid); ServiceOrders::setStatus($exOs3, 'em_execucao', $uid); ServiceOrders::setStatus($exOs3, 'concluida', $uid);
+ok(ServiceOrders::get($exOs3)['status'] === 'concluida' && (int)DB::val('SELECT ok FROM so_sends WHERE order_id = ?', [$exOs3]) === 0, 'cliente sem e-mail: conclui e registra o envio que falhou');
+// faturada não muda mais
+ServiceOrders::setStatus($exOs, 'faturada', $uid);
+throws(fn() => OrderExec::saveReport($exOs, ['report' => 'x']), 'faturada', 'OS faturada não aceita alterações');
+throws(fn() => OrderExec::deletePhoto($ph), 'faturada', 'foto de OS faturada não sai');
+ok(str_contains(Backup::sql(), 'INSERT INTO `so_answers`'), 'backup inclui as respostas');
+Mailer::$transport = null;
+
 @unlink($db);
 echo "\n$passes passaram, $fails falharam\n";
 exit($fails ? 1 : 0);

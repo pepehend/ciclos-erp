@@ -569,9 +569,9 @@ try {
             return ServiceOrders::agenda(['from' => q('from'), 'to' => q('to'), 'tech' => q('tech'), 'task_type_id' => q('task_type_id'), 'status' => q('status'), 'q' => q('q'), 'late' => q('late') === '1']);
         },
         'POST agenda_move' => function () {
-            Auth::requirePerm('ordens');
+            $u = Auth::requirePerm('ordens');
             $in = input();
-            ServiceOrders::reschedule((int)($in['id'] ?? 0), (string)($in['scheduled_at'] ?? ''), $in['technician_id'] ?? null);
+            ServiceOrders::reschedule((int)($in['id'] ?? 0), (string)($in['scheduled_at'] ?? ''), $in['technician_id'] ?? null, (int)$u['id']);
             return ['ok' => true];
         },
         'GET service_orders' => function () {
@@ -592,9 +592,50 @@ try {
             return ['id' => ServiceOrders::save($in, $u['id'], !empty($in['id']) ? (int)$in['id'] : null)];
         },
         'POST service_order_status' => function () {
+            $u = Auth::requirePerm('ordens');
+            $in = input();
+            ServiceOrders::setStatus((int)($in['id'] ?? 0), (string)($in['status'] ?? ''), (int)$u['id']);
+            return ['ok' => true];
+        },
+        'GET service_order_detail' => function () {
+            Auth::requirePerm('ordens');
+            return OrderExec::detail((int)q('id'));
+        },
+        'POST so_answers_save' => function () {
+            $u = Auth::requirePerm('ordens');
+            $in = input();
+            return OrderExec::saveAnswers((int)($in['id'] ?? 0), (int)($in['questionnaire_id'] ?? 0), $in['answers'] ?? [], $in['equipment_id'] ?? null, (int)$u['id']);
+        },
+        'POST so_report_save' => function () {
             Auth::requirePerm('ordens');
             $in = input();
-            ServiceOrders::setStatus((int)($in['id'] ?? 0), (string)($in['status'] ?? ''));
+            OrderExec::saveReport((int)($in['id'] ?? 0), $in);
+            return ['ok' => true];
+        },
+        'POST so_photo_add' => function () {
+            $u = Auth::requirePerm('ordens');
+            $in = input();
+            return ['id' => OrderExec::addPhoto((int)($in['id'] ?? 0), $in['image'] ?? '', (string)($in['caption'] ?? ''), (int)$u['id'])];
+        },
+        'POST so_photo_delete' => function () {
+            Auth::requirePerm('ordens');
+            OrderExec::deletePhoto((int)(input()['photo_id'] ?? 0));
+            return ['ok' => true];
+        },
+        'POST so_item_save' => function () {
+            $u = Auth::requirePerm('ordens');
+            $in = input();
+            return ['id' => OrderExec::saveItem((int)($in['id'] ?? 0), $in, (int)$u['id'])];
+        },
+        'POST so_item_delete' => function () {
+            Auth::requirePerm('ordens');
+            OrderExec::deleteItem((int)(input()['item_id'] ?? 0));
+            return ['ok' => true];
+        },
+        'POST so_send' => function () {
+            $u = Auth::requirePerm('ordens');
+            $in = input();
+            OrderExec::send((int)($in['id'] ?? 0), (string)($in['kind'] ?? ''), (string)($in['to'] ?? ''), (int)$u['id']);
             return ['ok' => true];
         },
         'GET equipments' => function () {

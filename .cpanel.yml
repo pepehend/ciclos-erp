@@ -6,7 +6,7 @@ deployment:
   tasks:
     - export DEPLOYPATH=$HOME/public_html/sistema/
     - /bin/mkdir -p $DEPLOYPATH
-    - /bin/cp index.php api.php orcamento.php pedido.php .htaccess .user.ini $DEPLOYPATH
+    - /bin/cp index.php api.php orcamento.php pedido.php os.php .htaccess .user.ini $DEPLOYPATH
     - /bin/cp -R assets $DEPLOYPATH
     - /bin/cp -R app $DEPLOYPATH
     - /bin/cp -R cliente $DEPLOYPATH

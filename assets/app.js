@@ -816,12 +816,12 @@ window.addEventListener('hashchange', comboClose);
 // ============ Layout e rotas ============
 // Opções do botão "Novo" (menu lateral e painel)
 const NEW_ITEMS = [
+  ['ordem/nova', 'Nova ordem de serviço', 'tool', 'ordens'],
   ['orcamento/novo', 'Novo orçamento', 'quote', 'orcamentos'],
   ['vendas/nova', 'Nova venda', 'cart', 'vendas'],
   ['compra/nova', 'Nova ordem de compra', 'order', 'compras'],
-  ['ordem/nova', 'Nova ordem de serviço', 'tool', 'ordens'],
 ];
-/** Botão "Novo" com menu suspenso (orçamento, venda, ordem de compra). */
+/** Botão "Novo" com menu suspenso (ordem de serviço, orçamento, venda, ordem de compra). */
 function newButton() {
   const items = NEW_ITEMS.filter(([, , , perm]) => can(perm));
   if (!items.length) return '';
@@ -840,13 +840,13 @@ const NAV = [
   { g: 'novo', label: 'Novo', icon: 'plus', cls: 'nav-new', items: NEW_ITEMS },
   ['notas/importar', 'Importar nota', 'upload', 'notas'],
   { g: 'operacao', label: 'Operação', icon: 'swap', items: [
-    ['vendas', 'Vendas', 'receipt', 'vendas'], ['orcamentos', 'Orçamentos', 'quote', 'orcamentos'],
-    ['notas', 'Notas fiscais', 'receipt', 'notas'],
-    ['compras', 'Ordens de compra', 'order', 'compras'], ['agenda', 'Agenda', 'calendar', 'ordens'], ['ordens', 'Ordens de serviço', 'tool', 'ordens']] },
+    ['agenda', 'Agenda', 'calendar', 'ordens'], ['ordens', 'Ordens de serviço', 'tool', 'ordens'],
+    ['orcamentos', 'Orçamentos', 'quote', 'orcamentos'], ['vendas', 'Vendas', 'receipt', 'vendas'],
+    ['notas', 'Notas fiscais', 'receipt', 'notas'], ['compras', 'Ordens de compra', 'order', 'compras']] },
   { g: 'cadastros', label: 'Cadastros', icon: 'box', items: [
     ['produtos', 'Produtos', 'box', 'produtos'], ['servicos', 'Serviços', 'tool', 'servicos'],
     ['clientes', 'Clientes', 'id', 'clientes'], ['fornecedores', 'Fornecedores', 'truck', 'fornecedores'],
-    ['formas-pagamento', 'Formas de pagamento', 'wallet', 'formas_pagamento'], ['condicoes-pagamento', 'Condições de pagamento', 'wallet', 'admin'],
+    ['pagamento', 'Pagamento', 'wallet', 'pagamento'],
     ['equipamentos', 'Equipamentos', 'box', 'ordens'], ['tipos-tarefa', 'Tipos de tarefa', 'tool', 'ordens'], ['questionarios', 'Questionários', 'check', 'ordens']] },
   { g: 'financeiro', label: 'Financeiro', icon: 'wallet', items: [
     ['financeiro', 'Pagamentos e recebimentos', 'wallet', 'financeiro'], ['fluxo-caixa', 'Fluxo de caixa', 'flow', 'financeiro']] },
@@ -859,13 +859,15 @@ const NAV = [
     // Sistema fica sempre por último em Configurações
     { sub: 'Sistema', key: 'sistema', icon: 'monitor', items: [['usuarios', 'Usuários', 'users', 'admin'], ['permissoes', 'Permissões', 'lock', 'admin'], ['backup', 'Backup', 'database', 'admin']] }] },
 ];
-const can = (perm) => !perm || (perm === 'admin' ? isAdmin() : isAdmin() || (state.me?.permissions || []).includes(perm));
+const can = (perm) => !perm || (perm === 'pagamento' ? can('formas_pagamento') || isAdmin()
+  : perm === 'admin' ? isAdmin() : isAdmin() || (state.me?.permissions || []).includes(perm));
 
 /** Qual item do menu fica destacado para cada endereço. */
 function navSection(path) {
-  if (['orcamento/novo', 'vendas/nova', 'notas/importar', 'compra/nova'].includes(path)) return path;
+  if (['ordem/nova', 'orcamento/novo', 'vendas/nova', 'notas/importar', 'compra/nova'].includes(path)) return path;
   if (['orcamento-status', 'orcamento-comportamento'].includes(path)) return 'orcamento-config';
-  const map = [['compra/', 'compras'], ['produto/', 'produtos'], ['venda/', 'vendas'], ['nota/', 'notas'], ['cliente/', 'clientes'], ['fornecedor/', 'fornecedores'], ['orcamento/', 'orcamentos']];
+  if (['formas-pagamento', 'condicoes-pagamento'].includes(path) || path.startsWith('pagamento/')) return 'pagamento';
+  const map = [['ordem/', 'ordens'], ['questionario/', 'questionarios'], ['compra/', 'compras'], ['produto/', 'produtos'], ['venda/', 'vendas'], ['nota/', 'notas'], ['cliente/', 'clientes'], ['fornecedor/', 'fornecedores'], ['orcamento/', 'orcamentos']];
   for (const [pre, sec] of map) if (path.startsWith(pre)) return sec;
   return path;
 }
@@ -930,23 +932,13 @@ function renderShell() {
       <header class="topbar"><button class="icon-btn" id="menu" aria-label="Menu">${icon('menu')}</button><span class="title" id="top-title">Gestão de Serviços</span></header>
       <main class="main" id="view"></main>
     </div></div>`;
-  // Grupos abertos/fechados ficam guardados neste navegador
-  let open = {};
-  try { open = JSON.parse(localStorage.getItem('navOpen') || '{}'); } catch (_) {}
-  $$('.nav-group').forEach((g) => { if (open[g.dataset.g] && g.dataset.g !== 'novo') g.classList.add('open'); });
-  $$('.nav-sub').forEach((g) => { if (open['sub:' + g.dataset.s]) g.classList.add('open'); });
+  // Grupos do menu: abre com clique; ao trocar de tela, só fica aberto o grupo da tela atual (route)
+  try { localStorage.removeItem('navOpen'); } catch (_) {}
   $('.nav').addEventListener('click', (e) => {
     const sh = e.target.closest('.nav-sh');
-    if (sh) {
-      const g = sh.parentElement; g.classList.toggle('open');
-      open['sub:' + g.dataset.s] = g.classList.contains('open');
-      try { localStorage.setItem('navOpen', JSON.stringify(open)); } catch (_) {}
-      return;
-    }
+    if (sh) { sh.parentElement.classList.toggle('open'); return; }
     const h = e.target.closest('.nav-gh'); if (!h) return;
-    const g = h.parentElement; g.classList.toggle('open');
-    open[g.dataset.g] = g.classList.contains('open');
-    try { localStorage.setItem('navOpen', JSON.stringify(open)); } catch (_) {}
+    h.parentElement.classList.toggle('open');
   });
   applyTheme();
   $('#themebtn').onclick = () => { const t = THEME_NEXT[getTheme()] || 'light'; setTheme(t); toast(`Tema: ${THEMES[t]}`); if ($('#tp')) $$('#tp button').forEach((x) => x.classList.toggle('on', x.dataset.t === t)); };
@@ -979,13 +971,15 @@ const ROUTES = [
   [/^cliente\/(\d+)$/, viewCustomer, 'clientes'],
   [/^relatorios$/, viewReports, 'relatorios'],
   [/^usuarios$/, viewUsers, 'admin'],
-  [/^condicoes-pagamento$/, viewPaymentTerms, 'admin'],
+  [/^pagamento$/, (v) => viewPayments(v), 'pagamento'],
+  [/^pagamento\/(formas|condicoes)$/, viewPayments, 'pagamento'],
+  [/^condicoes-pagamento$/, (v) => viewPayments(v, 'condicoes'), 'admin'],
   [/^orcamento-(config|comportamento|status)$/, viewQuoteSettings, 'admin'],
   [/^vendas-comportamento$/, viewSaleBehavior, 'admin'],
   [/^notas-comportamento$/, viewInvoiceBehavior, 'admin'],
   [/^compras-comportamento$/, viewPoBehavior, 'admin'],
   [/^compras$/, viewPurchases, 'compras'],
-  [/^formas-pagamento$/, viewPaymentMethods, 'formas_pagamento'],
+  [/^formas-pagamento$/, (v) => viewPayments(v, 'formas'), 'formas_pagamento'],
   [/^compra\/nova$/, (v) => viewPurchaseForm(v, null), 'compras'],
   [/^compra\/(\d+)$/, viewPurchaseForm, 'compras'],
   [/^agenda$/, viewAgenda, 'ordens'],
@@ -1015,7 +1009,7 @@ async function route() {
   const section = navSection(path);
   $$('.nav a').forEach((a) => a.classList.toggle('active', a.dataset.r === section));
   const active = $('.nav a.active');
-  if (active) { const g = active.closest('.nav-group'); if (g) g.classList.add('open'); const sg = active.closest('.nav-sub'); if (sg) sg.classList.add('open'); }
+  $$('.nav-group, .nav-sub').forEach((g) => g.classList.toggle('open', !!active && g.contains(active)));
   $('#top-title').textContent = active ? active.textContent : 'Gestão de Serviços';
   // Troca o elemento da página para não acumular eventos de telas anteriores
   const old = $('#view'); const view = old.cloneNode(false); old.replaceWith(view);
@@ -2477,9 +2471,109 @@ async function viewServiceOrders(v) {
   await load();
 }
 
+// ---- Apoio da execução da OS: imagens, assinatura, localização, link ----
+function resizeImage(file, max = 1280, q = 0.8) {
+  return new Promise((resolve, reject) => {
+    if (!/^image\//.test(file.type)) return reject(new Error('Escolha uma imagem (JPG, PNG ou WebP)'));
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url); resolve(c.toDataURL('image/jpeg', q));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Não consegui abrir esta imagem')); };
+    img.src = url;
+  });
+}
+function pickImages(multiple = true) {
+  return new Promise((resolve) => {
+    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.multiple = multiple; inp.setAttribute('capture', 'environment');
+    inp.onchange = async () => { const out = []; for (const f of inp.files) { try { out.push(await resizeImage(f)); } catch (e) { fail(e); } } resolve(out); };
+    inp.click();
+  });
+}
+function getGeo() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition((p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }), () => resolve(null), { timeout: 8000, maximumAge: 60000 });
+  });
+}
+function signaturePad(title = 'Assinatura') {
+  return new Promise((resolve) => {
+    let done = false;
+    const m = modal({
+      title,
+      body: `<p class="small muted">Assine com o dedo ou o mouse dentro do quadro.</p><canvas class="sigpad" width="600" height="220"></canvas>`,
+      foot: `<button class="btn" id="sgclr" style="margin-right:auto">Limpar</button><button class="btn" data-close>Cancelar</button><button class="btn primary" id="sgok">${icon('check')}Confirmar</button>`,
+    });
+    const c = $('.sigpad', m.el), ctx = c.getContext('2d');
+    const clear = () => { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); drawn = false; };
+    let drawn = false, down = false;
+    clear();
+    ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#111';
+    const pos = (e) => { const r = c.getBoundingClientRect(); return [(e.clientX - r.left) * c.width / r.width, (e.clientY - r.top) * c.height / r.height]; };
+    c.onpointerdown = (e) => { down = true; c.setPointerCapture(e.pointerId); const [x, y] = pos(e); ctx.beginPath(); ctx.moveTo(x, y); };
+    c.onpointermove = (e) => { if (!down) return; const [x, y] = pos(e); ctx.lineTo(x, y); ctx.stroke(); drawn = true; };
+    c.onpointerup = () => { down = false; };
+    $('#sgclr', m.el).onclick = clear;
+    $('#sgok', m.el).onclick = () => { if (!drawn) return toast('Assine antes de confirmar', 'err'); done = true; const url = c.toDataURL('image/png'); m.close(); resolve(url); };
+    const obs = new MutationObserver(() => { if (!document.body.contains(m.el)) { obs.disconnect(); if (!done) resolve(null); } });
+    obs.observe(document.body, { childList: true, subtree: true });
+  });
+}
+async function copyLink(url, msg = 'Link copiado') {
+  try { await navigator.clipboard.writeText(url); } catch (_) { const t = document.createElement('textarea'); t.value = url; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+  toast(msg);
+}
+const fmtDur = (s) => { s = Math.max(0, Math.round(+s || 0)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h ? `${h}h ${String(m).padStart(2, '0')}min` : `${m}min`; };
+
+// Visibilidade das perguntas (igual a OrderExec::visibleMap no servidor)
+function qVisible(questions, ans) {
+  const vis = {};
+  for (const q of questions) {
+    let ok = true;
+    if (q.cond) {
+      const want = String(q.cond.value).trim().toLowerCase(), v = ans[q.cond.question];
+      if (!vis[q.cond.question]) ok = false;
+      else if (Array.isArray(v)) ok = v.some((x) => String(x).trim().toLowerCase() === want);
+      else ok = String(v ?? '').trim().toLowerCase() === want;
+    }
+    vis[q.id] = ok;
+  }
+  return vis;
+}
+
+// Campo de resposta de uma pergunta (o valor fica em "ans"; fotos e assinatura por botões)
+function qFieldHtml(q, v) {
+  const id = esc(q.id);
+  const opt = (o, on) => `<option value="${esc(o)}" ${on ? 'selected' : ''}>${esc(o)}</option>`;
+  switch (q.type) {
+    case 'area': return `<textarea data-q="${id}" rows="3" maxlength="5000">${esc(v || '')}</textarea>`;
+    case 'numerica': return `<input data-q="${id}" inputmode="decimal" value="${esc(String(v ?? '').replace('.', ','))}">`;
+    case 'monetaria': return `<input data-q="${id}" inputmode="decimal" placeholder="R$ 0,00" value="${v ? esc(Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })) : ''}">`;
+    case 'data': return `<input data-q="${id}" type="date" value="${esc(v || '')}">`;
+    case 'hora': return `<input data-q="${id}" type="time" value="${esc(v || '')}">`;
+    case 'documento': return `<input data-q="${id}" data-mask="doc" inputmode="numeric" value="${esc(v ? docFmt(v) : '')}">`;
+    case 'check': return `<label class="check"><input type="checkbox" data-q="${id}" ${v === 'Sim' ? 'checked' : ''}> Sim</label>`;
+    case 'itens': return `<select data-q="${id}"><option value="">—</option>${q.options.map((o) => opt(o, v === o)).join('')}</select>`;
+    case 'multipla': return `<div class="qmulti">${q.options.map((o) => `<label class="check"><input type="checkbox" data-q="${id}" value="${esc(o)}" ${(v || []).includes(o) ? 'checked' : ''}> ${esc(o)}</label>`).join('')}</div>`;
+    case 'assinatura': return `<div class="qsig">${v ? `<img src="${esc(v)}" alt="Assinatura">` : '<span class="muted small">Sem assinatura</span>'}
+      <span class="inline"><button type="button" class="btn sm js-needs-edit" data-sig="${id}">${icon('pencil')}${v ? 'Assinar de novo' : 'Colher assinatura'}</button>${v ? `<button type="button" class="btn sm ghost js-needs-edit" data-sigdel="${id}">Remover</button>` : ''}</span></div>`;
+    case 'foto': return `<div class="qph">${(v || []).map((p, i) => `<figure><img src="${esc(p.src)}" alt="Foto">${p.lat ? `<figcaption><a href="https://www.google.com/maps?q=${p.lat},${p.lng}" target="_blank" rel="noopener">local</a></figcaption>` : ''}
+        <button type="button" class="icon-btn js-needs-edit" data-phdel="${id}" data-i="${i}" title="Remover foto" aria-label="Remover foto">${icon('x')}</button></figure>`).join('')}
+      <button type="button" class="btn sm js-needs-edit" data-phadd="${id}">${icon('camera')}Adicionar foto</button></div>`;
+    default: return `<input data-q="${id}" maxlength="1000" value="${esc(v || '')}">`;
+  }
+}
+
+const SO_ACTION = { aberta: 'Voltar para aberta', agendada: 'Marcar como agendada', pausada: 'Pausar', concluida: 'Concluir (check-out)', faturada: 'Marcar como faturada' };
+const SO_FICHA_TABS = [['detalhes', 'Detalhes'], ['relato', 'Relato'], ['questionarios', 'Questionários'], ['valores', 'Valores'], ['pendencias', 'Pendências'], ['horas', 'Controle de horas'], ['envios', 'Envios']];
+
 async function viewServiceOrderForm(v, id) {
   const isNew = !id;
-  const o = isNew ? { status: 'aberta', origin: 'chamado' } : await api('service_order', { params: { id } });
+  const D = isNew ? null : await api('service_order_detail', { params: { id } });
+  const o = isNew ? { status: 'aberta', origin: 'chamado' } : D.order;
   const form = await api('service_order_form', { params: { customer_id: o.customer_id || 0 } });
   const customers = await api('customers', { params: { active: '1', limit: 200, sort: 'asc' } });
   const fields = (f) => {
@@ -2493,9 +2587,9 @@ async function viewServiceOrderForm(v, id) {
     if (o.task_type_id && !list.some((t) => +t.id === +o.task_type_id)) list.push({ id: o.task_type_id, name: `${o.task_type_name || 'Tipo removido'} (inativo)` });
     return list.map((t) => `<option value="${t.id}" ${+o.task_type_id === +t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
   })();
-  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/ordens">← Ordens de serviço</a></p><h1>${isNew ? 'Nova ordem de serviço' : 'Ordem de serviço #' + o.id}</h1>
-      ${isNew ? '' : `<p class="muted">${soStatusHtml(o.status, form.statuses)} ${o.origin_label ? `· ${esc(o.origin_label)}` : ''}</p>`}</div>${isNew ? '' : `<div class="actions"><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn js-edit-only" id="socancel">${icon('x')}Cancelar</button></div>`}</div>
-    <div class="card"><form class="form" id="soform">
+  const locked = o.status === 'faturada';
+  const editBtns = (k) => locked ? '' : `<span class="inline"><button type="button" class="btn sm js-view-only" data-edit>${icon('pencil')}Editar</button><button type="button" class="btn sm js-edit-only" data-cancel="${k}">${icon('x')}Cancelar</button><button type="button" class="btn sm primary js-edit-only" data-save="${k}">Salvar</button></span>`;
+  const detailsForm = `<form class="form" id="soform">
       <label>Cliente * <select name="customer_id" id="cust" required><option value="">Selecione…</option>${customers.rows.map((c) => `<option value="${c.id}" ${+o.customer_id === +c.id ? 'selected' : ''}>${esc(custName(c))}</option>`).join('')}</select></label>
       <div class="grid two"><label>Equipamento <span id="eqs"></span></label>
         <label>Tipo de tarefa <select name="task_type_id" required><option value="">Selecione…</option>${taskOpts}</select></label></div>
@@ -2509,38 +2603,316 @@ async function viewServiceOrderForm(v, id) {
       <div class="grid two"><label>Agendar para <input type="datetime-local" name="scheduled_at" value="${dtLocal(o.scheduled_at)}"></label>
         <label>Prazo <input type="date" name="due_date" value="${esc(o.due_date || '')}"></label></div>
       <label>Observações internas <input name="notes" maxlength="500" value="${esc(o.notes)}"></label>
-      <div class="actions">${isNew ? '<a class="btn" href="#/ordens">Cancelar</a>' : ''}<button class="btn primary js-edit-only" type="submit" id="sosave">Salvar ordem</button></div>
-    </form>${isNew ? '' : `<div class="so-status"><h3>Andamento</h3>
-      ${o.transitions.length ? `<div class="actions">${o.transitions.map((s) => `<button class="btn" data-to="${s}">${icon('check')}Mover para "${esc(form.statuses[s])}"</button>`).join('')}</div>` : '<p class="muted">Ordem finalizada: não há mais mudanças de status.</p>'}
-    </div>`}</div>`;
-  fields(form);
-  const reloadCustomer = async () => {
-    const cid = $('#cust', v).value;
-    const f = await api('service_order_form', { params: { customer_id: cid || 0 } });
-    o.equipment_id = null; o.quote_id = null;
-    fields(f);
-  };
-  $('#cust', v).onchange = () => reloadCustomer().catch(fail);
-  $$('[name="origin"]', v).forEach((r) => (r.onchange = () => { $('#qts-wrap', v).hidden = r.value !== 'orcamento'; }));
-  editLock(v, $('#soform', v), !isNew);
-  const socancel = $('#socancel', v); if (socancel) socancel.onclick = () => route();
-  $('#soform', v).onsubmit = (e) => {
-    e.preventDefault();
-    busy($('#sosave', v), async () => {
-      const d = formData($('#soform', v));
+      ${isNew ? '<div class="actions"><a class="btn" href="#/ordens">Cancelar</a><button class="btn primary" type="submit" id="sosave">Salvar ordem</button></div>' : ''}
+    </form>`;
+
+  const bindDetails = (root) => {
+    fields(form);
+    $('#cust', v).onchange = async () => {
+      try { const f = await api('service_order_form', { params: { customer_id: $('#cust', v).value || 0 } }); o.equipment_id = null; o.quote_id = null; fields(f); } catch (e) { fail(e); }
+    };
+    $$('[name="origin"]', v).forEach((r) => (r.onchange = () => { $('#qts-wrap', v).hidden = r.value !== 'orcamento'; }));
+    const saveDetails = (btn) => busy(btn, async () => {
+      const f = $('#soform', v);
+      if (!f.reportValidity()) return;
+      const d = formData(f);
       if (d.origin === 'orcamento' && !d.quote_id) throw new Error('Selecione o orçamento');
       const r = await api('service_order_save', { body: { ...d, id: isNew ? undefined : o.id } });
       toast('Ordem salva');
-      go('ordem/' + r.id);
+      if (isNew) go('ordem/' + r.id); else route();
     });
+    $('#soform', v).onsubmit = (e) => { e.preventDefault(); saveDetails($('#sosave', v) || $('[data-save=detalhes]', root)); };
+    if (!isNew) {
+      editLock(root, $('#soform', v), true);
+      const sv = $('[data-save=detalhes]', root); if (sv) sv.onclick = () => saveDetails(sv);
+    }
   };
-  $$('[data-to]', v).forEach((b) => (b.onclick = () => busy(b, async () => {
+
+  if (isNew) {
+    v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/ordens">← Ordens de serviço</a></p><h1>Nova ordem de serviço</h1></div></div><div class="card">${detailsForm}</div>`;
+    bindDetails(v);
+    return;
+  }
+
+  // ---------- Ficha da OS existente ----------
+  const tabKey = 'soTab:' + o.id;
+  let tab = sessionStorage.getItem(tabKey) || 'detalhes';
+  const pend = D.pending;
+  const qs = D.questionnaires;
+  const qMissing = qs.reduce((n, q) => n + (q.answered ? q.missing.length : (q.linked ? 1 : 0)), 0);
+  const counts = { questionarios: qs.length, valores: D.items.rows.length, pendencias: pend.length, envios: D.sends.length };
+  const cust = o.customer_trade_name || o.customer_name;
+  const transitions = o.transitions.map((s) => {
+    const label = s === 'em_execucao' ? (o.status === 'pausada' ? 'Retomar atendimento' : 'Iniciar atendimento (check-in)') : SO_ACTION[s] || s;
+    const cls = s === 'concluida' || s === 'em_execucao' ? 'btn primary' : 'btn';
+    return `<button class="${cls}" data-to="${s}">${icon(s === 'pausada' ? 'minusc' : 'check')}${esc(label)}</button>`;
+  }).join('');
+
+  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/ordens">← Ordens de serviço</a></p><h1>Ordem de serviço #${o.id}</h1>
+      <p class="muted">${soStatusHtml(o.status, form.statuses)} · ${esc(cust)}${o.task_type_name ? ` · ${esc(o.task_type_name)}` : ''}${o.scheduled_at ? ` · ${dt(o.scheduled_at)}` : ''}</p></div>
+    <div class="actions">${transitions}
+      <div class="dd"><button type="button" class="btn dd-btn" aria-haspopup="true" aria-expanded="false">${icon('menu')}Mais ações${icon('chevron')}</button>
+        <div class="dd-menu" role="menu" hidden>
+          <a role="menuitem" href="${esc(o.public_url)}" target="_blank" rel="noopener">${icon('eye')}Ver OS digital</a>
+          <button type="button" role="menuitem" data-act="link">${icon('link')}Copiar link da OS</button>
+          <button type="button" role="menuitem" data-act="email">${icon('mail')}Enviar OS por e-mail</button>
+          <button type="button" role="menuitem" data-act="whats">${icon('whats')}Enviar pelo WhatsApp</button>
+        </div></div></div></div>
+    ${pend.length && !['concluida', 'faturada'].includes(o.status) ? `<div class="alert warn so-pend">${icon('warn')}<span>Para concluir esta ordem falta ${pend.length} ${pend.length === 1 ? 'item' : 'itens'}. <a href="#" data-tabgo="pendencias">Ver pendências</a></span></div>` : ''}
+    <div class="seg so-tabs" id="sotabs">${SO_FICHA_TABS.map(([k, l]) => `<button type="button" data-tab="${k}">${l}${counts[k] ? ` <span class="badge${k === 'pendencias' ? ' red' : ''}">${counts[k]}</span>` : ''}</button>`).join('')}</div>
+    <div id="sopanes">
+      <div class="card" data-pane="detalhes"><div class="card-head"><h2>Dados da ordem</h2>${editBtns('detalhes')}</div>${detailsForm}</div>
+      <div data-pane="relato"></div>
+      <div data-pane="questionarios"></div>
+      <div data-pane="valores"></div>
+      <div class="card" data-pane="pendencias"></div>
+      <div class="card" data-pane="horas"></div>
+      <div data-pane="envios"></div>
+    </div>`;
+  const pane = (k) => $(`[data-pane="${k}"]`, v);
+  const showTab = (k) => {
+    tab = SO_FICHA_TABS.some(([x]) => x === k) ? k : 'detalhes';
+    sessionStorage.setItem(tabKey, tab);
+    $$('#sotabs [data-tab]', v).forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+    $$('#sopanes > [data-pane]', v).forEach((p) => (p.hidden = p.dataset.pane !== tab));
+  };
+  $('#sotabs', v).onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) showTab(b.dataset.tab); };
+  v.addEventListener('click', (e) => { const a = e.target.closest('[data-tabgo]'); if (a) { e.preventDefault(); showTab(a.dataset.tabgo); } });
+  // Cancelar a edição de qualquer aba: recarrega a ficha (descarta o que não foi salvo)
+  v.addEventListener('click', (e) => { if (e.target.closest('[data-cancel]')) route(); });
+
+  // ---- Detalhes
+  bindDetails(pane('detalhes'));
+
+  // ---- Relato, fotos, assinatura e km
+  const rp = pane('relato');
+  let sig; // undefined = sem mudança; '' = remover; data URL = nova
+  rp.innerHTML = `<div class="card"><div class="card-head"><h2>Relato do atendimento</h2>${editBtns('relato')}</div>
+      <form class="form" id="rpf">
+        <label>O que foi feito <textarea name="report" rows="5" maxlength="10000" placeholder="Descreva o serviço realizado, peças trocadas, recomendações…">${esc(o.report || '')}</textarea></label>
+        <div class="grid two"><label>Km rodado <input name="km" inputmode="decimal" value="${o.km != null ? esc(String(o.km).replace('.', ',')) : ''}" placeholder="0"></label></div>
+        <fieldset class="fset"><legend>Assinatura do cliente</legend>
+          <div id="rpsig"></div>
+          <div class="grid two"><label>Nome de quem assinou <input name="signer_name" maxlength="120" value="${esc(o.signer_name || '')}"></label>
+            <label>CPF/CNPJ de quem assinou <input name="signer_doc" data-mask="doc" inputmode="numeric" value="${o.signer_doc ? esc(docFmt(o.signer_doc)) : ''}"></label></div>
+        </fieldset>
+      </form></div>
+    <div class="card"><div class="card-head"><h2>Fotos <span class="badge">${D.photos.length}</span></h2>
+        ${locked ? '' : `<button type="button" class="btn sm js-needs-edit" id="phadd">${icon('camera')}Adicionar fotos</button>`}</div>
+      ${D.photos.length ? `<div class="so-photos">${D.photos.map((p) => `<figure><a href="${esc(p.image)}" target="_blank" rel="noopener"><img src="${esc(p.image)}" alt="Foto"></a>
+          <figcaption>${esc(p.caption || '')}<span class="small muted">${dt(p.created_at)}${p.user_name ? ' · ' + esc(p.user_name) : ''}</span></figcaption>
+          ${locked ? '' : `<button type="button" class="icon-btn js-needs-edit" data-phdel="${p.id}" title="Excluir foto" aria-label="Excluir foto">${icon('trash')}</button>`}</figure>`).join('')}</div>`
+        : '<p class="muted small">Nenhuma foto. Fotos do equipamento, do serviço feito ou de peças trocadas.</p>'}</div>`;
+  const paintSig = () => {
+    const cur = sig === undefined ? o.signature : sig;
+    $('#rpsig', rp).innerHTML = `<div class="qsig">${cur ? `<img src="${esc(cur)}" alt="Assinatura">` : '<span class="muted small">Sem assinatura</span>'}
+      ${locked ? '' : `<span class="inline"><button type="button" class="btn sm js-needs-edit" id="sgnew">${icon('pencil')}${cur ? 'Assinar de novo' : 'Colher assinatura'}</button>${cur ? '<button type="button" class="btn sm ghost js-needs-edit" id="sgdel">Remover</button>' : ''}</span>`}</div>`;
+  };
+  paintSig();
+  const rpLock = editLock(rp, $('#rpf', rp), true, (l) => $$('#rpsig button', rp).forEach((b) => (b.disabled = l)));
+  rp.addEventListener('click', async (e) => {
+    if (e.target.closest('#sgnew')) { const s = await signaturePad('Assinatura do cliente'); if (s) { sig = s; paintSig(); rpLock(false); } }
+    if (e.target.closest('#sgdel')) { sig = ''; paintSig(); rpLock(false); }
+  });
+  const rsv = $('[data-save=relato]', rp);
+  if (rsv) rsv.onclick = () => busy(rsv, async () => {
+    const d = formData($('#rpf', rp));
+    await api('so_report_save', { body: { id: o.id, ...d, ...(sig === undefined ? {} : { signature: sig }) } });
+    toast('Relato salvo'); route();
+  });
+  const pha = $('#phadd', rp);
+  if (pha) pha.onclick = async () => {
+    const imgs = await pickImages(true);
+    if (!imgs.length) return;
+    const caption = imgs.length === 1 ? (window.prompt('Legenda da foto (opcional)') || '') : '';
+    try { for (const im of imgs) await api('so_photo_add', { body: { id: o.id, image: im, caption } }); toast(imgs.length === 1 ? 'Foto incluída' : `${imgs.length} fotos incluídas`); route(); } catch (e) { fail(e); route(); }
+  };
+  rp.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-phdel]'); if (!b) return;
+    if (!(await confirmBox('Excluir esta foto?', { ok: 'Excluir', danger: true }))) return;
+    busy(b, async () => { await api('so_photo_delete', { body: { photo_id: +b.dataset.phdel } }); toast('Foto excluída'); route(); });
+  });
+
+  // ---- Questionários
+  const qp = pane('questionarios');
+  qp.innerHTML = qs.length ? qs.map((q, n) => `<div class="card qrun" data-qn="${n}">
+      <div class="card-head"><div><h2>${esc(q.name)}</h2>
+        <div class="small">${!q.answered ? `<span class="badge${q.linked ? ' red' : ''}">Não respondido</span>` : q.missing.length ? `<span class="badge red">Falta ${q.missing.length} obrigatória(s)</span>` : '<span class="badge ok">Respondido</span>'}
+          ${q.answered_at ? `<span class="muted"> · atualizado em ${dt(q.answered_at)}</span>` : ''}${q.linked ? '' : '<span class="muted"> · fora do tipo de tarefa atual</span>'}</div></div>${editBtns('q' + n)}</div>
+      <form class="form" onsubmit="return false">
+        ${q.allow_equipment ? `<label>Equipamento${q.equipment_required ? ' *' : ''} <select data-eq><option value="">Nenhum</option>${D.equipments.map((e) => `<option value="${e.id}" ${+q.answer_equipment_id === +e.id ? 'selected' : ''}>${esc(e.name)}${e.serial ? ' · ' + esc(e.serial) : ''}</option>`).join('')}</select></label>` : ''}
+        <div class="qgrid" style="--cols:${Math.max(1, +q.per_line || 1)}"></div>
+      </form></div>`).join('')
+    : '<div class="card"><div class="empty">Esta ordem não tem questionários. Escolha um tipo de tarefa com questionários em Detalhes, ou ligue questionários ao tipo em Cadastros → Tipos de tarefa.</div></div>';
+  $$('.qrun', qp).forEach((card) => {
+    const q = qs[+card.dataset.qn];
+    const ans = JSON.parse(JSON.stringify(q.answers || {}));
+    const grid = $('.qgrid', card);
+    let isLocked = true;
+    const paint = () => {
+      const vis = qVisible(q.questions, ans);
+      grid.innerHTML = q.questions.map((x, i) => `<div class="qf" data-qid="${esc(x.id)}" ${vis[x.id] ? '' : 'hidden'}>
+          <div class="qf-l"><b>${i + 1}) ${esc(x.label)}${x.required ? ' *' : ''}</b>${x.description ? `<span class="small muted">${esc(x.description)}</span>` : ''}</div>
+          ${qFieldHtml(x, ans[x.id])}</div>`).join('');
+      $$('input, select, textarea, .js-needs-edit', grid).forEach((el) => (el.disabled = isLocked));
+    };
+    const read = (el) => {
+      const x = q.questions.find((y) => y.id === el.dataset.q); if (!x) return;
+      if (x.type === 'multipla') ans[x.id] = $$(`[data-q="${CSS.escape(x.id)}"]:checked`, grid).map((c) => c.value);
+      else if (x.type === 'check') ans[x.id] = el.checked ? 'Sim' : '';
+      else ans[x.id] = el.value;
+    };
+    const updVis = () => { const vis = qVisible(q.questions, ans); $$('.qf', grid).forEach((f) => (f.hidden = !vis[f.dataset.qid])); };
+    grid.addEventListener('input', (e) => { if (e.target.dataset.q) { read(e.target); updVis(); } });
+    grid.addEventListener('change', (e) => { if (e.target.dataset.q) { read(e.target); updVis(); } });
+    grid.addEventListener('click', async (e) => {
+      const add = e.target.closest('[data-phadd]'), del = e.target.closest('[data-phdel]'), sg = e.target.closest('[data-sig]'), sgd = e.target.closest('[data-sigdel]');
+      if (add) {
+        const x = q.questions.find((y) => y.id === add.dataset.phadd);
+        const imgs = await pickImages(true); if (!imgs.length) return;
+        const geo = x.geo ? await getGeo() : null;
+        const now = new Date(), at = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${now.toTimeString().slice(0, 8)}`;
+        ans[x.id] = [...(ans[x.id] || []), ...imgs.map((src) => ({ src, at, ...(geo || {}) }))];
+        if (x.geo && !geo) toast('Não consegui pegar a localização (permita o acesso no navegador)', 'err');
+        paint();
+      }
+      if (del) { ans[del.dataset.phdel].splice(+del.dataset.i, 1); paint(); }
+      if (sg) { const s = await signaturePad(q.questions.find((y) => y.id === sg.dataset.sig).label); if (s) { ans[sg.dataset.sig] = s; paint(); } }
+      if (sgd) { ans[sgd.dataset.sigdel] = ''; paint(); }
+    });
+    paint();
+    editLock(card, $('form', card), true, (l) => { isLocked = l; paint(); });
+    const sv = $('[data-save]', card);
+    if (sv) sv.onclick = () => busy(sv, async () => {
+      const eq = $('[data-eq]', card);
+      if (q.allow_equipment && q.equipment_required && eq && !eq.value) throw new Error('Escolha o equipamento deste questionário');
+      const vis = qVisible(q.questions, ans);
+      const out = {}; for (const x of q.questions) if (vis[x.id] && ans[x.id] !== undefined) out[x.id] = ans[x.id];
+      const r = await api('so_answers_save', { body: { id: o.id, questionnaire_id: q.id, answers: out, equipment_id: eq ? eq.value : null } });
+      toast(r.missing.length ? `Salvo. Ainda falta: ${r.missing.join(', ')}` : 'Questionário salvo');
+      route();
+    });
+  });
+
+  // ---- Valores
+  const vp = pane('valores');
+  const it = D.items;
+  vp.innerHTML = `<div class="card"><div class="card-head"><h2>Produtos, serviços e custos</h2>${locked ? '' : `<span class="inline"><button type="button" class="btn sm js-view-only" data-edit>${icon('pencil')}Editar</button><button type="button" class="btn sm js-edit-only" data-cancel="valores">Concluir edição</button></span>`}</div>
+      <p class="small muted">Registro do que foi usado no atendimento. Não baixa o estoque nem gera cobrança.</p>
+      ${it.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Descrição</th><th>Tipo</th><th class="num">Qtd.</th><th class="num">Valor unit.</th><th class="num">Total</th><th></th></tr></thead><tbody>
+        ${it.rows.map((r) => `<tr><td>${esc(r.description)}</td><td>${esc(D.kinds[r.kind])}</td><td class="num">${qty(r.quantity)}</td><td class="num">${money(r.unit_price)}</td><td class="num">${money(r.total)}</td>
+          <td class="num">${locked ? '' : `<button type="button" class="icon-btn js-needs-edit" data-itdel="${r.id}" title="Remover" aria-label="Remover">${icon('trash')}</button>`}</td></tr>`).join('')}
+        </tbody><tfoot>${Object.entries({ produto: 'Produtos', servico: 'Serviços', custo: 'Custos adicionais' }).filter(([k]) => it.totals[k]).map(([k, l]) => `<tr><td colspan="4" class="num muted">${l}</td><td class="num">${money(it.totals[k])}</td><td></td></tr>`).join('')}
+          <tr><td colspan="4" class="num"><strong>Total</strong></td><td class="num"><strong>${money(it.totals.total)}</strong></td><td></td></tr></tfoot></table></div>`
+        : '<p class="muted">Nenhum item lançado.</p>'}
+      ${locked ? '' : `<form class="form js-edit-only so-additem" id="itf" hidden>
+        <div class="so-itgrid"><label>Tipo <select name="kind">${Object.entries(D.kinds).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
+          <label>Item <select name="product_id"></select><input name="description" maxlength="200" placeholder="Descrição" hidden></label>
+          <label>Qtd. <input name="quantity" inputmode="decimal" value="1"></label></div>
+        <div class="so-itgrid"><label>Valor unitário (R$) <input name="unit_price" inputmode="decimal" placeholder="0,00"></label>
+          <div class="actions" style="align-self:end"><button class="btn primary" id="itadd">${icon('plus')}Incluir item</button></div></div>
+      </form>`}</div>`;
+  if (!locked) {
+    const itf = $('#itf', vp);
+    const all = await products().catch(() => []);
+    const kindSel = itf.kind, pSel = itf.product_id, dIn = itf.description;
+    const fillProducts = () => {
+      const k = kindSel.value;
+      pSel.hidden = k === 'custo'; dIn.hidden = k !== 'custo';
+      const list = all.filter((p) => (k === 'servico' ? p.type === 'servico' : p.type !== 'servico'));
+      pSel.innerHTML = `<option value="">Selecione…</option>${list.map((p) => `<option value="${p.id}" data-price="${+p.sale_price || 0}">${esc(p.name)}</option>`).join('')}`;
+    };
+    kindSel.onchange = fillProducts; fillProducts();
+    pSel.onchange = () => { const op = pSel.selectedOptions[0]; if (op && op.dataset.price && !itf.unit_price.value) itf.unit_price.value = (+op.dataset.price).toLocaleString('pt-BR', { minimumFractionDigits: 2 }); };
+    editLock(vp, itf, true);
+    itf.onsubmit = (e) => { e.preventDefault(); busy($('#itadd', vp), async () => {
+      const d = formData(itf);
+      if (d.kind !== 'custo' && !d.product_id) throw new Error('Escolha o item do cadastro');
+      if (d.kind === 'custo' && !d.description.trim()) throw new Error('Descreva o custo');
+      await api('so_item_save', { body: { id: o.id, ...d } });
+      toast('Item incluído'); route();
+    }); };
+    vp.addEventListener('click', (e) => { const b = e.target.closest('[data-itdel]'); if (b) busy(b, async () => { await api('so_item_delete', { body: { item_id: +b.dataset.itdel } }); toast('Item removido'); route(); }); });
+  }
+
+  // ---- Pendências
+  pane('pendencias').innerHTML = `<h2>Pendências para concluir</h2>
+    ${o.status === 'faturada' ? '<p class="muted">Ordem faturada.</p>'
+      : pend.length ? `<ul class="so-pendlist">${pend.map((p) => `<li>${icon('warn')}<span>${esc(p)}</span></li>`).join('')}</ul><p class="small muted">As pendências vêm das obrigatoriedades do tipo de tarefa e das perguntas obrigatórias dos questionários.</p>`
+      : `<p>${icon('check')} Nada pendente${['concluida'].includes(o.status) ? '.' : ': a ordem já pode ser concluída.'}</p>`}`;
+
+  // ---- Controle de horas
+  const h = D.hours;
+  pane('horas').innerHTML = `<h2>Controle de horas</h2>
+    ${h.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Monitoramento</th><th>Horário</th><th>Tempo corrido</th><th>Colaborador</th></tr></thead><tbody>
+      ${h.rows.map((r) => `<tr><td>${esc(r.label)}</td><td class="nowrap">${dt(r.at)}</td><td>${r.elapsed != null ? fmtDur(r.elapsed) : ''}</td><td>${esc(r.user_name || '—')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Sem registros.</p>'}
+    <div class="kpis so-kpis"><div class="kpi"><div class="label">Tempo de trabalho</div><div class="value">${fmtDur(h.work)}</div></div>
+      <div class="kpi"><div class="label">Tempo de pausa</div><div class="value">${fmtDur(h.pause)}</div></div></div>
+    ${h.running ? `<p class="small muted">${h.running === 'work' ? 'Atendimento em andamento' : 'Atendimento pausado'}: os tempos contam até agora.</p>` : ''}
+    <p class="small muted">O check-in é feito em "Iniciar atendimento" e o check-out em "Concluir".</p>`;
+
+  // ---- Envios
+  const ep = pane('envios');
+  const done = ['concluida', 'faturada'].includes(o.status);
+  ep.innerHTML = `<div class="card"><div class="card-head"><h2>Envios ao cliente</h2>
+      <span class="inline"><button type="button" class="btn sm" data-act="email">${icon('mail')}Enviar OS por e-mail</button>
+        <button type="button" class="btn sm" data-act="survey" ${done ? '' : 'disabled title="Disponível depois de concluir"'}>${icon('send')}Enviar pesquisa</button>
+        <button type="button" class="btn sm" data-act="link">${icon('link')}Copiar link da OS</button></span></div>
+      ${D.sends.length ? `<div class="table-wrap"><table><thead><tr><th>Quando</th><th>O quê</th><th>Para</th><th>Resultado</th><th>Por</th></tr></thead><tbody>
+        ${D.sends.map((s) => `<tr><td class="nowrap">${dt(s.created_at)}</td><td>${s.kind === 'os' ? 'OS digital' : 'Pesquisa de satisfação'}</td><td>${esc(s.recipient)}</td>
+          <td>${+s.ok ? '<span class="badge ok">Enviado</span>' : `<span class="badge red">Falhou</span> <span class="small muted">${esc(s.error || '')}</span>`}</td><td>${esc(s.user_name || '—')}</td></tr>`).join('')}</tbody></table></div>`
+        : '<p class="muted">Nada enviado ainda. Conforme o tipo de tarefa, a OS e a pesquisa vão por e-mail sozinhas ao concluir.</p>'}</div>
+    <div class="card"><h2>Pesquisa de satisfação</h2>
+      ${o.survey_at ? `<p><span class="stars-v">${'★'.repeat(+o.survey_rating)}<span class="off">${'★'.repeat(5 - +o.survey_rating)}</span></span> · respondida em ${dt(o.survey_at)}</p>${o.survey_comment ? `<p class="notes">${esc(o.survey_comment)}</p>` : ''}`
+        : `<p class="muted">${done ? 'O cliente ainda não avaliou.' : 'A avaliação fica disponível depois de concluir a ordem.'}</p>${done ? `<button type="button" class="btn sm" data-act="slink">${icon('link')}Copiar link da pesquisa</button>` : ''}`}</div>`;
+
+  // ---- Ações (cabeçalho e Envios)
+  const sendModal = (kind) => {
+    const m = modal({
+      title: kind === 'os' ? 'Enviar OS por e-mail' : 'Enviar pesquisa de satisfação',
+      body: `<form class="form" id="smf"><label>E-mail do cliente <input type="email" name="to" required value="${esc(o.customer_email || '')}"></label>
+        <p class="small muted">${kind === 'os' ? 'O cliente recebe o link da OS digital, para ver, imprimir ou salvar em PDF.' : 'O cliente recebe o link para dar uma nota de 1 a 5 ao atendimento.'}</p></form>`,
+      foot: `<button class="btn" data-close>Cancelar</button><button class="btn primary" id="smok">${icon('send')}Enviar</button>`,
+    });
+    const f = $('#smf', m.el);
+    const send = () => busy($('#smok', m.el), async () => {
+      if (!f.reportValidity()) return;
+      await api('so_send', { body: { id: o.id, kind, to: f.to.value } });
+      m.close(); toast('E-mail enviado'); route();
+    });
+    $('#smok', m.el).onclick = send; f.onsubmit = (e) => { e.preventDefault(); send(); };
+  };
+  v.addEventListener('click', (e) => {
+    const a = e.target.closest('[data-act]'); if (!a) return;
+    if (a.dataset.act === 'link') copyLink(o.public_url);
+    if (a.dataset.act === 'slink') copyLink(o.survey_url);
+    if (a.dataset.act === 'email') sendModal('os');
+    if (a.dataset.act === 'survey') sendModal('pesquisa');
+    if (a.dataset.act === 'whats') {
+      const phone = String(o.customer_phone || '').replace(/\D/g, '');
+      const msg = `Olá${cust ? ', ' + cust.split(' ')[0] : ''}! Segue a ordem de serviço #${o.id}: ${done ? o.survey_url : o.public_url}`;
+      window.open(`https://wa.me/${phone.length >= 10 ? '55' + phone : ''}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener');
+    }
+  });
+
+  // ---- Andamento (status)
+  $$('[data-to]', v).forEach((b) => (b.onclick = async () => {
     const to = b.dataset.to;
+    if (to === 'concluida' && pend.length) {
+      const m = modal({ title: 'Ainda não dá para concluir', body: `<p>Falta:</p><ul class="so-pendlist">${pend.map((p) => `<li>${icon('warn')}<span>${esc(p)}</span></li>`).join('')}</ul>`,
+        foot: `<button class="btn" data-close>Fechar</button><button class="btn primary" id="gopend">Ver pendências</button>` });
+      $('#gopend', m.el).onclick = () => { m.close(); showTab('pendencias'); };
+      return;
+    }
     if (to === 'faturada' && !(await confirmBox('Marcar esta ordem como faturada? Ela não poderá mais ser alterada.', { ok: 'Marcar como faturada' }))) return;
-    await api('service_order_status', { body: { id: o.id, status: to } });
-    toast('Status atualizado');
-    route();
-  })));
+    busy(b, async () => {
+      await api('service_order_status', { body: { id: o.id, status: to } });
+      toast(to === 'concluida' ? 'Ordem concluída' : to === 'em_execucao' ? 'Atendimento iniciado' : 'Status atualizado');
+      route();
+    });
+  }));
+
+  showTab(tab);
 }
 
 async function viewEquipments(v) {
@@ -3868,6 +4240,24 @@ async function convertQuote(q) {
 }
 
 // ============ Formas de pagamento ============
+// ============ Pagamento (formas e condições numa tela só) ============
+async function viewPayments(v, tab) {
+  const tabs = [['formas', 'Formas de pagamento', 'formas_pagamento'], ['condicoes', 'Condições de pagamento', 'admin']].filter(([, , p]) => can(p));
+  if (!tabs.some(([k]) => k === tab)) tab = prefGet('payTab', tabs[0][0]);
+  if (!tabs.some(([k]) => k === tab)) tab = tabs[0][0];
+  prefSet('payTab', tab);
+  v.innerHTML = `<div class="page-head"><div><h1>Pagamento</h1><p class="muted">Formas e condições de pagamento usadas nas vendas, orçamentos, ordens de compra e no financeiro.</p></div></div>
+    ${tabs.length > 1 ? `<div class="seg" id="paytabs" style="margin-bottom:14px">${tabs.map(([k, l]) => `<button type="button" data-pt="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
+    <div id="paybody"></div>`;
+  const tb = $('#paytabs', v);
+  if (tb) tb.onclick = (e) => { const b = e.target.closest('[data-pt]'); if (b) go('pagamento/' + b.dataset.pt); };
+  const body = $('#paybody', v);
+  const p = tab === 'condicoes' ? viewPaymentTerms(body) : viewPaymentMethods(body);
+  // O título de cada parte vira subtítulo dentro da tela
+  const h = $('.page-head h1', body); if (h) h.outerHTML = `<h2>${h.innerHTML}</h2>`;
+  await p;
+}
+
 async function viewPaymentMethods(v) {
   v.innerHTML = `<div class="page-head"><div><h1>Formas de pagamento</h1><p class="muted">Aparecem nas vendas, nos orçamentos, no financeiro e nas ordens de compra, nesta ordem.</p></div>
       <div class="actions"><button class="btn primary" id="newpm">${icon('plus')}Nova forma de pagamento</button></div></div>
