@@ -99,6 +99,19 @@ class OrderExec
         return trim((string)$v) !== '';
     }
 
+    /** [preenchidas, total] entre as perguntas que aparecem (as escondidas pela condição não contam). */
+    public static function progress(array $qn, array $ans): array
+    {
+        $vis = self::visibleMap($qn['questions'], $ans);
+        $filled = $total = 0;
+        foreach ($qn['questions'] as $q) {
+            if (empty($vis[$q['id']])) continue;
+            $total++;
+            if (self::filled($q, $ans[$q['id']] ?? null)) $filled++;
+        }
+        return [$filled, $total];
+    }
+
     /** Perguntas obrigatórias (visíveis) sem resposta. */
     public static function missing(array $qn, array $ans): array
     {
@@ -181,7 +194,9 @@ class OrderExec
             $r = $rows[$qid] ?? null;
             $ans = $r ? (json_decode($r['answers'], true) ?: []) : [];
             $qn['linked'] = in_array($qid, $linked, true);
-            $qn['answered'] = (bool)$r;
+            // Respondido = pelo menos uma pergunta (das que aparecem) preenchida; apagar todas as respostas volta a "não respondido"
+            [$qn['filled'], $qn['total']] = self::progress($qn, $ans);
+            $qn['answered'] = $qn['filled'] > 0;
             $qn['answers'] = $ans;
             $qn['answer_equipment_id'] = $r && $r['equipment_id'] ? (int)$r['equipment_id'] : null;
             $qn['answered_at'] = $r['updated_at'] ?? null;
@@ -207,6 +222,11 @@ class OrderExec
         }
         $data = ['answers' => json_encode($ans, JSON_UNESCAPED_UNICODE), 'equipment_id' => $eq, 'user_id' => $userId ?: null, 'updated_at' => now()];
         $id = DB::val('SELECT id FROM so_answers WHERE order_id = ? AND questionnaire_id = ?', [$orderId, $qid]);
+        // Tudo apagado (nenhuma resposta e nenhum equipamento): o questionário volta a não respondido
+        if (!self::progress($qn, $ans)[0] && !$eq) {
+            if ($id) DB::run('DELETE FROM so_answers WHERE id = ?', [$id]);
+            return ['missing' => self::missing($qn, $ans)];
+        }
         if ($id) DB::update('so_answers', (int)$id, $data);
         else DB::insert('so_answers', $data + ['order_id' => $orderId, 'questionnaire_id' => $qid]);
         return ['missing' => self::missing($qn, $ans)];

@@ -1608,6 +1608,20 @@ ok($rxBack === $rxCli && !Customers::get($rxCli)['deleted_at'], 'cadastrar de no
 $rxSup = Customers::save(['type' => 'pj', 'name' => 'Fornecedor sem uso'], null, 'suppliers');
 ok(Removals::delete('suppliers', $rxSup) === 'apagado', 'fornecedor nunca usado é apagado');
 
+echo "\nQuestionário completo depois de editar\n";
+$qcCli = Customers::save(['type' => 'pf', 'name' => 'Cliente questionário']);
+$qcQn = Questionnaires::save(['name' => 'Checklist', 'questions' => [['id' => 'a', 'label' => 'Pressão', 'type' => 'texto', 'required' => true], ['id' => 'b', 'label' => 'Obs', 'type' => 'texto']]]);
+$qcTt = TaskTypes::save(['name' => 'Com checklist', 'questionnaire_ids' => [$qcQn], 'requires' => ['questionario']]);
+$qcOs = ServiceOrders::save(['customer_id' => $qcCli, 'task_type_id' => $qcTt, 'description' => 'Checklist'], $uid);
+$qcGet = fn() => array_values(array_filter(OrderExec::questionnaires(ServiceOrders::get($qcOs)), fn($q) => (int)$q['id'] === $qcQn))[0];
+OrderExec::saveAnswers($qcOs, $qcQn, ['a' => '8 bar', 'b' => 'ok'], null, $uid);
+ok($qcGet()['answered'] && !$qcGet()['missing'] && $qcGet()['filled'] === 2 && $qcGet()['total'] === 2, 'questionário respondido e completo');
+OrderExec::saveAnswers($qcOs, $qcQn, ['a' => '', 'b' => 'ok'], null, $uid);
+ok($qcGet()['answered'] && $qcGet()['missing'] === ['Pressão'], 'apagar uma obrigatória deixa o questionário incompleto');
+OrderExec::saveAnswers($qcOs, $qcQn, ['a' => '', 'b' => ''], null, $uid);
+$qcP = OrderExec::pending(ServiceOrders::get($qcOs));
+ok(!$qcGet()['answered'] && !DB::val('SELECT id FROM so_answers WHERE order_id = ?', [$qcOs]) && in_array('Responder o questionário "Checklist"', $qcP, true), 'apagar todas as respostas volta a "não respondido" e a pendência reaparece');
+
 echo "\nPainel das ordens de serviço\n";
 $pdCli = Customers::save(['type' => 'pf', 'name' => 'Cliente painel']);
 $pdBefore = ServiceOrders::dashboard($uid);
