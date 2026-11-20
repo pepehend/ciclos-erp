@@ -842,7 +842,7 @@ const NAV = [
   { g: 'operacao', label: 'Operação', icon: 'swap', items: [
     ['vendas', 'Vendas', 'receipt', 'vendas'], ['orcamentos', 'Orçamentos', 'quote', 'orcamentos'],
     ['notas', 'Notas fiscais', 'receipt', 'notas'],
-    ['compras', 'Ordens de compra', 'order', 'compras'], ['ordens', 'Ordens de serviço', 'tool', 'ordens']] },
+    ['compras', 'Ordens de compra', 'order', 'compras'], ['agenda', 'Agenda', 'calendar', 'ordens'], ['ordens', 'Ordens de serviço', 'tool', 'ordens']] },
   { g: 'cadastros', label: 'Cadastros', icon: 'box', items: [
     ['produtos', 'Produtos', 'box', 'produtos'], ['servicos', 'Serviços', 'tool', 'servicos'],
     ['clientes', 'Clientes', 'id', 'clientes'], ['fornecedores', 'Fornecedores', 'truck', 'fornecedores'],
@@ -988,6 +988,7 @@ const ROUTES = [
   [/^formas-pagamento$/, viewPaymentMethods, 'formas_pagamento'],
   [/^compra\/nova$/, (v) => viewPurchaseForm(v, null), 'compras'],
   [/^compra\/(\d+)$/, viewPurchaseForm, 'compras'],
+  [/^agenda$/, viewAgenda, 'ordens'],
   [/^ordens$/, viewServiceOrders, 'ordens'],
   [/^ordem\/nova$/, (v) => viewServiceOrderForm(v, null), 'ordens'],
   [/^ordem\/(\d+)$/, viewServiceOrderForm, 'ordens'],
@@ -2642,6 +2643,285 @@ async function equipmentForm(eq, onSaved) {
     await api('equipment_active', { body: { id: eq.id, active: to } });
     m.close(); toast(to ? 'Equipamento reativado' : 'Equipamento desativado'); onSaved && onSaved();
   });
+}
+
+// ============ Agenda ============
+// Linha do tempo (dia): 08:00 às 19:00. Semana e calendário: grade por dia.
+const AG_START = 8 * 60, AG_SPAN = 11 * 60;
+const AG_WEEK = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const agPad = (n) => String(n).padStart(2, '0');
+const agYmd = (d) => `${d.getFullYear()}-${agPad(d.getMonth() + 1)}-${agPad(d.getDate())}`;
+const agParse = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const agAdd = (s, n) => { const d = agParse(s); d.setDate(d.getDate() + n); return agYmd(d); };
+const agHm = (s) => (s ? String(s).slice(11, 16) : '');
+const agMin = (s) => { const [h, m] = agHm(s).split(':').map(Number); return h * 60 + m; };
+const agMinStr = (m) => `${agPad(Math.floor(m / 60))}:${agPad(m % 60)}`;
+const agDur = (o) => +o.duration_min || 60;
+const agCust = (o) => o.customer_trade_name || o.customer_name || '—';
+const agFmtDay = (s) => s.split('-').reverse().join('/');
+const AG_OPEN = ['aberta', 'agendada'];
+
+async function viewAgenda(v) {
+  const st = { view: prefGet('agendaView', 'lista'), period: prefGet('agendaPeriod', 'semana'), date: agYmd(new Date()),
+    tech: '', task: '', status: '', q: '', unOpen: true };
+  let data = null, R = null, filled = false;
+  const today = () => agYmd(new Date());
+
+  v.innerHTML = `<div class="page-head"><div><h1>Agenda</h1><p class="muted">Ordens de serviço por dia, semana ou técnico. Arraste uma OS para outro horário, técnico ou dia.</p></div>
+      <div class="actions"><button class="btn primary" id="ag-new">${icon('plus')}Nova OS</button></div></div>
+    <div class="ag-cards" id="ag-cards"></div>
+    <div class="card" id="ag-unbox"></div>
+    <div class="card">
+      <div class="ag-bar">
+        <button class="btn sm" id="ag-prev" aria-label="Anterior">‹</button><button class="btn sm" id="ag-next" aria-label="Próximo">›</button>
+        <button class="btn sm" id="ag-today">Hoje</button><strong id="ag-label" class="ag-label"></strong>
+        <span class="grow"></span>
+        <div class="seg" id="ag-views"><button type="button" data-v="lista">Lista</button><button type="button" data-v="calendario">Calendário</button><button type="button" data-v="linha">Linha do tempo</button></div>
+        <select id="ag-period" aria-label="Período"></select>
+      </div>
+      <div class="ag-bar">
+        <select id="ag-tech" aria-label="Técnico"><option value="">Todos os técnicos</option></select>
+        <select id="ag-task" aria-label="Tipo de tarefa"><option value="">Todos os tipos</option></select>
+        <select id="ag-status" aria-label="Status"><option value="">Todos os status</option></select>
+        <input id="ag-q" type="search" placeholder="Cliente, equipamento ou nº da OS">
+      </div>
+      <div id="ag-body"></div>
+    </div>`;
+
+  const body = $('#ag-body', v);
+  const unbox = $('#ag-unbox', v);
+
+  // Período efetivo: calendário é sempre mês; linha do tempo aceita dia ou semana.
+  const effPeriod = () => (st.view === 'calendario' ? 'mes' : st.view === 'linha' && st.period === 'mes' ? 'semana' : st.period);
+  const range = () => {
+    const eff = effPeriod(), d = agParse(st.date);
+    if (eff === 'dia') return { eff, from: st.date, to: st.date };
+    if (eff === 'mes') {
+      const first = new Date(d.getFullYear(), d.getMonth(), 1);
+      if (st.view === 'calendario') { const start = agAdd(agYmd(first), -first.getDay()); return { eff, from: start, to: agAdd(start, 41) }; }
+      return { eff, from: agYmd(first), to: agYmd(new Date(d.getFullYear(), d.getMonth() + 1, 0)) };
+    }
+    const start = agAdd(st.date, -d.getDay());
+    return { eff, from: start, to: agAdd(start, 6) };
+  };
+  const shift = (n) => {
+    const eff = effPeriod(), d = agParse(st.date);
+    if (eff === 'dia') st.date = agAdd(st.date, n);
+    else if (eff === 'semana') st.date = agAdd(st.date, 7 * n);
+    else { d.setDate(1); d.setMonth(d.getMonth() + n); st.date = agYmd(d); }
+  };
+  const label = () => {
+    const eff = R.eff;
+    if (eff === 'dia') return `${['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'][agParse(st.date).getDay()]}, ${agFmtDay(st.date)}`;
+    if (eff === 'semana') return `${agFmtDay(R.from)} a ${agFmtDay(R.to)}`;
+    const s = agParse(st.date).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  };
+  const tip = (o) => `OS #${o.id}\nStatus: ${o.status_label}\nTipo: ${o.task_type_name || '—'}\nCliente: ${agCust(o)}\nTécnico: ${o.technician_name || '—'}\nDuração: ${agDur(o)} min`;
+  const chip = (o) => `<div class="ag-chip ${o.status}" ${AG_OPEN.includes(o.status) ? 'draggable="true"' : ''} data-id="${o.id}" data-tech="${o.technician_id || ''}" data-hm="${agHm(o.scheduled_at)}" title="${esc(tip(o))}">${o.scheduled_at ? `<b>${agHm(o.scheduled_at)}</b> ` : ''}${esc(agCust(o))}</div>`;
+
+  // ---- Reagendar (arrastar ou escolher data)
+  const reschedule = async (id, when, tech) => {
+    try {
+      await api('agenda_move', { body: { id: +id, scheduled_at: when, technician_id: tech } });
+      toast('OS reagendada');
+      await load();
+    } catch (e) { fail(e); }
+  };
+  const onDrop = (e, when, techOverride) => {
+    const id = e.dataTransfer.getData('text/plain');
+    if (!id) return;
+    const tech = techOverride !== undefined ? techOverride : (e.dataTransfer.getData('application/x-tech') || null);
+    reschedule(id, when, tech);
+  };
+  const wireDrops = () => body.querySelectorAll('[data-drop]').forEach((el) => {
+    el.ondragover = (e) => { if (e.dataTransfer.types.includes('text/plain')) { e.preventDefault(); el.classList.add('drop'); } };
+    el.ondragleave = () => el.classList.remove('drop');
+    el.ondrop = (e) => {
+      e.preventDefault(); el.classList.remove('drop');
+      if (el.dataset.drop === 'track') {
+        const r = el.getBoundingClientRect();
+        const mins = AG_START + Math.min(AG_SPAN, Math.max(0, Math.round(((e.clientX - r.left) / r.width) * AG_SPAN / 15) * 15));
+        onDrop(e, `${st.date} ${agMinStr(mins)}`, el.dataset.tech || null);
+      } else {
+        const hm = e.dataTransfer.getData('application/x-hm') || '08:00';
+        onDrop(e, `${el.dataset.day} ${hm}`, el.dataset.tech !== undefined ? (el.dataset.tech || null) : undefined);
+      }
+    };
+  });
+
+  // ---- Telas
+  const paintCards = () => {
+    const c = data.counts;
+    const cards = [
+      ['atrasadas', 'Atrasadas', c.atrasadas, 'red'], ['hoje', 'Para hoje', c.hoje, ''], ['em_execucao', 'Em atendimento', c.em_execucao, ''],
+      ['pausada', 'Pausadas', c.pausada, 'amber'], ['sem_agendamento', 'Sem agendamento', c.sem_agendamento, ''], ['concluida', 'Concluídas', c.concluida, 'green'],
+    ];
+    $('#ag-cards', v).innerHTML = cards.map(([k, l, n, cls]) => `<button type="button" class="ag-card ${cls}" data-card="${k}"><b>${n}</b><span>${l}</span></button>`).join('');
+  };
+  const paintUn = () => {
+    const list = data.unscheduled;
+    unbox.innerHTML = `<div class="card-head"><h2>OS sem agendamento <span class="badge">${list.length}</span></h2>
+        <button class="btn sm" id="ag-untog">${st.unOpen ? 'Recolher' : 'Mostrar'}</button></div>` + (!st.unOpen ? '' : list.length
+      ? `<div class="ag-un">${list.map((o) => `<div class="ag-un-item" draggable="true" data-un="${o.id}" data-tech="${o.technician_id || ''}" data-hm="">
+          <div><strong>#${o.id} · ${esc(agCust(o))}</strong><div class="small muted">${esc(o.task_type_name || 'Sem tipo de tarefa')} · ${esc(String(o.description).slice(0, 90))}</div></div>
+          <button class="btn sm" data-sched="${o.id}">Agendar</button></div>`).join('')}</div>`
+      : '<p class="muted small">Nenhuma OS aguardando agendamento. Ordens novas sem data aparecem aqui.</p>');
+  };
+  const paintLista = () => {
+    const rows = data.rows;
+    body.innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Nº</th><th>Data/hora</th><th>Cliente</th><th>Equipamento</th><th>Tipo de tarefa</th><th>Técnico</th><th>Status</th></tr></thead><tbody>
+      ${rows.map((o) => `<tr class="click" data-go="${o.id}"><td class="nowrap">#${o.id}</td><td class="nowrap">${o.scheduled_at ? dt(o.scheduled_at) : '—'}</td>
+        <td><strong>${esc(agCust(o))}</strong></td><td>${esc(o.equipment_name || '—')}</td><td>${esc(o.task_type_name || '—')}</td>
+        <td>${esc(o.technician_name || '—')}</td><td>${soStatusHtml(o.status, data.statuses)}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">Nenhuma OS agendada neste período.</div>';
+  };
+  const paintCal = () => {
+    const byDay = {};
+    data.rows.forEach((o) => { const k = o.scheduled_at.slice(0, 10); (byDay[k] = byDay[k] || []).push(o); });
+    const month = agParse(st.date).getMonth(), now = today();
+    let cells = '';
+    for (let i = 0; i < 42; i++) {
+      const day = agAdd(R.from, i), dd = agParse(day), list = byDay[day] || [];
+      cells += `<div class="ag-day${dd.getMonth() !== month ? ' out' : ''}${day === now ? ' today' : ''}" data-drop="day" data-day="${day}">
+        <div class="dnum">${dd.getDate()}</div>${list.slice(0, 5).map(chip).join('')}
+        ${list.length > 5 ? `<button type="button" class="ag-more" data-goday="${day}">+${list.length - 5} na linha do tempo</button>` : ''}</div>`;
+    }
+    body.innerHTML = `<div class="ag-cal">${AG_WEEK.map((w) => `<div class="ag-wh">${w}</div>`).join('')}${cells}</div>`;
+  };
+  const paintLinha = () => {
+    const techs = [...data.technicians.map((t) => ({ id: String(t.id), name: t.name })), { id: '', name: 'Sem técnico' }];
+    const rowsOf = (t) => data.rows.filter((o) => String(o.technician_id || '') === t.id);
+    if (R.eff === 'dia') {
+      const hours = []; for (let h = 8; h < 19; h++) hours.push(h); // 19:00 é a borda final
+      const head = `<div class="ag-row ag-head" style="grid-template-columns:170px 1fr"><div class="ag-name"></div><div class="ag-hours">${hours.map((h) => `<span style="left:${((h * 60 - AG_START) / AG_SPAN) * 100}%">${agPad(h)}:00</span>`).join('')}</div></div>`;
+      const lines = techs.map((t) => {
+        const lanes = [];
+        const placed = rowsOf(t).map((o) => {
+          const s = agMin(o.scheduled_at), e = s + agDur(o);
+          let lane = 0; while (lanes[lane] !== undefined && lanes[lane] > s) lane++;
+          lanes[lane] = e;
+          return { o, s, e, lane };
+        });
+        const h = Math.max(1, lanes.length) * 38 + 8;
+        const blocks = placed.map(({ o, s, e, lane }) => {
+          const left = (Math.max(0, s - AG_START) / AG_SPAN) * 100;
+          const width = Math.max(0.6, (Math.min(e, AG_START + AG_SPAN) - Math.max(s, AG_START)) / AG_SPAN * 100);
+          return `<div class="ag-block ${o.status}" ${AG_OPEN.includes(o.status) ? 'draggable="true"' : ''} data-id="${o.id}" data-tech="${o.technician_id || ''}" data-hm="${agHm(o.scheduled_at)}" title="${esc(tip(o))}" style="left:${left}%;width:${width}%;top:${lane * 38 + 4}px"><b>${agHm(o.scheduled_at)}</b> ${esc(agCust(o))}</div>`;
+        }).join('');
+        return `<div class="ag-row" style="grid-template-columns:170px 1fr"><div class="ag-name">${esc(t.name)}</div>
+          <div class="ag-track" data-drop="track" data-tech="${t.id}" style="height:${h}px">${blocks}</div></div>`;
+      }).join('');
+      body.innerHTML = `<div class="ag-tl ag-tl-day">${head}${lines}</div>`;
+    } else {
+      const days = Array.from({ length: 7 }, (_, i) => agAdd(R.from, i));
+      const cols = 'grid-template-columns:170px repeat(7, minmax(130px, 1fr))';
+      const head = `<div class="ag-row ag-head" style="${cols}"><div class="ag-name"></div>${days.map((d) => `<div class="ag-dh${d === today() ? ' today' : ''}">${AG_WEEK[agParse(d).getDay()]} ${agFmtDay(d).slice(0, 5)}</div>`).join('')}</div>`;
+      const lines = techs.map((t) => `<div class="ag-row" style="${cols}"><div class="ag-name">${esc(t.name)}</div>${days.map((d) => {
+        const list = rowsOf(t).filter((o) => o.scheduled_at.slice(0, 10) === d);
+        return `<div class="ag-cell" data-drop="cell" data-day="${d}" data-tech="${t.id}">${list.map(chip).join('')}</div>`;
+      }).join('')}</div>`).join('');
+      body.innerHTML = `<div class="ag-tl ag-tl-week">${head}${lines}</div>`;
+    }
+  };
+  const paintBody = () => {
+    if (st.view === 'calendario') paintCal();
+    else if (st.view === 'linha') paintLinha();
+    else paintLista();
+    wireDrops();
+  };
+  const paintBar = () => {
+    $('#ag-label', v).textContent = label();
+    $$('#ag-views button', v).forEach((b) => b.classList.toggle('on', b.dataset.v === st.view));
+    const sel = $('#ag-period', v);
+    sel.innerHTML = `<option value="dia">Dia</option><option value="semana">Semana</option>${st.view === 'linha' ? '' : '<option value="mes">Mês</option>'}`;
+    sel.hidden = st.view === 'calendario';
+    sel.value = effPeriod() === 'mes' && st.view === 'linha' ? 'semana' : st.period;
+    if (st.view === 'calendario') sel.value = 'mes';
+    $('#ag-tech', v).value = st.tech; $('#ag-task', v).value = st.task; $('#ag-status', v).value = st.status;
+  };
+  const fill = () => {
+    if (filled) return; filled = true;
+    $('#ag-tech', v).insertAdjacentHTML('beforeend', data.technicians.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join(''));
+    $('#ag-task', v).insertAdjacentHTML('beforeend', data.task_types.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join(''));
+    $('#ag-status', v).insertAdjacentHTML('beforeend', Object.entries(data.statuses).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join(''));
+  };
+  let seq = 0; // descarta respostas de cargas antigas (cliques rápidos em período ou visão)
+  const load = async () => {
+    const my = ++seq;
+    const r = range();
+    const d = await api('agenda', { params: { from: r.from, to: r.to, tech: st.tech, task_type_id: st.task, status: st.status, q: st.q } });
+    if (my !== seq) return;
+    R = r; data = d;
+    fill();
+    paintCards(); paintUn(); paintBar(); paintBody();
+  };
+
+  // ---- Controles
+  $('#ag-new', v).onclick = () => go('ordem/nova');
+  $('#ag-prev', v).onclick = () => { shift(-1); load().catch(fail); };
+  $('#ag-next', v).onclick = () => { shift(1); load().catch(fail); };
+  $('#ag-today', v).onclick = () => { st.date = today(); load().catch(fail); };
+  $$('#ag-views button', v).forEach((b) => (b.onclick = () => { st.view = b.dataset.v; prefSet('agendaView', st.view); load().catch(fail); }));
+  $('#ag-period', v).onchange = (e) => { st.period = e.target.value; prefSet('agendaPeriod', st.period); load().catch(fail); };
+  $('#ag-tech', v).onchange = (e) => { st.tech = e.target.value; load().catch(fail); };
+  $('#ag-task', v).onchange = (e) => { st.task = e.target.value; load().catch(fail); };
+  $('#ag-status', v).onchange = (e) => { st.status = e.target.value; load().catch(fail); };
+  $('#ag-q', v).oninput = debounce((e) => { st.q = e.target.value.trim(); load().catch(fail); });
+  $('#ag-cards', v).onclick = (e) => {
+    const b = e.target.closest('[data-card]'); if (!b) return;
+    const k = b.dataset.card;
+    if (k === 'hoje') { st.view = 'linha'; st.period = 'dia'; st.date = today(); st.status = ''; }
+    else if (k === 'sem_agendamento') { st.unOpen = true; paintUn(); unbox.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    else { st.view = 'lista'; st.status = { atrasadas: 'agendada', em_execucao: 'em_execucao', pausada: 'pausada', concluida: 'concluida' }[k]; }
+    load().catch(fail);
+  };
+  unbox.onclick = (e) => {
+    if (e.target.closest('#ag-untog')) { st.unOpen = !st.unOpen; paintUn(); return; }
+    const s = e.target.closest('[data-sched]');
+    if (s) scheduleModal(data.unscheduled.find((o) => String(o.id) === s.dataset.sched));
+  };
+  unbox.ondragstart = (e) => {
+    const it = e.target.closest('[data-un]'); if (!it) return;
+    e.dataTransfer.setData('text/plain', it.dataset.un);
+    e.dataTransfer.setData('application/x-tech', it.dataset.tech || '');
+    e.dataTransfer.setData('application/x-hm', '');
+  };
+  body.onclick = (e) => {
+    const g = e.target.closest('[data-goday]');
+    if (g) { st.date = g.dataset.goday; st.view = 'linha'; st.period = 'dia'; load().catch(fail); return; }
+    const c = e.target.closest('[data-id], [data-go]');
+    if (c) go('ordem/' + (c.dataset.id || c.dataset.go));
+  };
+  body.ondragstart = (e) => {
+    const c = e.target.closest('[data-id]'); if (!c) return;
+    e.dataTransfer.setData('text/plain', c.dataset.id);
+    e.dataTransfer.setData('application/x-tech', c.dataset.tech || '');
+    e.dataTransfer.setData('application/x-hm', c.dataset.hm || '');
+  };
+
+  // Escolher data e horário (sem arrastar)
+  const scheduleModal = (o) => {
+    if (!o) return;
+    const m = modal({
+      title: `Agendar OS #${o.id}`,
+      body: `<form class="form" id="agf">
+        <p class="small muted">${esc(agCust(o))} · ${esc(o.task_type_name || 'Sem tipo de tarefa')}</p>
+        <div class="grid two"><label>Data <input type="date" name="day" required value="${o.scheduled_at ? o.scheduled_at.slice(0, 10) : st.date}"></label>
+        <label>Horário <input type="time" name="hm" step="900" required value="${o.scheduled_at ? agHm(o.scheduled_at) : '08:00'}"></label></div>
+        <label>Técnico <select name="tech"><option value="">Sem técnico</option>${data.technicians.map((t) => `<option value="${t.id}" ${String(o.technician_id || '') === String(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>
+      </form>`,
+      foot: `<button class="btn" data-close>Cancelar</button><button class="btn primary" id="agok">${icon('check')}Agendar</button>`,
+    });
+    $('#agok', m.el).onclick = (e) => busy(e.currentTarget, async () => {
+      const d = formData($('#agf', m.el));
+      if (!d.day || !d.hm) throw new Error('Informe a data e o horário');
+      await api('agenda_move', { body: { id: o.id, scheduled_at: `${d.day} ${d.hm}`, technician_id: d.tech || null } });
+      m.close(); toast('OS agendada'); await load();
+    });
+  };
+
+  await load();
 }
 
 // ============ Tipos de tarefa ============

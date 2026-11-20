@@ -263,4 +263,108 @@ class ServiceOrders
         if ($to === 'concluida') $data['finished_at'] = now();
         DB::update('service_orders', $id, $data);
     }
+
+    /**
+     * Agenda: OS com data no período (from..to, Y-m-d), filtros opcionais, OS sem data
+     * e contagens por situação (no sistema inteiro, sem filtro).
+     */
+    public static function agenda(array $f): array
+    {
+        $from = self::agendaDay($f['from'] ?? '', 'Período inicial');
+        $to = self::agendaDay($f['to'] ?? '', 'Período final');
+        if ($to < $from) throw new AppError('O período final é anterior ao inicial');
+        if ((strtotime($to) - strtotime($from)) > 62 * 86400) throw new AppError('Período longo demais (máximo de 2 meses)');
+
+        $filter = ['1=1']; $fp = [];
+        if (!empty($f['tech'])) { $filter[] = 'o.technician_id = ?'; $fp[] = (int)$f['tech']; }
+        if (!empty($f['task_type_id'])) { $filter[] = 'o.task_type_id = ?'; $fp[] = (int)$f['task_type_id']; }
+        $status = (string)($f['status'] ?? '');
+        if ($status !== '') {
+            if (!isset(self::STATUSES[$status])) throw new AppError('Status inválido');
+            $filter[] = 'o.status = ?'; $fp[] = $status;
+        }
+        if (($s = trim((string)($f['q'] ?? ''))) !== '') {
+            $like = '%' . mb_strtolower($s) . '%';
+            $filter[] = '(LOWER(c.name) LIKE ? OR LOWER(c.trade_name) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(o.description) LIKE ? OR o.id = ?)';
+            array_push($fp, $like, $like, $like, $like, (int)$s);
+        }
+        $where = implode(' AND ', $filter);
+        $select = "SELECT o.id, o.status, o.scheduled_at, o.due_date, o.description, o.customer_id, o.technician_id, o.task_type_id,
+                c.name customer_name, c.trade_name customer_trade_name, e.name equipment_name, t.name technician_name,
+                tt.name task_type_name, tt.duration_min
+            FROM service_orders o
+            JOIN customers c ON c.id = o.customer_id
+            LEFT JOIN equipments e ON e.id = o.equipment_id
+            LEFT JOIN users t ON t.id = o.technician_id
+            LEFT JOIN task_types tt ON tt.id = o.task_type_id ";
+
+        $next = (new DateTime($to))->modify('+1 day')->format('Y-m-d');
+        $rows = DB::all($select . "WHERE o.scheduled_at >= ? AND o.scheduled_at < ? AND $where ORDER BY o.scheduled_at, o.id",
+            array_merge([$from . ' 00:00:00', $next . ' 00:00:00'], $fp));
+        $unscheduled = DB::all($select . "WHERE o.scheduled_at IS NULL AND o.status = 'aberta' AND $where ORDER BY o.id DESC LIMIT 200", $fp);
+
+        $today = date('Y-m-d');
+        $tomorrow = (new DateTime($today))->modify('+1 day')->format('Y-m-d');
+        $count = fn(string $sql, array $p = []) => (int)DB::val("SELECT COUNT(*) FROM service_orders o WHERE $sql", $p);
+        $counts = [
+            'atrasadas' => $count("o.status = 'agendada' AND o.scheduled_at < ?", [now()]),
+            'hoje' => $count("o.status IN ('agendada','em_execucao','pausada') AND o.scheduled_at >= ? AND o.scheduled_at < ?", [$today . ' 00:00:00', $tomorrow . ' 00:00:00']),
+            'em_execucao' => $count("o.status = 'em_execucao'"),
+            'pausada' => $count("o.status = 'pausada'"),
+            'sem_agendamento' => $count("o.status = 'aberta' AND o.scheduled_at IS NULL"),
+            'concluida' => $count("o.status = 'concluida'"),
+        ];
+
+        foreach ([&$rows, &$unscheduled] as &$list) {
+            foreach ($list as &$r) $r['status_label'] = self::label($r['status']);
+            unset($r);
+        }
+        unset($list);
+
+        return [
+            'from' => $from, 'to' => $to,
+            'rows' => $rows,
+            'unscheduled' => $unscheduled,
+            'counts' => $counts,
+            'statuses' => self::STATUSES,
+            'technicians' => DB::all('SELECT id, name FROM users WHERE active = 1 ORDER BY name'),
+            'task_types' => DB::all('SELECT id, name FROM task_types WHERE active = 1 ORDER BY name'),
+        ];
+    }
+
+    private static function agendaDay($v, string $campo): string
+    {
+        $v = trim((string)$v);
+        if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $v, $m) || !checkdate((int)$m[2], (int)$m[3], (int)$m[1])) {
+            throw new AppError("$campo inválido");
+        }
+        return $v;
+    }
+
+    /**
+     * Reagenda pela agenda (arrastar ou escolher data): só data, horário e técnico.
+     * Sem data volta a OS para "aberta". Só ordens abertas ou agendadas.
+     */
+    public static function reschedule(int $id, string $when, $technicianId): void
+    {
+        $o = self::get($id);
+        if (!in_array($o['status'], ['aberta', 'agendada'], true)) {
+            throw new AppError('Só é possível reagendar ordens abertas ou agendadas');
+        }
+        $sched = null;
+        $when = trim($when);
+        if ($when !== '') {
+            if (!preg_match('/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(:\d{2})?$/', $when, $m)) {
+                throw new AppError('Data e horário do agendamento inválidos');
+            }
+            $sched = $m[1] . ' ' . $m[2] . ($m[3] ?? ':00');
+        }
+        $tech = (int)$technicianId ?: null;
+        if ($tech && !DB::val('SELECT id FROM users WHERE id = ? AND active = 1', [$tech])) throw new AppError('Técnico não encontrado');
+
+        $data = ['scheduled_at' => $sched, 'technician_id' => $tech, 'updated_at' => now()];
+        if ($o['status'] === 'aberta' && $sched) $data['status'] = 'agendada';
+        if ($o['status'] === 'agendada' && !$sched) $data['status'] = 'aberta';
+        DB::update('service_orders', $id, $data);
+    }
 }

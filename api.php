@@ -564,6 +564,16 @@ try {
             return ['id' => Quotes::duplicate((int)(input()['id'] ?? 0), $u['id'])];
         },
         // ---- Ordens de serviço ----
+        'GET agenda' => function () {
+            Auth::requirePerm('ordens');
+            return ServiceOrders::agenda(['from' => q('from'), 'to' => q('to'), 'tech' => q('tech'), 'task_type_id' => q('task_type_id'), 'status' => q('status'), 'q' => q('q')]);
+        },
+        'POST agenda_move' => function () {
+            Auth::requirePerm('ordens');
+            $in = input();
+            ServiceOrders::reschedule((int)($in['id'] ?? 0), (string)($in['scheduled_at'] ?? ''), $in['technician_id'] ?? null);
+            return ['ok' => true];
+        },
         'GET service_orders' => function () {
             Auth::requirePerm('ordens');
             return ['rows' => ServiceOrders::list($_GET), 'statuses' => ServiceOrders::STATUSES, 'types' => TaskTypes::names()];

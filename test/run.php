@@ -1339,6 +1339,38 @@ $tecUser = DB::one('SELECT u.*, p.permissions profile_permissions FROM users u L
 ok(Auth::permsOf($tecUser) === ['ordens'], 'usuário com perfil Técnico recebe só a permissão de ordens');
 ok(in_array($tecId, array_map('intval', array_column(DB::all("SELECT id FROM users WHERE active = 1 ORDER BY name"), 'id'))), 'técnico aparece na lista de técnicos');
 
+echo "\nAgenda\n";
+$ag1 = ServiceOrders::save(['customer_id' => $cf, 'description' => 'Agenda A', 'scheduled_at' => '2030-03-10T09:00', 'technician_id' => $uid], $uid);
+$ag2 = ServiceOrders::save(['customer_id' => $cf, 'description' => 'Agenda B', 'scheduled_at' => '2030-03-10T14:30', 'technician_id' => $tecId], $uid);
+$ag3 = ServiceOrders::save(['customer_id' => $cf, 'description' => 'Sem data'], $uid);
+$ag4 = ServiceOrders::save(['customer_id' => $cf, 'description' => 'Fora do dia', 'scheduled_at' => '2030-03-12T10:00'], $uid);
+$ag = ServiceOrders::agenda(['from' => '2030-03-10', 'to' => '2030-03-10']);
+$agIds = array_map('intval', array_column($ag['rows'], 'id'));
+ok($agIds === [$ag1, $ag2], 'agenda traz só as OS do dia, em ordem de horário');
+ok(in_array($ag3, array_map('intval', array_column($ag['unscheduled'], 'id')), true), 'OS sem data entra em "sem agendamento"');
+ok(!in_array($ag3, $agIds, true) && !in_array($ag4, array_map('intval', array_column($ag['unscheduled'], 'id')), true), 'OS sem data não aparece no calendário e OS de outro dia não entra no dia');
+ok(ServiceOrders::agenda(['from' => '2030-03-10', 'to' => '2030-03-12'])['rows'][2]['id'] == $ag4, 'período de três dias inclui as três OS agendadas');
+$agTec = ServiceOrders::agenda(['from' => '2030-03-10', 'to' => '2030-03-10', 'tech' => $tecId]);
+ok(count($agTec['rows']) === 1 && (int)$agTec['rows'][0]['id'] === $ag2, 'filtro por técnico');
+ok(isset($ag['rows'][0]['status_label']) && $ag['rows'][0]['status_label'] === 'Agendada', 'linha da agenda traz o nome do status');
+ok(isset($ag['counts']) && $ag['counts']['sem_agendamento'] >= 1, 'contagem de OS sem agendamento');
+ok(isset($ag['technicians'][0]['name']) && isset($ag['task_types']), 'agenda devolve técnicos e tipos de tarefa para os filtros');
+throws(fn() => ServiceOrders::agenda(['from' => '10/03/2030', 'to' => '2030-03-10']), 'Período inicial inválido', 'data inicial inválida recusada');
+throws(fn() => ServiceOrders::agenda(['from' => '2030-03-10', 'to' => '2030-03-01']), 'anterior', 'período invertido recusado');
+throws(fn() => ServiceOrders::agenda(['from' => '2030-01-01', 'to' => '2030-12-31']), 'longo demais', 'período de um ano recusado');
+ServiceOrders::reschedule($ag3, '2030-03-11 08:15', $uid);
+$r3 = ServiceOrders::get($ag3);
+ok($r3['status'] === 'agendada' && $r3['scheduled_at'] === '2030-03-11 08:15:00' && (int)$r3['technician_id'] === $uid, 'arrastar OS aberta para o dia agenda e muda o status');
+ServiceOrders::reschedule($ag2, '2030-03-10T16:00', $tecId);
+ok(ServiceOrders::get($ag2)['scheduled_at'] === '2030-03-10 16:00:00', 'reagendar muda o horário (formato com T)');
+ServiceOrders::reschedule($ag3, '', null);
+$r3b = ServiceOrders::get($ag3);
+ok($r3b['status'] === 'aberta' && $r3b['scheduled_at'] === null, 'sem horário a OS volta para aberta');
+throws(fn() => ServiceOrders::reschedule($ag3, 'amanhã às 9', null), 'inválidos', 'data inválida recusada');
+ServiceOrders::setStatus($ag4, 'em_execucao');
+throws(fn() => ServiceOrders::reschedule($ag4, '2030-03-20 09:00', null), 'abertas ou agendadas', 'OS em execução não pode ser reagendada');
+throws(fn() => ServiceOrders::reschedule($ag1, '2030-03-20 09:00', 999999), 'Técnico não encontrado', 'técnico inexistente recusado');
+
 @unlink($db);
 echo "\n$passes passaram, $fails falharam\n";
 exit($fails ? 1 : 0);
