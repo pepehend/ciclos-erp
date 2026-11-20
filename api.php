@@ -594,7 +594,7 @@ try {
         'POST service_order_status' => function () {
             $u = Auth::requirePerm('ordens');
             $in = input();
-            ServiceOrders::setStatus((int)($in['id'] ?? 0), (string)($in['status'] ?? ''), (int)$u['id']);
+            ServiceOrders::setStatus((int)($in['id'] ?? 0), (string)($in['status'] ?? ''), (int)$u['id'], isset($in['reason']) ? (string)$in['reason'] : null);
             return ['ok' => true];
         },
         'GET service_order_detail' => function () {
@@ -631,6 +631,11 @@ try {
             Auth::requirePerm('ordens');
             OrderExec::deleteItem((int)(input()['item_id'] ?? 0));
             return ['ok' => true];
+        },
+        'POST so_hours_save' => function () {
+            $u = Auth::requirePerm('ordens');
+            $in = input();
+            return ['changed' => OrderExec::saveHours((int)($in['id'] ?? 0), $in, (int)$u['id'])];
         },
         'POST so_send' => function () {
             $u = Auth::requirePerm('ordens');

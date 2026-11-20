@@ -254,7 +254,7 @@ class ServiceOrders
         return $newId;
     }
 
-    public static function setStatus(int $id, string $to, int $userId = 0): void
+    public static function setStatus(int $id, string $to, int $userId = 0, ?string $reason = null): void
     {
         $o = self::get($id);
         if (!isset(self::STATUSES[$to])) throw new AppError('Status inválido');
@@ -270,7 +270,7 @@ class ServiceOrders
         if ($to === 'concluida') $data['finished_at'] = now();
         if ($to === 'em_execucao' && !$o['started_at']) $data['started_at'] = now();
         DB::update('service_orders', $id, $data);
-        OrderExec::logEvent($id, $o['status'], $to, $userId);
+        OrderExec::logEvent($id, $o['status'], $to, $userId, $reason);
         if ($to === 'concluida') OrderExec::onConcluded($id, $userId);
     }
 

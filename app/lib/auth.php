@@ -210,7 +210,7 @@ class Auth
         ['sales', 'user_id'], ['sales', 'canceled_by'], ['invoices', 'user_id'], ['quotes', 'user_id'], ['quotes', 'created_by'],
         ['financial_entries', 'user_id'], ['purchase_orders', 'user_id'], ['movements', 'user_id'], ['portal_requests', 'resolved_by'],
         ['service_orders', 'user_id'], ['service_orders', 'technician_id'],
-        ['so_answers', 'user_id'], ['so_photos', 'user_id'], ['so_items', 'user_id'], ['so_events', 'user_id'], ['so_sends', 'user_id'],
+        ['so_answers', 'user_id'], ['so_photos', 'user_id'], ['so_items', 'user_id'], ['so_events', 'user_id'], ['so_events', 'edited_by'], ['so_events', 'deleted_by'], ['so_sends', 'user_id'],
     ];
     const ADMIN_LOCKED = 'Administradores só podem ser rebaixados, desativados ou excluídos pelo console do servidor.';
 

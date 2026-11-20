@@ -299,16 +299,32 @@ class OrderExec
 
     // ---------------- Histórico de status / controle de horas ----------------
 
-    public static function logEvent(int $orderId, ?string $from, string $to, int $userId = 0): void
+    public static function logEvent(int $orderId, ?string $from, string $to, int $userId = 0, ?string $reason = null): void
     {
-        DB::insert('so_events', ['order_id' => $orderId, 'from_status' => $from, 'to_status' => $to, 'user_id' => $userId ?: null, 'created_at' => now()]);
+        $reason = $reason !== null ? (mb_substr(trim($reason), 0, 120) ?: null) : null;
+        DB::insert('so_events', ['order_id' => $orderId, 'from_status' => $from, 'to_status' => $to, 'user_id' => $userId ?: null,
+            'reason' => $to === 'pausada' ? $reason : null, 'created_at' => now()]);
+    }
+
+    /** Nome de cada registro na sequência: o primeiro em execução é o check-in, os seguintes são fim de pausa. */
+    private static function labels(array $ev): array
+    {
+        $out = []; $started = false;
+        foreach ($ev as $e) {
+            $s = $e['to_status'];
+            $out[] = match ($s) { 'em_execucao' => $started ? 'Fim da pausa' : 'Check-in', 'pausada' => 'Início da pausa', 'concluida' => 'Check-out', default => ServiceOrders::label($s) };
+            if ($s === 'em_execucao') $started = true;
+        }
+        return $out;
     }
 
     /** Linhas do controle de horas (check-in, pausas, check-out) e tempos totais em segundos. */
     public static function hours(int $orderId, ?string $nowAt = null): array
     {
-        $ev = DB::all('SELECT e.*, u.name user_name FROM so_events e LEFT JOIN users u ON u.id = e.user_id WHERE e.order_id = ? ORDER BY e.created_at, e.id', [$orderId]);
-        $rows = []; $work = 0; $pause = 0; $started = false; $open = null;
+        $ev = DB::all('SELECT e.*, u.name user_name, x.name edited_by_name FROM so_events e LEFT JOIN users u ON u.id = e.user_id LEFT JOIN users x ON x.id = e.edited_by
+            WHERE e.order_id = ? AND e.deleted_at IS NULL ORDER BY e.created_at, e.id', [$orderId]);
+        $labels = self::labels($ev);
+        $rows = []; $work = 0; $pause = 0; $open = null;
         $close = function ($at) use (&$open, &$work, &$pause) {
             if (!$open) return 0;
             $d = max(0, strtotime($at) - strtotime($open['at']));
@@ -316,22 +332,146 @@ class OrderExec
             $open = null;
             return $d;
         };
-        foreach ($ev as $e) {
+        foreach ($ev as $i => $e) {
             $elapsed = $close($e['created_at']);
-            $label = match ($e['to_status']) {
-                'em_execucao' => $started ? 'Fim da pausa' : 'Check-in',
-                'pausada' => 'Início da pausa',
-                'concluida' => 'Check-out',
-                default => ServiceOrders::label($e['to_status']),
-            };
-            if ($e['to_status'] === 'em_execucao') { $started = true; $open = ['kind' => 'work', 'at' => $e['created_at']]; }
+            if ($e['to_status'] === 'em_execucao') $open = ['kind' => 'work', 'at' => $e['created_at']];
             if ($e['to_status'] === 'pausada') $open = ['kind' => 'pause', 'at' => $e['created_at']];
-            $rows[] = ['label' => $label, 'status' => $e['to_status'], 'at' => $e['created_at'], 'user_name' => $e['user_name'],
-                'elapsed' => in_array($e['from_status'], ['em_execucao', 'pausada'], true) ? $elapsed : null];
+            $rows[] = ['id' => (int)$e['id'], 'label' => $labels[$i], 'status' => $e['to_status'], 'at' => $e['created_at'], 'user_name' => $e['user_name'],
+                'elapsed' => in_array($e['from_status'], ['em_execucao', 'pausada'], true) ? $elapsed : null,
+                'reason' => $e['reason'], 'manual' => (int)$e['manual'],
+                'original_at' => $e['original_at'], 'note' => $e['note'], 'edited_by_name' => $e['edited_by_name'], 'edited_at' => $e['edited_at']];
         }
         $running = $open['kind'] ?? null;
         $close($nowAt ?? now());
-        return ['rows' => $rows, 'work' => $work, 'pause' => $pause, 'running' => $running];
+        $deleted = (int)DB::val('SELECT COUNT(*) FROM so_events WHERE order_id = ? AND deleted_at IS NOT NULL', [$orderId]);
+        return ['rows' => $rows, 'work' => $work, 'pause' => $pause, 'running' => $running, 'deleted' => $deleted];
+    }
+
+    private static function moment($v, string $what): string
+    {
+        $v = trim((string)$v);
+        if (!preg_match('/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(:\d{2})?$/', $v, $m)) throw new AppError("$what: data e horário inválidos");
+        $at = $m[1] . ' ' . $m[2] . ($m[3] ?? ':00');
+        if (!strtotime($at) || date('Y-m-d H:i:s', strtotime($at)) !== $at) throw new AppError("$what: data e horário inválidos");
+        if (strtotime($at) > time() + 300) throw new AppError("$what: o horário não pode estar no futuro");
+        return $at;
+    }
+
+    /**
+     * Ajuste manual do controle de horas, como no Auvo. Em $in:
+     *  rows   = [{id, at, reason, note}]  horário/motivo de registros existentes (justificativa obrigatória ao mudar o horário)
+     *  delete = [{id, note}]              exclui uma pausa (o início e o fim saem juntos; justificativa obrigatória)
+     *  add    = [{start, end, reason, note}] inclui uma pausa dentro de um período de atendimento
+     * Os registros existentes mantêm a ordem e a sequência precisa continuar válida (check-in → pausas → check-out).
+     * Guarda o horário original, quem alterou e quando; exclusão é marcada (não apaga).
+     */
+    public static function saveHours(int $orderId, array $in, int $userId): int
+    {
+        $o = ServiceOrders::get($orderId);
+        self::editable($o);
+        $ev = DB::all('SELECT * FROM so_events WHERE order_id = ? AND deleted_at IS NULL ORDER BY created_at, id', [$orderId]);
+        $labels = self::labels($ev);
+        $idx = [];
+        foreach ($ev as $i => $e) $idx[(int)$e['id']] = $i;
+        $note = fn($v) => mb_substr(trim((string)$v), 0, 300);
+        $what = fn($i) => '"' . $labels[$i] . '"';
+
+        // Alterações de horário e motivo
+        $upd = [];
+        foreach ((array)($in['rows'] ?? []) as $r) {
+            $id = (int)($r['id'] ?? 0);
+            if (!isset($idx[$id])) throw new AppError('Registro do controle de horas não encontrado');
+            $i = $idx[$id]; $e = $ev[$i];
+            $at = isset($r['at']) && trim((string)$r['at']) !== '' ? self::moment($r['at'], $labels[$i]) : $e['created_at'];
+            $reason = $e['to_status'] === 'pausada' && array_key_exists('reason', $r) ? (mb_substr(trim((string)$r['reason']), 0, 120) ?: null) : $e['reason'];
+            if ($at === $e['created_at'] && $reason === $e['reason']) continue;
+            $n = $note($r['note'] ?? '');
+            if ($at !== $e['created_at'] && mb_strlen($n) < 3) throw new AppError('Escreva a justificativa da alteração de ' . $what($i));
+            $upd[$i] = ['at' => $at, 'reason' => $reason, 'note' => $n ?: $e['note'], 'timeChanged' => $at !== $e['created_at']];
+        }
+
+        // Exclusão de pausas (início + fim)
+        $del = [];
+        foreach ((array)($in['delete'] ?? []) as $d) {
+            $id = (int)($d['id'] ?? 0);
+            if (!isset($idx[$id])) throw new AppError('Registro do controle de horas não encontrado');
+            $i = $idx[$id];
+            if ($ev[$i]['to_status'] !== 'pausada') throw new AppError('Só pausas podem ser excluídas; check-in e check-out marcam o início e o fim do atendimento');
+            $end = $i + 1;
+            if (!isset($ev[$end]) || $ev[$end]['from_status'] !== 'pausada') throw new AppError('Esta pausa ainda está em andamento: retome o atendimento antes de excluí-la');
+            $n = $note($d['note'] ?? '');
+            if (mb_strlen($n) < 3) throw new AppError('Escreva a justificativa da exclusão da pausa');
+            $del[$i] = $n; $del[$end] = $n;
+        }
+
+        foreach (array_keys($del) as $i) unset($upd[$i]); // registro excluído não conta como alterado
+
+        // Inclusão de pausas
+        $add = [];
+        foreach ((array)($in['add'] ?? []) as $k => $a) {
+            $start = self::moment($a['start'] ?? '', 'Início da pausa');
+            $end = self::moment($a['end'] ?? '', 'Fim da pausa');
+            if ($end <= $start) throw new AppError('O fim da pausa precisa ser depois do início');
+            $n = $note($a['note'] ?? '');
+            if (mb_strlen($n) < 3) throw new AppError('Escreva a justificativa da pausa incluída');
+            $add[] = ['start' => $start, 'end' => $end, 'reason' => mb_substr(trim((string)($a['reason'] ?? '')), 0, 120) ?: null, 'note' => $n];
+        }
+        if (!$upd && !$del && !$add) return 0;
+
+        // Sequência final: registros existentes (na mesma ordem) + pausas incluídas, por horário
+        $list = [];
+        foreach ($ev as $i => $e) {
+            if (isset($del[$i])) continue;
+            $list[] = ['i' => $i, 'at' => $upd[$i]['at'] ?? $e['created_at'], 'from' => $e['from_status'], 'to' => $e['to_status'], 'ord' => $i];
+        }
+        foreach ($list as $k => $x) {
+            if ($k && $x['at'] < $list[$k - 1]['at']) {
+                throw new AppError('Os horários precisam seguir a ordem dos registros: ' . $what($x['i']) . ' (' . date('d/m/Y H:i', strtotime($x['at'])) . ') ficou antes de '
+                    . $what($list[$k - 1]['i']) . ' (' . date('d/m/Y H:i', strtotime($list[$k - 1]['at'])) . ')');
+            }
+        }
+        foreach ($add as $k => $a) {
+            $list[] = ['new' => $k, 'part' => 'start', 'at' => $a['start'], 'from' => 'em_execucao', 'to' => 'pausada', 'ord' => count($ev) + $k * 2];
+            $list[] = ['new' => $k, 'part' => 'end', 'at' => $a['end'], 'from' => 'pausada', 'to' => 'em_execucao', 'ord' => count($ev) + $k * 2 + 1];
+        }
+        // Mesmo horário: o registro existente vem antes da pausa incluída
+        usort($list, fn($x, $y) => [$x['at'], isset($x['new']) ? 1 : 0, $x['ord']] <=> [$y['at'], isset($y['new']) ? 1 : 0, $y['ord']]);
+        $prev = null; $lastNew = null;
+        $outside = fn($k) => new AppError('A pausa de ' . date('d/m/Y H:i', strtotime($add[$k]['start'])) . ' precisa ficar dentro de um período de atendimento (depois do check-in e sem cruzar outra pausa ou o check-out)');
+        foreach ($list as $x) {
+            if ($x['from'] !== $prev) {
+                if (isset($x['new'])) throw $outside($x['new']);
+                if ($lastNew !== null) throw $outside($lastNew); // o registro existente foi "atravessado" por uma pausa incluída
+                throw new AppError('Essa alteração deixa a sequência do atendimento inválida perto de ' . $what($x['i']));
+            }
+            $prev = $x['to'];
+            $lastNew = isset($x['new']) ? $x['new'] : null;
+        }
+
+        DB::tx(function () use ($ev, $upd, $del, $add, $orderId, $userId) {
+            foreach ($upd as $i => $u) {
+                $e = $ev[$i];
+                $data = ['reason' => $u['reason'], 'edited_by' => $userId ?: null, 'edited_at' => now(), 'note' => $u['note'] ?: null];
+                if ($u['timeChanged']) $data += ['created_at' => $u['at'], 'original_at' => $e['original_at'] ?: $e['created_at']];
+                DB::update('so_events', (int)$e['id'], $data);
+            }
+            foreach ($del as $i => $n) DB::update('so_events', (int)$ev[$i]['id'], ['deleted_at' => now(), 'deleted_by' => $userId ?: null, 'note' => $n]);
+            foreach ($add as $a) {
+                foreach ([['em_execucao', 'pausada', $a['start'], $a['reason']], ['pausada', 'em_execucao', $a['end'], null]] as [$from, $to, $at, $reason]) {
+                    DB::insert('so_events', ['order_id' => $orderId, 'from_status' => $from, 'to_status' => $to, 'user_id' => $userId ?: null, 'created_at' => $at,
+                        'reason' => $reason, 'manual' => 1, 'note' => $a['note'], 'edited_by' => $userId ?: null, 'edited_at' => now()]);
+                }
+            }
+        });
+
+        // Início = primeiro check-in; fim = último check-out (se a OS está concluída)
+        $start = DB::val("SELECT MIN(created_at) FROM so_events WHERE order_id = ? AND to_status = 'em_execucao' AND deleted_at IS NULL", [$orderId]);
+        $end = DB::val("SELECT MAX(created_at) FROM so_events WHERE order_id = ? AND to_status = 'concluida' AND deleted_at IS NULL", [$orderId]);
+        $data = ['updated_at' => now()];
+        if ($start) $data['started_at'] = $start;
+        if ($end && in_array($o['status'], ['concluida', 'faturada'], true)) $data['finished_at'] = $end;
+        DB::update('service_orders', $orderId, $data);
+        return count($upd) + intdiv(count($del), 2) + count($add);
     }
 
     // ---------------- Pendências para concluir ----------------
