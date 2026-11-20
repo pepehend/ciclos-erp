@@ -1,4 +1,4 @@
-/* Sistema de Gestão de Serviços — interface (JavaScript puro, sem dependências) */
+/* CiclosERP — interface (JavaScript puro, sem dependências) */
 'use strict';
 
 // ============ Utilidades ============
@@ -932,12 +932,12 @@ function navSection(path) {
   return path;
 }
 
-/** Cabeçalho do menu: logo e nome da empresa (Configurações → Dados da empresa); sem eles, o ícone e "Gestão de Serviços". */
+/** Cabeçalho do menu: logo e nome da empresa (Configurações → Dados da empresa); sem eles, o ícone e "CiclosERP". */
 function brandHtml() {
   const co = state.meta?.company || {};
   const name = String(co.name || '').trim();
   const logo = /^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,/.test(co.logo || '') ? co.logo : '';
-  return `${logo ? `<img class="brand-img" src="${esc(logo)}" alt="">` : `<span class="logo">${icon('box')}</span>`}<span class="brand-name" title="${esc(name || 'Gestão de Serviços')}">${esc(name || 'Gestão de Serviços')}</span>`;
+  return `${logo ? `<img class="brand-img" src="${esc(logo)}" alt="">` : `<span class="logo">${icon('box')}</span>`}<span class="brand-name" title="${esc(name || 'CiclosERP')}">${esc(name || 'CiclosERP')}</span>`;
 }
 function paintBrand() {
   const b = document.getElementById('brand'); if (b) { b.innerHTML = brandHtml(); b.classList.toggle('has-img', !!b.querySelector('.brand-img')); }
@@ -946,10 +946,10 @@ function paintBrand() {
 /** Nome e ícone da aba do navegador: nome fantasia e logo da empresa (guardados no aparelho para já abrir certo). */
 function brandTab() {
   const co = state.meta?.company || {};
-  const name = String(co.name || '').trim() || 'Gestão de Serviços';
+  const name = String(co.name || '').trim() || 'CiclosERP';
   const link = document.querySelector('link[rel=icon]');
   const save = (k, v) => { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (_) {} };
-  document.title = name; save('brandTitle', name === 'Gestão de Serviços' ? '' : name);
+  document.title = name; save('brandTitle', name === 'CiclosERP' ? '' : name);
   if (!link) return;
   const logo = /^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,/.test(co.logo || '') ? co.logo : '';
   if (!logo) { link.href = link.dataset.default || link.href; save('brandIcon', ''); return; }
@@ -990,7 +990,7 @@ function renderShell() {
         ${state.version ? `<div class="ver" title="Versão do sistema">Versão ${esc(state.version)}</div>` : ''}</div>
     </aside>
     <div>
-      <header class="topbar"><button class="icon-btn" id="menu" aria-label="Menu">${icon('menu')}</button><span class="title" id="top-title">Gestão de Serviços</span></header>
+      <header class="topbar"><button class="icon-btn" id="menu" aria-label="Menu">${icon('menu')}</button><span class="title" id="top-title">CiclosERP</span></header>
       <main class="main" id="view"></main>
     </div></div>`;
   // Grupos do menu: abre com clique; ao trocar de tela, só fica aberto o grupo da tela atual (route)
@@ -1075,7 +1075,7 @@ async function route() {
   $$('.nav a').forEach((a) => a.classList.toggle('active', a.dataset.r === section));
   const active = $('.nav a.active');
   $$('.nav-group, .nav-sub').forEach((g) => g.classList.toggle('open', !!active && g.contains(active)));
-  $('#top-title').textContent = active ? active.textContent : 'Gestão de Serviços';
+  $('#top-title').textContent = active ? active.textContent : 'CiclosERP';
   // Troca o elemento da página para não acumular eventos de telas anteriores
   const old = $('#view'); const view = old.cloneNode(false); old.replaceWith(view);
   const token = ++routeToken;
@@ -1109,7 +1109,7 @@ function renderLogin() {
   const logo = /^data:image\//.test(b.logo || '') ? `<img src="${esc(b.logo)}" alt="">` : icon('box');
   const h = new Date().getHours(), hello = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
   $('#app').innerHTML = `<div class="lg-page">
-    <header class="lg-top"><div class="lg-brand"><span class="lg-logo ${/^data:image/.test(b.logo || '') ? 'img' : ''}">${logo}</span>${esc(b.name || 'Gestão de Serviços')}</div><a class="lg-client" href="cliente/">${icon('user')}Área do cliente</a></header>
+    <header class="lg-top"><div class="lg-brand"><span class="lg-logo ${/^data:image/.test(b.logo || '') ? 'img' : ''}">${logo}</span>${esc(b.name || 'CiclosERP')}</div><a class="lg-client" href="cliente/">${icon('user')}Área do cliente</a></header>
     <main class="lg-main">
       <section class="lg-hero">
         ${state.version ? `<span class="lg-ver">Versão ${esc(state.version)}</span>` : ''}
@@ -1127,7 +1127,7 @@ function renderLogin() {
       </form>
     </main>
     <footer class="lg-foot"><svg viewBox="0 0 600 12" preserveAspectRatio="none" aria-hidden="true"><path d="M0 6 Q 15 0 30 6 T 60 6 T 90 6 T 120 6 T 150 6 T 180 6 T 210 6 T 240 6 T 270 6 T 300 6 T 330 6 T 360 6 T 390 6 T 420 6 T 450 6 T 480 6 T 510 6 T 540 6 T 570 6 T 600 6" fill="none" stroke="#c6f04a" stroke-width="2"/></svg>
-      <span>${new Date().getFullYear()} © ${esc(b.name || 'Sistema de Gestão de Serviços')}</span></footer>
+      <span>${new Date().getFullYear()} © ${esc(b.name || 'CiclosERP')}</span></footer>
   </div>`;
   const f = $('#login');
   $('input', f).focus();
@@ -6938,7 +6938,7 @@ async function tkHost(path) {
   $('#tkdrawer').hidden = true;
   const [re, fn, perm] = ROUTES.find(([r]) => r.test(path)) || [/^/, viewDashboard];
   const sec = navSection(path);
-  let title = 'Gestão de Serviços';
+  let title = 'CiclosERP';
   for (const g of NAV) for (const it of (g.items || [])) for (const x of (it.items || [it])) if (Array.isArray(x) && x[0] === sec) title = x[1];
   if (sec === 'conta' || path === 'aparencia') title = 'Minha conta';
   const old = $('#tkv'); const shell = old.cloneNode(false); old.replaceWith(shell);

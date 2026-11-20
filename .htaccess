@@ -1,4 +1,4 @@
-# Sistema de Gestão de Serviços - configurações do Apache
+# CiclosERP - configurações do Apache
 Options -Indexes
 DirectoryIndex index.php
 

@@ -1,4 +1,4 @@
-# Sistema de Gestão de Serviços: guia para desenvolvimento
+# CiclosERP: guia para desenvolvimento
 
 Repositório `pepehend/ciclos-erp` (antes `pepehend/sistema-gestao`; o GitHub redireciona o nome antigo). No cPanel, a pasta do clone continua `~/repositories/sistema-gestao`, e o `deploy/auto-deploy.sh` descobre a própria pasta sozinho.
 
