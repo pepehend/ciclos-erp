@@ -2841,15 +2841,79 @@ async function viewServiceOrderForm(v, id) {
       : pend.length ? `<ul class="so-pendlist">${pend.map((p) => `<li>${icon('warn')}<span>${esc(p)}</span></li>`).join('')}</ul><p class="small muted">As pendências vêm das obrigatoriedades do tipo de tarefa e das perguntas obrigatórias dos questionários.</p>`
       : `<p class="so-ok">${icon('check')} Nada pendente${['concluida'].includes(o.status) ? '.' : ': a ordem já pode ser concluída.'}</p>`}`;
 
-  // ---- Controle de horas
+  // ---- Controle de horas (como no Auvo: ajustar horários, motivo e justificativa; incluir e excluir pausas)
   const h = D.hours;
-  pane('horas').innerHTML = `<h2>Controle de horas</h2>
-    ${h.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Monitoramento</th><th>Horário</th><th>Tempo corrido</th><th>Colaborador</th></tr></thead><tbody>
-      ${h.rows.map((r) => `<tr><td>${esc(r.label)}</td><td class="nowrap">${dt(r.at)}</td><td>${r.elapsed != null ? fmtDur(r.elapsed) : ''}</td><td>${esc(r.user_name || '—')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Sem registros.</p>'}
-    <div class="kpis so-kpis"><div class="kpi"><div class="label">Tempo de trabalho</div><div class="value">${fmtDur(h.work)}</div></div>
-      <div class="kpi"><div class="label">Tempo de pausa</div><div class="value">${fmtDur(h.pause)}</div></div></div>
+  const hp = pane('horas');
+  const dtl = (x) => String(x || '').replace(' ', 'T').slice(0, 16);
+  const lastPauseOpen = o.status === 'pausada' && h.rows.length && h.rows[h.rows.length - 1].status === 'pausada';
+  const origem = (r) => r.manual ? '<span class="badge">Manual</span>'
+    : r.edited_at ? `<span class="badge" title="Antes: ${esc(dt(r.original_at || r.at))}">Ajustado</span>` : '<span class="badge ok">Sistema</span>';
+  hp.innerHTML = `<div class="card-head"><h2>Controle de horas</h2>${h.rows.length && !locked ? `<span class="inline">
+      <button type="button" class="btn sm js-edit-only js-needs-edit" id="hradd" hidden>${icon('plus')}Adicionar pausa</button>${editBtns('horas')}</span>` : ''}</div>
+    <form class="form" id="hrf" onsubmit="return false">
+    ${h.rows.length ? `<div class="table-wrap"><table class="hr-table"><thead><tr><th>Colaborador</th><th>Monitoramento</th><th>Horário</th><th>Tempo corrido</th><th>Motivo</th><th>Justificativa</th><th>Origem</th><th></th></tr></thead>
+      <tbody id="hrbody">${h.rows.map((r, i) => {
+        const pause = r.status === 'pausada', open = lastPauseOpen && i === h.rows.length - 1;
+        return `<tr data-row="${r.id}"><td>${esc(r.user_name || '—')}</td><td>${esc(r.label)}${open ? '<div class="small warn-t">Sem registro de fim de pausa</div>' : ''}</td>
+          <td class="nowrap"><span class="js-view-only">${dt(r.at)}</span><input class="js-edit-only" type="datetime-local" step="60" data-at value="${dtl(r.at)}" data-orig="${dtl(r.at)}" hidden></td>
+          <td>${r.elapsed != null ? fmtDur(r.elapsed) : ''}</td>
+          <td>${pause ? `<span class="js-view-only">${esc(r.reason || '')}</span><input class="js-edit-only" data-reason maxlength="120" list="hrmotivos" value="${esc(r.reason || '')}" data-orig="${esc(r.reason || '')}" hidden>` : ''}</td>
+          <td><span class="js-view-only small">${esc(r.note || '')}${r.edited_at ? `<div class="muted">${esc(r.edited_by_name || '—')} em ${dt(r.edited_at)}</div>` : ''}</span>
+            <input class="js-edit-only" data-note maxlength="300" placeholder="Justificativa" hidden></td>
+          <td>${origem(r)}</td>
+          <td>${pause && !open ? `<button type="button" class="icon-btn js-edit-only js-needs-edit" data-hrdel="${r.id}" title="Excluir esta pausa (início e fim)" aria-label="Excluir pausa" hidden>${icon('trash')}</button>` : ''}</td></tr>`;
+      }).join('')}</tbody></table></div>
+      <datalist id="hrmotivos">${['Almoço', 'Fim do expediente', 'Aguardando peça', 'Aguardando cliente', 'Deslocamento'].map((x) => `<option value="${x}">`).join('')}</datalist>
+      <div id="hradds"></div>` : '<p class="muted">Sem registros.</p>'}
+    </form>
+    <div class="kpis so-kpis"><div class="kpi"><div class="label">Tempo total de trabalho</div><div class="value">${fmtDur(h.work)}</div></div>
+      <div class="kpi"><div class="label">Tempo total de pausa</div><div class="value">${fmtDur(h.pause)}</div></div></div>
     ${h.running ? `<p class="small muted">${h.running === 'work' ? 'Atendimento em andamento' : 'Atendimento pausado'}: os tempos contam até agora.</p>` : ''}
-    <p class="small muted">O check-in é feito em "Iniciar atendimento" e o check-out em "Concluir".</p>`;
+    <p class="small muted">${icon('warn')} O check-in é feito em "Iniciar atendimento" e o check-out em "Concluir". Em Editar dá para corrigir horários e motivos, incluir ou excluir pausas; toda alteração de horário pede justificativa e fica registrada.${h.deleted ? ` ${h.deleted / 2} pausa(s) excluída(s) ficam guardadas no histórico.` : ''}</p>`;
+  if (h.rows.length && !locked) {
+    const form = $('#hrf', hp), adds = $('#hradds', hp);
+    const lock = editLock(hp, form, true, (l) => { if (l) { $$('tr.del', hp).forEach((t) => t.classList.remove('del')); adds.innerHTML = ''; } });
+    $('#hradd', hp).onclick = () => {
+      adds.insertAdjacentHTML('beforeend', `<div class="hr-add"><strong>Nova pausa</strong>
+        <div class="hr-add-grid"><label>Início * <input type="datetime-local" step="60" data-a="start" required></label><label>Fim * <input type="datetime-local" step="60" data-a="end" required></label>
+          <label>Motivo <input data-a="reason" maxlength="120" list="hrmotivos"></label><label>Justificativa * <input data-a="note" maxlength="300" required></label>
+          <button type="button" class="icon-btn" data-hraddrm title="Remover" aria-label="Remover">${icon('x')}</button></div></div>`);
+      adds.lastElementChild.querySelector('input').focus();
+    };
+    adds.onclick = (e) => { const b = e.target.closest('[data-hraddrm]'); if (b) b.closest('.hr-add').remove(); };
+    $('#hrbody', hp).onclick = (e) => {
+      const b = e.target.closest('[data-hrdel]'); if (!b) return;
+      const tr = b.closest('tr'), on = !tr.classList.contains('del'), pair = tr.nextElementSibling;
+      tr.classList.toggle('del', on); if (pair) { pair.classList.toggle('del', on); pair.dataset.pair = on ? '1' : ''; }
+      if (on) { const n = $('[data-note]', tr); n.placeholder = 'Por que excluir esta pausa? *'; n.focus(); }
+    };
+    const hsv = $('[data-save=horas]', hp);
+    hsv.onclick = () => busy(hsv, async () => {
+      const rows = [], del = [], add = [];
+      for (const tr of $$('#hrbody tr', hp)) {
+        const id = +tr.dataset.row, at = $('[data-at]', tr), rs = $('[data-reason]', tr), note = $('[data-note]', tr).value.trim();
+        const label = tr.children[1].firstChild.textContent;
+        if (tr.dataset.pair === '1') continue;
+        if (tr.classList.contains('del')) {
+          if (note.length < 3) { $('[data-note]', tr).focus(); throw new Error(`Escreva por que a pausa "${label}" de ${dt(at.dataset.orig.replace('T', ' '))} vai ser excluída`); }
+          del.push({ id, note }); continue;
+        }
+        const timeChanged = at.value && at.value !== at.dataset.orig, reasonChanged = rs && rs.value.trim() !== rs.dataset.orig;
+        if (timeChanged && note.length < 3) { $('[data-note]', tr).focus(); throw new Error(`Escreva a justificativa da alteração de "${label}"`); }
+        if (timeChanged || reasonChanged) rows.push({ id, ...(timeChanged ? { at: at.value } : {}), ...(rs ? { reason: rs.value } : {}), note });
+      }
+      for (const box of $$('.hr-add', adds)) {
+        const v2 = (k) => $(`[data-a=${k}]`, box).value.trim();
+        if (!v2('start') || !v2('end')) throw new Error('Informe o início e o fim da pausa incluída');
+        if (v2('note').length < 3) { $('[data-a=note]', box).focus(); throw new Error('Escreva a justificativa da pausa incluída'); }
+        add.push({ start: v2('start'), end: v2('end'), reason: v2('reason'), note: v2('note') });
+      }
+      if (!rows.length && !del.length && !add.length) throw new Error('Nada foi alterado');
+      const r = await api('so_hours_save', { body: { id: o.id, rows, delete: del, add } });
+      toast(r.changed === 1 ? '1 alteração salva no controle de horas' : `${r.changed} alterações salvas no controle de horas`); route();
+    });
+    void lock;
+  }
 
   // ---- Envios
   const ep = pane('envios');
@@ -2905,6 +2969,18 @@ async function viewServiceOrderForm(v, id) {
       return;
     }
     if (to === 'faturada' && !(await confirmBox('Marcar esta ordem como faturada? Ela não poderá mais ser alterada.', { ok: 'Marcar como faturada' }))) return;
+    if (to === 'pausada') {
+      const m = modal({ title: 'Pausar atendimento',
+        body: `<form class="form" id="pzf"><label>Motivo da pausa <input name="reason" maxlength="120" list="pzmot" placeholder="Ex.: Almoço, Fim do expediente">
+          <datalist id="pzmot">${['Almoço', 'Fim do expediente', 'Aguardando peça', 'Aguardando cliente', 'Deslocamento'].map((x) => `<option value="${x}">`).join('')}</datalist></label></form>`,
+        foot: `<button class="btn" data-close>Cancelar</button><button class="btn primary" id="pzok">${icon('minusc')}Pausar</button>` });
+      const go2 = () => busy($('#pzok', m.el), async () => {
+        await api('service_order_status', { body: { id: o.id, status: 'pausada', reason: $('#pzf', m.el).reason.value } });
+        m.close(); toast('Atendimento pausado'); route();
+      });
+      $('#pzok', m.el).onclick = go2; $('#pzf', m.el).onsubmit = (e) => { e.preventDefault(); go2(); };
+      return;
+    }
     busy(b, async () => {
       await api('service_order_status', { body: { id: o.id, status: to } });
       toast(to === 'concluida' ? 'Ordem concluída' : to === 'em_execucao' ? 'Atendimento iniciado' : 'Status atualizado');

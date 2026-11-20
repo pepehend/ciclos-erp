@@ -527,7 +527,15 @@ class DB
                 from_status VARCHAR(20) NULL,
                 to_status VARCHAR(20) NOT NULL,
                 user_id $fk NULL,
-                created_at $dt NOT NULL
+                created_at $dt NOT NULL,
+                original_at $dt NULL,
+                note VARCHAR(300) NULL,
+                reason VARCHAR(120) NULL,
+                manual INT NOT NULL DEFAULT 0,
+                edited_by $fk NULL,
+                edited_at $dt NULL,
+                deleted_by $fk NULL,
+                deleted_at $dt NULL
             )$end",
             "CREATE TABLE IF NOT EXISTS so_sends (
                 id $pk,
@@ -768,6 +776,17 @@ class DB
         }
         // Tipos de tarefa ainda não criados (atualização ou instalação nova): cria os padrões e converte os checklists antigos
         if (!(int)self::val('SELECT COUNT(*) FROM task_types')) TaskTypes::importLegacy();
+        // v1.10.0: ajuste manual do controle de horas (horário original, justificativa, motivo da pausa, inclusão e exclusão de pausas)
+        try {
+            self::pdo()->query('SELECT deleted_at FROM so_events LIMIT 1');
+        } catch (PDOException $e) {
+            $dtc = self::$driver === 'mysql' ? 'DATETIME' : 'TEXT';
+            $fkc = self::$driver === 'mysql' ? 'INT UNSIGNED' : 'INTEGER';
+            foreach (["original_at $dtc NULL", 'note VARCHAR(300) NULL', 'reason VARCHAR(120) NULL', 'manual INT NOT NULL DEFAULT 0',
+                      "edited_by $fkc NULL", "edited_at $dtc NULL", "deleted_by $fkc NULL", "deleted_at $dtc NULL"] as $col) {
+                try { self::pdo()->exec("ALTER TABLE so_events ADD COLUMN $col"); } catch (PDOException $e2) { /* tabela ainda não existe ou coluna já existe */ }
+            }
+        }
         // v1.8.0: execução da OS (relato, assinatura, km, link público, pesquisa) e tabelas de respostas, fotos, itens, histórico e envios
         try {
             self::pdo()->query('SELECT public_token FROM service_orders LIMIT 1');

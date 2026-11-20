@@ -1459,6 +1459,63 @@ throws(fn() => OrderExec::deletePhoto($ph), 'faturada', 'foto de OS faturada nã
 ok(str_contains(Backup::sql(), 'INSERT INTO `so_answers`'), 'backup inclui as respostas');
 Mailer::$transport = null;
 
+echo "\nAjuste do controle de horas\n";
+$hOs = ServiceOrders::save(['customer_id' => $cf, 'description' => 'Horas'], $uid);
+ServiceOrders::setStatus($hOs, 'agendada', $uid); ServiceOrders::setStatus($hOs, 'em_execucao', $uid);
+ServiceOrders::setStatus($hOs, 'pausada', $uid, 'Almoço'); ServiceOrders::setStatus($hOs, 'em_execucao', $uid); ServiceOrders::setStatus($hOs, 'concluida', $uid);
+$hr = OrderExec::hours($hOs)['rows'];
+ok($hr[3]['reason'] === 'Almoço', 'motivo da pausa gravado ao pausar');
+$hid = array_column($hr, 'id', 'label');
+$d0 = date('Y-m-d', strtotime('-1 day'));
+$J = 'Técnico esqueceu de marcar no app';
+$rows = [['id' => $hr[0]['id'], 'at' => "$d0 07:00", 'note' => $J], ['id' => $hr[1]['id'], 'at' => "$d0 07:30", 'note' => $J], ['id' => $hid['Check-in'], 'at' => "{$d0}T08:00", 'note' => $J],
+       ['id' => $hid['Início da pausa'], 'at' => "$d0 12:00", 'note' => $J], ['id' => $hid['Fim da pausa'], 'at' => "$d0 13:00", 'note' => $J], ['id' => $hid['Check-out'], 'at' => "$d0 17:30", 'note' => $J]];
+$semNota = $rows; $semNota[2]['note'] = ' ';
+throws(fn() => OrderExec::saveHours($hOs, ['rows' => $semNota], $uid), 'justificativa da alteração de "Check-in"', 'horário alterado sem justificativa recusado');
+ok(OrderExec::saveHours($hOs, ['rows' => $rows], $uid) === 6, 'ajuste de seis horários');
+$h = OrderExec::hours($hOs);
+ok($h['work'] == 8.5 * 3600 && $h['pause'] == 3600, 'tempos recalculados: 8h30 de trabalho e 1h de pausa');
+$ci = $h['rows'][2];
+ok($ci['at'] === "$d0 08:00:00" && $ci['original_at'] !== null && $ci['note'] === $J && $ci['edited_by_name'] === 'Pedro', 'guarda horário original, justificativa e quem alterou');
+$hO = ServiceOrders::get($hOs);
+ok($hO['started_at'] === "$d0 08:00:00" && $hO['finished_at'] === "$d0 17:30:00", 'início e fim do atendimento acompanham o check-in e o check-out');
+$orig = $ci['original_at'];
+OrderExec::saveHours($hOs, ['rows' => [['id' => $hid['Check-in'], 'at' => "$d0 08:10", 'note' => 'Corrigindo de novo']]], $uid);
+ok(OrderExec::hours($hOs)['rows'][2]['original_at'] === $orig, 'segunda alteração mantém o horário original da primeira');
+ok(OrderExec::saveHours($hOs, ['rows' => [['id' => $hid['Check-in'], 'at' => "$d0 08:10"]]], $uid) === 0, 'horário igual não conta como alteração');
+ok(OrderExec::saveHours($hOs, ['rows' => [['id' => $hid['Início da pausa'], 'reason' => 'Fim do expediente']]], $uid) === 1
+   && OrderExec::hours($hOs)['rows'][3]['reason'] === 'Fim do expediente', 'motivo da pausa muda sem exigir justificativa');
+throws(fn() => OrderExec::saveHours($hOs, ['rows' => [['id' => $hid['Início da pausa'], 'at' => "$d0 18:00", 'note' => 'x x']]], $uid), 'seguir a ordem', 'pausa depois do check-out recusada');
+throws(fn() => OrderExec::saveHours($hOs, ['rows' => [['id' => $hid['Check-out'], 'at' => date('Y-m-d', strtotime('+2 days')) . ' 10:00', 'note' => 'x x']]], $uid), 'futuro', 'horário no futuro recusado');
+throws(fn() => OrderExec::saveHours($hOs, ['rows' => [['id' => $hid['Check-out'], 'at' => "$d0 25:00", 'note' => 'x x']]], $uid), 'inválidos', 'horário inválido recusado');
+$outro = (int)DB::val('SELECT id FROM so_events WHERE order_id <> ? LIMIT 1', [$hOs]);
+throws(fn() => OrderExec::saveHours($hOs, ['rows' => [['id' => $outro, 'at' => "$d0 10:00", 'note' => 'x x']]], $uid), 'não encontrado', 'registro de outra OS não é alterado por esta');
+// incluir pausa
+throws(fn() => OrderExec::saveHours($hOs, ['add' => [['start' => "$d0 15:00", 'end' => "$d0 15:30", 'reason' => 'Café']]], $uid), 'justificativa da pausa', 'pausa incluída sem justificativa recusada');
+throws(fn() => OrderExec::saveHours($hOs, ['add' => [['start' => "$d0 15:30", 'end' => "$d0 15:00", 'note' => 'x x']]], $uid), 'depois do início', 'fim antes do início recusado');
+throws(fn() => OrderExec::saveHours($hOs, ['add' => [['start' => "$d0 12:30", 'end' => "$d0 14:00", 'note' => 'x x']]], $uid), 'dentro de um período de atendimento', 'pausa cruzando outra pausa recusada');
+throws(fn() => OrderExec::saveHours($hOs, ['add' => [['start' => "$d0 06:00", 'end' => "$d0 06:30", 'note' => 'x x']]], $uid), 'dentro de um período de atendimento', 'pausa antes do check-in recusada');
+throws(fn() => OrderExec::saveHours($hOs, ['add' => [['start' => "$d0 17:00", 'end' => "$d0 18:00", 'note' => 'x x']]], $uid), 'dentro de um período de atendimento', 'pausa cruzando o check-out recusada');
+ok(OrderExec::saveHours($hOs, ['add' => [['start' => "$d0 15:00", 'end' => "$d0 15:30", 'reason' => 'Café', 'note' => 'Pausa não registrada']]], $uid) === 1, 'pausa incluída');
+$h = OrderExec::hours($hOs);
+ok(array_column($h['rows'], 'label') === ['Aberta', 'Agendada', 'Check-in', 'Início da pausa', 'Fim da pausa', 'Início da pausa', 'Fim da pausa', 'Check-out']
+   && $h['rows'][5]['manual'] === 1 && $h['rows'][5]['reason'] === 'Café', 'pausa incluída entra na ordem, marcada como manual');
+ok($h['pause'] == 1.5 * 3600 && $h['work'] == (7 * 3600 + 50 * 60), 'tempos com a pausa incluída: 7h50 de trabalho (check-in 08:10) e 1h30 de pausa');
+// excluir pausa
+$p1 = $h['rows'][3]['id'];
+throws(fn() => OrderExec::saveHours($hOs, ['delete' => [['id' => $h['rows'][2]['id'], 'note' => 'x x']]], $uid), 'Só pausas', 'check-in não pode ser excluído');
+throws(fn() => OrderExec::saveHours($hOs, ['delete' => [['id' => $p1, 'note' => '']]], $uid), 'justificativa da exclusão', 'exclusão sem justificativa recusada');
+ok(OrderExec::saveHours($hOs, ['delete' => [['id' => $p1, 'note' => 'Pausa lançada errado']]], $uid) === 1, 'pausa excluída');
+$h = OrderExec::hours($hOs);
+ok(count($h['rows']) === 6 && $h['deleted'] === 2 && $h['pause'] == 1800, 'início e fim da pausa saem juntos e ficam guardados como excluídos');
+// pausa em andamento não pode ser excluída
+$h2 = ServiceOrders::save(['customer_id' => $cf, 'description' => 'Pausada'], $uid);
+ServiceOrders::setStatus($h2, 'agendada', $uid); ServiceOrders::setStatus($h2, 'em_execucao', $uid); ServiceOrders::setStatus($h2, 'pausada', $uid);
+$pp = OrderExec::hours($h2)['rows'][3]['id'];
+throws(fn() => OrderExec::saveHours($h2, ['delete' => [['id' => $pp, 'note' => 'x x']]], $uid), 'em andamento', 'pausa em andamento não é excluída');
+ServiceOrders::setStatus($hOs, 'faturada', $uid);
+throws(fn() => OrderExec::saveHours($hOs, ['rows' => [['id' => $hid['Check-out'], 'at' => "$d0 17:00", 'note' => 'x x']]], $uid), 'faturada', 'OS faturada não tem as horas alteradas');
+
 @unlink($db);
 echo "\n$passes passaram, $fails falharam\n";
 exit($fails ? 1 : 0);

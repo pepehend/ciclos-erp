@@ -810,3 +810,12 @@ tr.sel td { background: var(--accent-soft); }
 .so-pend svg, .so-pendlist svg, .so-ok svg { width: 18px; height: 18px; flex: none; }
 .so-ok { display: flex; gap: 8px; align-items: center; }
 .so-ok svg { color: var(--ok); }
+/* Controle de horas */
+.hr-table tr.del td { text-decoration: line-through; opacity: .55; }
+.hr-table tr.del td:nth-child(6), .hr-table tr.del td:last-child { text-decoration: none; opacity: 1; }
+.hr-table input { min-width: 150px; }
+.warn-t { color: var(--warn); font-weight: 600; }
+.hr-add { border: 1px dashed var(--accent); border-radius: var(--radius); padding: 10px 12px; margin-top: 10px; display: grid; gap: 8px; }
+.hr-add-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 2fr auto; gap: 10px; align-items: end; }
+.so-kpis + p svg, [data-pane=horas] > p svg { width: 14px; height: 14px; vertical-align: -2px; }
+@media (max-width: 760px) { .hr-add-grid { grid-template-columns: 1fr; } }
