@@ -1246,6 +1246,24 @@ function readFiscal(root) {
   return o;
 }
 
+// Registros salvos abrem em visualização: os campos ficam travados até "Editar" (como no orçamento).
+// .js-view-only aparece na visualização; .js-edit-only aparece ao editar; .js-needs-edit (adicionar, remover,
+// buscar) fica travado na visualização; abas e links continuam clicáveis.
+const NEEDS_EDIT = '.js-needs-edit, .sp-del, [data-delref]';
+function editLock(root, form, startLocked, after) {
+  const apply = (locked) => {
+    form.querySelectorAll('input, select, textarea').forEach((el) => (el.disabled = locked));
+    root.querySelectorAll(NEEDS_EDIT).forEach((el) => (el.disabled = locked));
+    root.querySelectorAll('.js-view-only').forEach((el) => (el.hidden = !locked));
+    root.querySelectorAll('.js-edit-only').forEach((el) => (el.hidden = locked));
+    if (after) after(locked);
+  };
+  const ed = root.querySelector('[data-edit]');
+  if (ed) ed.onclick = () => apply(false);
+  apply(startLocked);
+  return apply;
+}
+
 async function productForm(p, onSaved) {
   if (p && p.type === 'servico') return serviceForm(p, onSaved);
   const isNew = !p || !p.id;
@@ -1287,11 +1305,11 @@ async function productForm(p, onSaved) {
       <div data-pp="refs" hidden class="form">
         <p class="help" style="margin:0">Códigos equivalentes de outros fabricantes. A busca por código encontra o produto por qualquer um deles (ignorando traços, pontos e espaços).</p>
         <div id="refrows"></div>
-        <div><button type="button" class="btn sm" id="addref">${icon('plus')}Adicionar referência</button></div>
+        <div><button type="button" class="btn sm js-needs-edit" id="addref">${icon('plus')}Adicionar referência</button></div>
       </div>
       <div data-pp="trib" hidden>${fiscalPaneHtml(p.fiscal)}</div>
     </form>`,
-    foot: `<button class="btn" data-close>Cancelar</button><button class="btn primary" id="save">Salvar</button>`,
+    foot: `<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="save">Salvar</button>`,
   });
   const f = $('#pf', m.el);
   const costIni = f.elements.avg_cost.value.trim();
@@ -1345,6 +1363,7 @@ async function productForm(p, onSaved) {
   if (f.elements.avg_cost) f.elements.avg_cost.oninput = pricing;
   pricing();
 
+  editLock(m.el, f, !isNew);
   $('#save', m.el).onclick = (e) => busy(e.target, async () => {
     const d = formData(f);
     d.type = type;
@@ -2054,7 +2073,7 @@ async function renderReview(box, inv, { batch = false } = {}) {
 
 // ============ Clientes ============
 /** Formulário de cliente com busca automática pelo CNPJ e pelo CEP. */
-function customerForm(c, onSaved, { entity = 'customer' } = {}) {
+function customerForm(c, onSaved, { entity = 'customer', editing = false } = {}) {
   const isNew = !c || !c.id;
   const sup = entity === 'supplier';
   c = c || { type: 'pj' };
@@ -2064,7 +2083,7 @@ function customerForm(c, onSaved, { entity = 'customer' } = {}) {
     body: `<form class="form" id="cf" autocomplete="off">
       <div class="seg" id="ctype"><button type="button" data-t="pj">Empresa (CNPJ)</button><button type="button" data-t="pf">Pessoa física (CPF)</button></div>
       <div class="row">
-        <label><span class="doc-label">CNPJ</span> <span class="inline" style="flex-wrap:nowrap"><input name="document" inputmode="numeric" value="${esc(docFmt(c.document))}" style="flex:1"><button type="button" class="btn" id="lookup">${icon('search')}Buscar dados</button></span><span class="help" id="dochelp">Digite o CNPJ: os dados são preenchidos automaticamente.</span></label>
+        <label><span class="doc-label">CNPJ</span> <span class="inline" style="flex-wrap:nowrap"><input name="document" inputmode="numeric" value="${esc(docFmt(c.document))}" style="flex:1"><button type="button" class="btn js-needs-edit" id="lookup">${icon('search')}Buscar dados</button></span><span class="help" id="dochelp">Digite o CNPJ: os dados são preenchidos automaticamente.</span></label>
       </div>
       <div id="cstatus"></div>
       <div class="row">
@@ -2093,7 +2112,7 @@ function customerForm(c, onSaved, { entity = 'customer' } = {}) {
       </fieldset>
       <label>Observações <textarea name="notes" maxlength="500">${v('notes')}</textarea></label>
     </form>`,
-    foot: `<button class="btn" data-close>Cancelar</button><button class="btn primary" id="save">Salvar ${sup ? 'fornecedor' : 'cliente'}</button>`,
+    foot: `<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="save">Salvar ${sup ? 'fornecedor' : 'cliente'}</button>`,
   });
   const f = $('#cf', m.el);
   let type = c.type === 'pf' ? 'pf' : 'pj', lastLookup = '';
@@ -2147,6 +2166,7 @@ function customerForm(c, onSaved, { entity = 'customer' } = {}) {
     try { const d = await api('cep', { params: { cep } }); fill({ street: d.street, district: d.district, city: d.city, state: d.state }); $('#cephelp', m.el).textContent = 'Endereço preenchido. Falta o número.'; f.elements.number.focus(); }
     catch (err) { $('#cephelp', m.el).innerHTML = `<span class="stock-low">${esc(err.message)}</span>`; }
   });
+  editLock(m.el, f, !isNew && !editing);
   $('#save', m.el).onclick = (e) => busy(e.target, async () => {
     const d = formData(f);
     const doc = d.document.replace(/\D/g, '');
@@ -2354,7 +2374,7 @@ async function viewCustomer(v, id) {
       ${c.sales.map((s) => `<tr class="click" data-go="venda/${s.id}"><td>${s.id}</td><td class="nowrap">${dt(s.created_at)}</td><td>${esc(payLabel(s.payment_method))}</td><td class="num">${s.items}</td><td class="num">${s.status === 'cancelada' ? `<s class="muted">${money(s.total)}</s> <span class="badge err">cancelada</span>` : money(s.total)}</td><td class="small muted">${esc(s.user_name || '')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nenhuma compra ainda.</p>'}</div>
     <div id="custhist"></div>`;
   v.addEventListener('click', (e) => { const r = e.target.closest('[data-go]'); if (r) go(r.dataset.go); });
-  $('#edit', v).onclick = () => customerForm(c, () => route());
+  $('#edit', v).onclick = () => customerForm(c, () => route(), { editing: true });
   if (c.portal) bindPortalCard(v, c);
   if (can('ordens')) loadCustomerHistory(v, c).catch(fail);
   if ($('#sell', v)) $('#sell', v).onclick = () => { sessionStorage.setItem('saleCustomer', JSON.stringify(c)); go('vendas/nova'); };
@@ -2372,7 +2392,7 @@ function serviceForm(sv, onSaved) {
     title: isNew ? 'Novo serviço' : 'Editar serviço',
     body: `<form class="form" id="svf"><label>Nome do serviço * <input name="name" required maxlength="200" value="${esc(sv?.name)}" placeholder="Ex.: Montagem de mesa de doces"></label>
       <label>Preço (R$) * <input name="sale_price" inputmode="decimal" value="${sv && +sv.sale_price ? qty(sv.sale_price, 2) : ''}" placeholder="0,00"></label></form>`,
-    foot: `${!isNew && isAdmin() ? `<button class="btn danger" id="svdel" style="margin-right:auto">${icon('trash')}Excluir</button>` : ''}<button class="btn" data-close>Cancelar</button><button class="btn primary" id="svsave">Salvar serviço</button>`,
+    foot: `${!isNew && isAdmin() ? `<button class="btn danger" id="svdel" style="margin-right:auto">${icon('trash')}Excluir</button>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="svsave">Salvar serviço</button>`,
   });
   const f = $('#svf', m.el);
   const sd = $('#svdel', m.el);
@@ -2386,6 +2406,7 @@ function serviceForm(sv, onSaved) {
     const r = await api('product_save', { body });
     invalidateProducts(); m.close(); toast('Serviço salvo'); onSaved && onSaved(r.id);
   });
+  editLock(m.el, f, !isNew);
   $('#svsave', m.el).onclick = (e) => save(e.currentTarget);
   f.onsubmit = (e) => { e.preventDefault(); save($('#svsave', m.el)); };
 }
@@ -2472,7 +2493,7 @@ async function viewServiceOrderForm(v, id) {
     return list.map((t) => `<option value="${t.id}" ${+o.task_type_id === +t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
   })();
   v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/ordens">← Ordens de serviço</a></p><h1>${isNew ? 'Nova ordem de serviço' : 'Ordem de serviço #' + o.id}</h1>
-      ${isNew ? '' : `<p class="muted">${soStatusHtml(o.status, form.statuses)} ${o.origin_label ? `· ${esc(o.origin_label)}` : ''}</p>`}</div></div>
+      ${isNew ? '' : `<p class="muted">${soStatusHtml(o.status, form.statuses)} ${o.origin_label ? `· ${esc(o.origin_label)}` : ''}</p>`}</div>${isNew ? '' : `<div class="actions"><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn js-edit-only" id="socancel">${icon('x')}Cancelar</button></div>`}</div>
     <div class="card"><form class="form" id="soform">
       <label>Cliente * <select name="customer_id" id="cust" required><option value="">Selecione…</option>${customers.rows.map((c) => `<option value="${c.id}" ${+o.customer_id === +c.id ? 'selected' : ''}>${esc(custName(c))}</option>`).join('')}</select></label>
       <div class="grid two"><label>Equipamento <span id="eqs"></span></label>
@@ -2487,7 +2508,7 @@ async function viewServiceOrderForm(v, id) {
       <div class="grid two"><label>Agendar para <input type="datetime-local" name="scheduled_at" value="${dtLocal(o.scheduled_at)}"></label>
         <label>Prazo <input type="date" name="due_date" value="${esc(o.due_date || '')}"></label></div>
       <label>Observações internas <input name="notes" maxlength="500" value="${esc(o.notes)}"></label>
-      <div class="actions"><a class="btn" href="#/ordens">Cancelar</a><button class="btn primary" type="submit" id="sosave">Salvar ordem</button></div>
+      <div class="actions">${isNew ? '<a class="btn" href="#/ordens">Cancelar</a>' : ''}<button class="btn primary js-edit-only" type="submit" id="sosave">Salvar ordem</button></div>
     </form>${isNew ? '' : `<div class="so-status"><h3>Andamento</h3>
       ${o.transitions.length ? `<div class="actions">${o.transitions.map((s) => `<button class="btn" data-to="${s}">${icon('check')}Mover para "${esc(form.statuses[s])}"</button>`).join('')}</div>` : '<p class="muted">Ordem finalizada: não há mais mudanças de status.</p>'}
     </div>`}</div>`;
@@ -2500,6 +2521,8 @@ async function viewServiceOrderForm(v, id) {
   };
   $('#cust', v).onchange = () => reloadCustomer().catch(fail);
   $$('[name="origin"]', v).forEach((r) => (r.onchange = () => { $('#qts-wrap', v).hidden = r.value !== 'orcamento'; }));
+  editLock(v, $('#soform', v), !isNew);
+  const socancel = $('#socancel', v); if (socancel) socancel.onclick = () => route();
   $('#soform', v).onsubmit = (e) => {
     e.preventDefault();
     busy($('#sosave', v), async () => {
@@ -2563,11 +2586,11 @@ async function equipmentForm(eq, onSaved) {
       <div data-pane="specs" hidden>
         <p class="small muted">Dados técnicos do aparelho, como potência, voltagem ou pressão de trabalho.</p>
         <div id="splist"></div>
-        <button type="button" class="btn ghost" id="spadd">${icon('plus')}Adicionar especificação</button>
+        <button type="button" class="btn ghost js-needs-edit" id="spadd">${icon('plus')}Adicionar especificação</button>
       </div>
       ${isNew ? '' : '<div data-pane="ordens" hidden><div id="eqhist"><p class="muted">Carregando…</p></div></div>'}
     </form>`,
-    foot: `${!isNew ? `<button class="btn ghost" id="eqact" style="margin-right:auto">${+eq.active ? 'Desativar' : 'Reativar'}</button>` : ''}<button class="btn" data-close>Cancelar</button><button class="btn primary" id="eqsave">Salvar equipamento</button>`,
+    foot: `${!isNew ? `<button class="btn ghost" id="eqact" style="margin-right:auto">${+eq.active ? 'Desativar' : 'Reativar'}</button>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="eqsave">Salvar equipamento</button>`,
   });
   const f = $('#eqf', m.el);
   const splist = $('#splist', m.el);
@@ -2609,6 +2632,7 @@ async function equipmentForm(eq, onSaved) {
     await api('equipment_save', { body: { ...d, id: eq?.id, specs: list } });
     m.close(); toast('Equipamento salvo'); onSaved && onSaved();
   });
+  editLock(m.el, f, !isNew);
   $('#eqsave', m.el).onclick = (e) => save(e.currentTarget);
   f.onsubmit = (e) => { e.preventDefault(); save($('#eqsave', m.el)); };
   const act = $('#eqact', m.el);
@@ -2671,7 +2695,7 @@ function taskTypeForm(t, meta, qRows, onSaved) {
         <label class="check"><input type="checkbox" name="send_survey" ${t && +t.send_survey ? 'checked' : ''}> Enviar pesquisa de satisfação</label>
         <label class="check"><input type="checkbox" name="send_os_email" ${t && +t.send_os_email ? 'checked' : ''}> Enviar OS digital por e-mail</label></fieldset>
     </form>`,
-    foot: `${!isNew ? `<button class="btn ghost" id="ttact" style="margin-right:auto">${+t.active ? 'Desativar' : 'Reativar'}</button>` : ''}<button class="btn" data-close>Cancelar</button><button class="btn primary" id="ttsave">Salvar tipo</button>`,
+    foot: `${!isNew ? `<button class="btn ghost" id="ttact" style="margin-right:auto">${+t.active ? 'Desativar' : 'Reativar'}</button>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="ttsave">Salvar tipo</button>`,
   });
   const f = $('#ttf', md.el);
   const save = (btn) => busy(btn, async () => {
@@ -2689,6 +2713,7 @@ function taskTypeForm(t, meta, qRows, onSaved) {
     } });
     md.close(); toast('Tipo salvo'); onSaved && onSaved();
   });
+  editLock(md.el, f, !isNew);
   $('#ttsave', md.el).onclick = (e) => save(e.currentTarget);
   f.onsubmit = (e) => { e.preventDefault(); save($('#ttsave', md.el)); };
   const act = $('#ttact', md.el);
@@ -2728,13 +2753,14 @@ async function viewQuestionnaireForm(v, id) {
   const q = isNew
     ? { name: '', per_line: 1, show_os: 1, pairs: 0, show_unanswered: 0, allow_equipment: 0, equipment_required: 0, active: 1, questions: [] }
     : await api('questionnaire', { params: { id } });
+  let locked = !isNew;
   let qs = (q.questions || []).map((x) => ({ ...x, options: x.options || [] }));
   const typeOpts = (cur) => Object.entries(types).map(([k, l]) => `<option value="${k}" ${cur === k ? 'selected' : ''}>${esc(l)}</option>`).join('');
   const types = (await api('questionnaires', { params: { all: 1 } })).types; // lista de tipos de resposta
 
   v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/questionarios">← Questionários</a></p><h1>${isNew ? 'Novo questionário' : esc(q.name)}</h1>
       ${isNew ? '' : `<p class="muted">${+q.active ? '' : '<span class="badge">inativo</span>'} ${q.questions_count} pergunta(s)</p>`}</div>
-      <div class="actions">${isNew ? '' : `<button class="btn ghost" id="qact">${+q.active ? 'Desativar' : 'Reativar'}</button>`}<button class="btn primary" id="qsave">${icon('check')}Salvar questionário</button></div></div>
+      <div class="actions">${isNew ? '' : `<button class="btn ghost" id="qact">${+q.active ? 'Desativar' : 'Reativar'}</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn js-edit-only" id="qcancel">${icon('x')}Cancelar</button>`}<button class="btn primary js-edit-only" id="qsave">${icon('check')}Salvar questionário</button></div></div>
     <div class="card"><form class="form" id="qform">
       <label>Nome * <input name="name" required maxlength="120" value="${esc(q.name)}" placeholder="Ex.: Checklist de compressor"></label>
       <div class="grid two"><label>Perguntas por linha <select name="per_line">${[1, 2, 3, 4].map((n) => `<option value="${n}" ${+q.per_line === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
@@ -2747,7 +2773,7 @@ async function viewQuestionnaireForm(v, id) {
     </form></div>
     <h2 class="qtitle">Perguntas</h2>
     <div id="qlist"></div>
-    <div class="actions"><button class="btn" id="qadd">${icon('plus')}Adicionar pergunta</button></div>`;
+    <div class="actions"><button class="btn js-needs-edit" id="qadd">${icon('plus')}Adicionar pergunta</button></div>`;
 
   const box = $('#qlist', v);
   const earlierOf = (list, i) => list.slice(0, i).filter((x) => x.id);
@@ -2777,31 +2803,32 @@ async function viewQuestionnaireForm(v, id) {
   };
 
   const render = () => {
+    const d = locked ? 'disabled' : '';
     box.innerHTML = qs.length ? qs.map((x, i) => {
       const earlier = earlierOf(qs, i);
       const condQ = x.cond ? earlier.find((e) => e.id === x.cond.question) : null;
       const hasCond = !!x.cond;
       return `<div class="qcard" data-qid="${esc(x.id)}">
         <div class="qhead"><span class="qnum">${i + 1}</span>
-          <input data-k="label" maxlength="200" placeholder="Texto da pergunta" value="${esc(x.label)}" class="qlabel">
-          <select data-k="type" class="qtype">${typeOpts(x.type)}</select>
-          <label class="check"><input type="checkbox" data-k="required" ${x.required ? 'checked' : ''}> Obrigatória</label>
+          <input ${d} data-k="label" maxlength="200" placeholder="Texto da pergunta" value="${esc(x.label)}" class="qlabel">
+          <select ${d} data-k="type" class="qtype">${typeOpts(x.type)}</select>
+          <label class="check"><input type="checkbox" ${d} data-k="required" ${x.required ? 'checked' : ''}> Obrigatória</label>
           <span class="qtools">
-            <button class="icon-btn" data-act="up" title="Subir" aria-label="Subir" ${i === 0 ? 'disabled' : ''}>▲</button>
-            <button class="icon-btn" data-act="down" title="Descer" aria-label="Descer" ${i === qs.length - 1 ? 'disabled' : ''}>▼</button>
-            <button class="icon-btn" data-act="dup" title="Duplicar" aria-label="Duplicar">${icon('copy')}</button>
-            <button class="icon-btn" data-act="del" title="Remover" aria-label="Remover">${icon('trash')}</button>
+            <button class="icon-btn" data-act="up" title="Subir" aria-label="Subir" ${d || (i === 0 ? 'disabled' : '')}>▲</button>
+            <button class="icon-btn" data-act="down" title="Descer" aria-label="Descer" ${d || (i === qs.length - 1 ? 'disabled' : '')}>▼</button>
+            <button class="icon-btn" ${d} data-act="dup" title="Duplicar" aria-label="Duplicar">${icon('copy')}</button>
+            <button class="icon-btn" ${d} data-act="del" title="Remover" aria-label="Remover">${icon('trash')}</button>
           </span></div>
-        <input data-k="description" maxlength="300" placeholder="Ajuda para o técnico (opcional)" value="${esc(x.description || '')}" class="qdesc">
-        ${Q_OPTION_TYPES.includes(x.type) ? `<label>Opções <textarea data-k="options" rows="4" placeholder="Uma opção por linha">${esc(x.options.join('\n'))}</textarea></label>` : ''}
-        ${x.type === 'foto' ? `<label class="check"><input type="checkbox" data-k="geo" ${x.geo ? 'checked' : ''}> Registrar a localização da foto</label>` : ''}
+        <input ${d} data-k="description" maxlength="300" placeholder="Ajuda para o técnico (opcional)" value="${esc(x.description || '')}" class="qdesc">
+        ${Q_OPTION_TYPES.includes(x.type) ? `<label>Opções <textarea ${d} data-k="options" rows="4" placeholder="Uma opção por linha">${esc(x.options.join('\n'))}</textarea></label>` : ''}
+        ${x.type === 'foto' ? `<label class="check"><input type="checkbox" ${d} data-k="geo" ${x.geo ? 'checked' : ''}> Registrar a localização da foto</label>` : ''}
         <div class="qcond">
-          <label class="check"><input type="checkbox" data-k="hascond" ${hasCond ? 'checked' : ''} ${earlier.length ? '' : 'disabled'}> Mostrar só quando a pergunta anterior tiver uma resposta</label>
+          <label class="check"><input type="checkbox" data-k="hascond" ${hasCond ? 'checked' : ''} ${d || (earlier.length ? '' : 'disabled')}> Mostrar só quando a pergunta anterior tiver uma resposta</label>
           ${hasCond ? `<div class="grid two">
-            <label>Pergunta anterior <select data-k="condq">${earlier.map((e) => `<option value="${esc(e.id)}" ${x.cond.question === e.id ? 'selected' : ''}>${esc(e.label || '(sem texto)')}</option>`).join('')}</select></label>
+            <label>Pergunta anterior <select ${d} data-k="condq">${earlier.map((e) => `<option value="${esc(e.id)}" ${x.cond.question === e.id ? 'selected' : ''}>${esc(e.label || '(sem texto)')}</option>`).join('')}</select></label>
             <label>Resposta que mostra esta pergunta ${condQ && condQ.options.length
-              ? `<select data-k="condv">${condQ.options.map((o) => `<option value="${esc(o)}" ${x.cond.value === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`
-              : `<input data-k="condv" maxlength="120" value="${esc(x.cond.value)}">`}</label></div>` : ''}
+              ? `<select ${d} data-k="condv">${condQ.options.map((o) => `<option value="${esc(o)}" ${x.cond.value === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`
+              : `<input ${d} data-k="condv" maxlength="120" value="${esc(x.cond.value)}">`}</label></div>` : ''}
         </div></div>`;
     }).join('') : '<div class="empty">Nenhuma pergunta. Clique em <strong>Adicionar pergunta</strong>.</div>';
   };
@@ -2876,7 +2903,8 @@ async function viewQuestionnaireForm(v, id) {
     toast(to ? 'Questionário reativado' : 'Questionário desativado'); route();
   });
 
-  render();
+  editLock(v, $('#qform', v), !isNew, (l) => { locked = l; $('#qeqr', v).disabled = l || !$('#qeq', v).checked; render(); });
+  const qc = $('#qcancel', v); if (qc) qc.onclick = () => route();
 }
 
 // ============ Fornecedores ============
@@ -2930,7 +2958,7 @@ async function viewSupplier(v, id) {
     <div class="card"><h2>Notas fiscais</h2>${c.invoices.length ? `<div class="table-wrap"><table><thead><tr><th>Data</th><th>Nota</th><th>Origem</th><th class="num">Itens</th><th class="num">Total</th><th>Por</th></tr></thead><tbody>
       ${c.invoices.map((i) => `<tr class="click" data-go="nota/${i.id}"><td class="nowrap">${dOnly(i.issued_at || i.created_at)}</td><td>${esc(i.number || 's/n')}${i.series ? ' / ' + esc(i.series) : ''}</td><td><span class="badge">${KIND_LABEL[i.kind] || i.kind}</span></td><td class="num">${i.items}</td><td class="num">${money(i.total)}</td><td class="small muted">${esc(i.user_name || '')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nenhuma nota importada deste fornecedor.</p>'}</div>`;
   v.addEventListener('click', (e) => { const r = e.target.closest('[data-go]'); if (r) go(r.dataset.go); });
-  $('#edit', v).onclick = () => customerForm(c, () => route(), { entity: 'supplier' });
+  $('#edit', v).onclick = () => customerForm(c, () => route(), { entity: 'supplier', editing: true });
   if ($('#toggle', v)) $('#toggle', v).onclick = async (e) => {
     if (+c.active && !(await confirmBox(`Desativar "${custName(c)}"? O histórico de notas é mantido.`, { ok: 'Desativar', danger: true }))) return;
     busy(e.target, async () => { await api('supplier_save', { body: { ...c, active: !+c.active } }); toast('Fornecedor atualizado'); route(); });
