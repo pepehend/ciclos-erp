@@ -19,6 +19,7 @@ class Equipments
     public static function list(array $f): array
     {
         $w = ['1=1']; $p = [];
+        $w[] = 'e.deleted_at IS NULL';
         if (empty($f['all'])) { $w[] = 'e.active = 1'; }
         if (!empty($f['customer_id'])) { $w[] = 'e.customer_id = ?'; $p[] = (int)$f['customer_id']; }
         if (($s = trim((string)($f['q'] ?? ''))) !== '') {
@@ -40,6 +41,7 @@ class Equipments
         $customerId = (int)($in['customer_id'] ?? 0);
         if (!$customerId) throw new AppError('Selecione o cliente do equipamento');
         Customers::get($customerId);
+        Removals::check('customers', $customerId, $id ? (int)DB::val('SELECT customer_id FROM equipments WHERE id = ?', [$id]) : null);
         $data = [
             'customer_id' => $customerId,
             'name' => mb_substr($name, 0, 120),
@@ -54,7 +56,7 @@ class Equipments
             'updated_at' => now(),
         ];
         if ($id) {
-            self::get($id);
+            if (self::get($id)['deleted_at']) throw new AppError('Equipamento excluído não pode ser alterado');
             DB::update('equipments', $id, $data);
             return $id;
         }
@@ -97,7 +99,7 @@ class Equipments
 
     public static function setActive(int $id, bool $active): void
     {
-        self::get($id);
+        if (self::get($id)['deleted_at']) throw new AppError('Equipamento excluído não pode ser alterado');
         DB::update('equipments', $id, ['active' => $active ? 1 : 0, 'updated_at' => now()]);
     }
 }
@@ -118,6 +120,43 @@ class ServiceOrders
         'concluida' => [],
     ];
     const ORIGINS = ['chamado' => 'Chamado avulso', 'orcamento' => 'Orçamento'];
+    /**
+     * Resumo das ordens de serviço para o painel: em aberto por status, agenda de hoje, atrasadas,
+     * concluídas no mês, pesquisa de satisfação e concluídas sem orçamento.
+     */
+    public static function dashboard(?int $userId = null): array
+    {
+        $today = date('Y-m-d');
+        $d0 = "$today 00:00:00"; $d1 = "$today 23:59:59";
+        $month = date('Y-m-01') . ' 00:00:00';
+        $in = implode(',', array_fill(0, count(self::OPEN), '?'));
+        $byStatus = array_fill_keys(self::OPEN, 0);
+        foreach (DB::all("SELECT status, COUNT(*) n FROM service_orders WHERE status IN ($in) GROUP BY status", self::OPEN) as $r) $byStatus[$r['status']] = (int)$r['n'];
+        // Atrasada: prazo vencido, ou agendada para um dia que já passou sem o atendimento ter começado
+        $lateSql = "status IN ($in) AND ((due_date IS NOT NULL AND due_date < ?) OR (status IN ('aberta','agendada') AND scheduled_at IS NOT NULL AND scheduled_at < ?))";
+        $lateP = array_merge(self::OPEN, [$today, $d0]);
+        $cols = 'o.id, o.status, o.scheduled_at, o.due_date, o.description, c.name customer_name, c.trade_name customer_trade_name,
+            t.name technician_name, tt.name task_type_name, o.technician_id';
+        $from = 'FROM service_orders o JOIN customers c ON c.id = o.customer_id LEFT JOIN users t ON t.id = o.technician_id LEFT JOIN task_types tt ON tt.id = o.task_type_id';
+        $survey = DB::one('SELECT COUNT(*) n, AVG(survey_rating) avg FROM service_orders WHERE survey_rating IS NOT NULL AND survey_at >= ?', [$month]);
+        return [
+            'open' => array_sum($byStatus),
+            'by_status' => $byStatus,
+            'unscheduled' => (int)DB::val("SELECT COUNT(*) FROM service_orders WHERE status IN ($in) AND scheduled_at IS NULL", self::OPEN),
+            'late_count' => (int)DB::val("SELECT COUNT(*) FROM service_orders WHERE $lateSql", $lateP),
+            'late' => DB::all("SELECT $cols $from WHERE " . str_replace(['status', 'due_date', 'scheduled_at'], ['o.status', 'o.due_date', 'o.scheduled_at'], $lateSql) . ' ORDER BY COALESCE(o.due_date, o.scheduled_at) LIMIT 5', $lateP),
+            'today' => DB::all("SELECT $cols $from WHERE o.scheduled_at BETWEEN ? AND ? ORDER BY o.scheduled_at, o.id LIMIT 20", [$d0, $d1]),
+            'mine_today' => $userId ? (int)DB::val('SELECT COUNT(*) FROM service_orders WHERE technician_id = ? AND scheduled_at BETWEEN ? AND ?', [$userId, $d0, $d1]) : 0,
+            'done_month' => (int)DB::val("SELECT COUNT(*) FROM service_orders WHERE status = 'concluida' AND finished_at >= ?", [$month]),
+            'done_today' => (int)DB::val("SELECT COUNT(*) FROM service_orders WHERE status = 'concluida' AND finished_at BETWEEN ? AND ?", [$d0, $d1]),
+            'survey' => ['count' => (int)$survey['n'], 'avg' => $survey['avg'] !== null ? round((float)$survey['avg'], 1) : null],
+            // Concluídas nos últimos 30 dias que ainda não viraram orçamento (OS → "Abrir orçamento")
+            'no_quote' => (int)DB::val("SELECT COUNT(*) FROM service_orders o WHERE o.status = 'concluida' AND o.finished_at >= ?
+                AND o.quote_id IS NULL AND NOT EXISTS (SELECT 1 FROM quotes q WHERE q.service_order_id = o.id)", [date('Y-m-d', strtotime('-30 days')) . ' 00:00:00']),
+            'statuses' => self::STATUSES,
+        ];
+    }
+
     /** Abas da lista: "abertas" são as que ainda não foram concluídas. */
     const OPEN = ['aberta', 'agendada', 'a_caminho', 'em_execucao', 'pausada'];
 
@@ -191,6 +230,7 @@ class ServiceOrders
         $customerId = (int)($in['customer_id'] ?? 0);
         if (!$customerId) throw new AppError('Selecione o cliente');
         Customers::get($customerId);
+        Removals::check('customers', $customerId, $old ? (int)$old['customer_id'] : null);
         $description = trim((string)($in['description'] ?? ''));
         if ($description === '') throw new AppError('Descreva o serviço solicitado');
 
@@ -208,13 +248,14 @@ class ServiceOrders
         if ($equipmentId) {
             $eq = Equipments::get($equipmentId);
             if ((int)$eq['customer_id'] !== $customerId) throw new AppError('O equipamento não pertence a este cliente');
+            Removals::check('equipments', $equipmentId, $old ? (int)$old['equipment_id'] : null);
         }
 
         // Tipo de tarefa: só tipos ativos (um tipo já usado pela OS continua aceito ao editar)
         $taskTypeId = (int)($in['task_type_id'] ?? 0) ?: null;
         if ($taskTypeId && (!$old || (int)$old['task_type_id'] !== $taskTypeId)) {
             $tt = TaskTypes::get($taskTypeId);
-            if (!(int)$tt['active']) throw new AppError('Este tipo de tarefa está inativo');
+            if (!(int)$tt['active']) throw new AppError('Este tipo de tarefa está ' . ($tt['deleted_at'] ? 'excluído' : 'inativo'));
         }
 
         $technicianId = (int)($in['technician_id'] ?? 0) ?: null;

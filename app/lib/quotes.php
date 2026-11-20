@@ -55,6 +55,7 @@ class Quotes
             $customerId = (int)($in['customer_id'] ?? 0);
             if (!$customerId) throw new AppError('Selecione o cliente do orçamento (ou informe o lead)');
             Customers::get($customerId);
+            Removals::check('customers', $customerId, $id ? (int)DB::val('SELECT customer_id FROM quotes WHERE id = ?', [$id]) : null);
         }
         // Aprovar só para cliente cadastrado (lead precisa ser cadastrado antes)
         if ($status === 'aprovado' && !$customerId) {

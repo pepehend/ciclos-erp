@@ -98,7 +98,10 @@ class PurchaseOrders
         $supplierId = (int)($in['supplier_id'] ?? 0);
         if (!$supplierId) throw new AppError('Selecione o fornecedor');
         $sup = Customers::get($supplierId, 'suppliers');
-        if (!$sup['active']) throw new AppError('O fornecedor "' . $sup['name'] . '" está inativo');
+        // Fornecedor inativo ou excluído só continua numa ordem que já era dele
+        if (!$sup['active'] && (empty($old) || (int)$old['supplier_id'] !== $supplierId)) {
+            throw new AppError('O fornecedor "' . $sup['name'] . '" está ' . ($sup['deleted_at'] ? 'excluído' : 'inativo'));
+        }
 
         $orderDate = Finance::date($in['order_date'] ?? null) ?? date('Y-m-d');
         $expected = Finance::date($in['expected_date'] ?? null);

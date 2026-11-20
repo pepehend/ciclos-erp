@@ -5,7 +5,7 @@
 
 declare(strict_types=1);
 
-const APP_VERSION = '2.3.1';
+const APP_VERSION = '2.4.0';
 define('APP_ROOT', dirname(__DIR__));
 define('CONFIG_FILE', __DIR__ . '/config.php');
 
@@ -34,6 +34,7 @@ require __DIR__ . '/lib/auth.php';
 require __DIR__ . '/lib/backup.php';
 require __DIR__ . '/lib/gdrive.php';
 require __DIR__ . '/lib/portal.php';
+require __DIR__ . '/lib/deletion.php';
 
 // Autoload da biblioteca de leitura de PDF (smalot/pdfparser, licença LGPL)
 spl_autoload_register(function (string $class) {

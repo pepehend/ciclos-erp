@@ -43,7 +43,7 @@ class Questionnaires
 
     public static function list(bool $all = false): array
     {
-        $rows = DB::all('SELECT * FROM questionnaires' . ($all ? '' : ' WHERE active = 1') . ' ORDER BY name');
+        $rows = DB::all('SELECT * FROM questionnaires WHERE deleted_at IS NULL' . ($all ? '' : ' AND active = 1') . ' ORDER BY name');
         return array_map([self::class, 'decode'], $rows);
     }
 
@@ -240,7 +240,7 @@ class Questionnaires
             'updated_at' => now(),
         ];
         if ($id) {
-            self::get($id);
+            if (self::get($id)['deleted_at'] ?? null) throw new AppError('Questionário excluído não pode ser alterado');
             DB::update('questionnaires', $id, $data);
             return $id;
         }
@@ -248,10 +248,9 @@ class Questionnaires
         return DB::insert('questionnaires', $data);
     }
 
-    /** Questionário usado por um tipo de tarefa não se apaga, só se desativa. */
     public static function setActive(int $id, bool $active): void
     {
-        self::get($id);
+        if (self::get($id)['deleted_at'] ?? null) throw new AppError('Questionário excluído não pode ser alterado');
         DB::update('questionnaires', $id, ['active' => $active ? 1 : 0, 'updated_at' => now()]);
     }
 }
@@ -286,7 +285,7 @@ class TaskTypes
 
     public static function list(bool $all = false): array
     {
-        $rows = DB::all('SELECT * FROM task_types' . ($all ? '' : ' WHERE active = 1') . ' ORDER BY name');
+        $rows = DB::all('SELECT * FROM task_types WHERE deleted_at IS NULL' . ($all ? '' : ' AND active = 1') . ' ORDER BY name');
         return array_map([self::class, 'decode'], $rows);
     }
 
@@ -345,7 +344,7 @@ class TaskTypes
             'updated_at' => now(),
         ];
         if ($id) {
-            self::get($id);
+            if (self::get($id)['deleted_at'] ?? null) throw new AppError('Tipo de tarefa excluído não pode ser alterado');
             DB::update('task_types', $id, $data);
             return $id;
         }
@@ -355,7 +354,7 @@ class TaskTypes
 
     public static function setActive(int $id, bool $active): void
     {
-        self::get($id);
+        if (self::get($id)['deleted_at'] ?? null) throw new AppError('Tipo de tarefa excluído não pode ser alterado');
         DB::update('task_types', $id, ['active' => $active ? 1 : 0, 'updated_at' => now()]);
     }
 

@@ -635,12 +635,27 @@ const MASKS = [
   { sel: DOC_SEL, fmt: (v, el) => docMask(v, el.dataset.mask), free: () => false, im: 'numeric',
     ph: (el) => el.dataset.mask === 'cpf' ? '000.000.000-00' : el.dataset.mask === 'cnpj' || /cnpj|company_document/.test((el.name || '') + (el.dataset.k || '')) ? '00.000.000/0000-00' : 'CPF ou CNPJ' },
 ];
-// Campos só de número (respostas Numérica e Monetária dos questionários): aceita algarismos, vírgula e ponto;
-// data-num="dec" aceita também o sinal de menos no começo. Letras e outros caracteres somem enquanto digita.
+// Campos só de número (respostas Numérica e Monetária dos questionários).
+// data-num="dec": algarismos, vírgula, ponto e o sinal de menos no começo; o resto some enquanto digita.
+// data-num="money": máscara de valor que começa pelos centavos (1 → 0,01; 12 → 0,12; 123 → 1,23; 123456 → 1.234,56).
 const numOnly = (v, neg) => { const t = String(v).replace(neg ? /[^\d.,-]/g : /[^\d.,]/g, ''); return neg ? t.replace(/(?!^)-/g, '') : t; };
+const moneyMask = (v) => {
+  const d = String(v ?? '').replace(/\D/g, '').replace(/^0+/, '').slice(0, 13);
+  if (!d) return '';
+  return (Number(d) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+// Valor guardado (ex.: "1234.5") já no formato da máscara ("1.234,50")
+const moneyMaskVal = (v) => (v === null || v === undefined || v === '' || !isFinite(+v) ? '' : (+v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 document.addEventListener('input', (e) => {
   const el = e.target;
   if (!el.matches || !el.matches('input[data-num]')) return;
+  if (el.dataset.num === 'money') {
+    // Os números entram sempre pela direita (centavos); o cursor fica no fim
+    const out = moneyMask(el.value);
+    if (out !== el.value) el.value = out;
+    try { el.setSelectionRange(out.length, out.length); } catch (_) {}
+    return;
+  }
   const neg = el.dataset.num === 'dec', before = el.value, caret = el.selectionStart ?? before.length;
   const clean = numOnly(before, neg);
   if (clean === before) return;
@@ -1102,10 +1117,38 @@ function renderLogin() {
 }
 
 // ============ Painel ============
+/** Painel: bloco das ordens de serviço (agenda de hoje, atrasadas, concluídas, satisfação) e dos orçamentos ligados a elas. */
+function dashOrdersHtml(d) {
+  const o = d.orders, q = d.quotes;
+  if (!o && !q) return '';
+  const st = o ? o.statuses : {};
+  const row = (r, when) => `<tr class="click" data-go="ordem/${r.id}"><td class="nowrap">${when(r)}</td>
+    <td><div><strong>${soCustomer(r)}</strong></div><div class="small muted">#${r.id}${r.task_type_name ? ' · ' + esc(r.task_type_name) : ''}${r.technician_name ? ' · ' + esc(r.technician_name) : ''}</div></td>
+    <td>${soStatusHtml(r.status, st)}</td></tr>`;
+  const hour = (r) => esc(String(r.scheduled_at).slice(11, 16));
+  const late = (r) => `<span class="stock-low">${r.due_date && r.due_date < new Date().toISOString().slice(0, 10) ? 'prazo ' + dOnly(r.due_date) : 'agendada ' + dOnly(r.scheduled_at)}</span>`;
+  const stars = (n) => (n == null ? '—' : `${String(n).replace('.', ',')} <span style="color:#f5a524">★</span>`);
+  return `${o ? `<div class="kpis">
+      <div class="kpi"><div class="label">OS em aberto</div><div class="value">${o.open}</div><div class="sub">${SO_OPEN_CODES.filter((k) => o.by_status[k]).map((k) => `${esc(st[k] || k)}: ${o.by_status[k]}`).join(' · ') || 'nenhuma'}</div></div>
+      <div class="kpi"><div class="label">Na agenda hoje</div><div class="value">${o.today.length}</div><div class="sub">${o.mine_today ? `${o.mine_today} com você · ` : ''}${o.done_today} concluída(s) hoje</div></div>
+      <div class="kpi ${o.late_count ? 'neg' : ''}"><div class="label">OS atrasadas</div><div class="value">${o.late_count}</div><div class="sub">${o.unscheduled ? `${o.unscheduled} sem agendamento` : '<a href="#/agenda">ver agenda</a>'}</div></div>
+      <div class="kpi pos"><div class="label">Concluídas no mês</div><div class="value">${o.done_month}</div><div class="sub">satisfação ${stars(o.survey.avg)}${o.survey.count ? ` (${o.survey.count} resposta${o.survey.count > 1 ? 's' : ''})` : ''}</div></div>
+      ${q ? `<div class="kpi"><div class="label">Orçamentos aprovados</div><div class="value">${q.approved}</div><div class="sub">${money(q.approved_total)} aguardando venda</div></div>` : ''}
+      ${o.no_quote ? `<div class="kpi"><div class="label">OS concluídas sem orçamento</div><div class="value">${o.no_quote}</div><div class="sub">nos últimos 30 dias${q ? ` · ${q.from_os} orçamento(s) aberto(s) por OS no mês` : ''}</div></div>` : ''}
+    </div>
+    <div class="grid two">
+      <div class="card"><div class="card-head"><h2>Agenda de hoje</h2><a href="#/agenda" class="small">abrir agenda</a></div>
+        ${o.today.length ? `<div class="table-wrap"><table><tbody>${o.today.map((r) => row(r, hour)).join('')}</tbody></table></div>` : '<p class="muted">Nenhuma ordem agendada para hoje.</p>'}</div>
+      <div class="card"><div class="card-head"><h2>Ordens atrasadas</h2><a href="#/ordens" class="small">ver ordens</a></div>
+        ${o.late.length ? `<div class="table-wrap"><table><tbody>${o.late.map((r) => row(r, late)).join('')}</tbody></table></div>${o.late_count > o.late.length ? `<p class="help" style="margin:8px 0 0">Mostrando ${o.late.length} de ${o.late_count}.</p>` : ''}` : '<p class="muted">Nenhuma ordem atrasada.</p>'}</div>
+    </div>` : `<div class="kpis"><div class="kpi"><div class="label">Orçamentos aprovados</div><div class="value">${q.approved}</div><div class="sub">${money(q.approved_total)} aguardando venda</div></div></div>`}`;
+}
+
 async function viewDashboard(v) {
   const d = await api('dashboard');
   v.innerHTML = `<div class="page-head"><div><h1>Olá, ${esc(state.me.name.split(' ')[0])}</h1><p class="muted">${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</p></div>
     <div class="actions">${can('notas') ? `<a class="btn" href="#/notas/importar">${icon('upload')}Importar nota</a>` : ''}${newButton()}</div></div>
+    ${dashOrdersHtml(d)}
     ${d.today ? `<div class="kpis">
       <div class="kpi"><div class="label">Vendas hoje</div><div class="value">${money(d.today.revenue)}</div><div class="sub">${d.today.sales} venda(s)</div></div>
       <div class="kpi ${d.today.profit >= 0 ? 'pos' : 'neg'}"><div class="label">Lucro bruto hoje</div><div class="value">${money(d.today.profit)}</div></div>
@@ -2361,14 +2404,36 @@ async function loadCustomerHistory(v, c) {
   };
 }
 
+/**
+ * Exclusão de cadastro (cliente, fornecedor, equipamento, tipo de tarefa, questionário). Nunca usado: apaga de vez.
+ * Já usado: some das listas, mas continua aparecendo onde foi usado. Devolve true se excluiu.
+ */
+const DELETE_KINDS = {
+  customer: ['customer_delete', 'o cliente', 'Cliente', 'orçamentos, vendas, ordens de serviço e lançamentos'],
+  supplier: ['supplier_delete', 'o fornecedor', 'Fornecedor', 'notas, ordens de compra e lançamentos'],
+  equipment: ['equipment_delete', 'o equipamento', 'Equipamento', 'ordens de serviço'],
+  task_type: ['task_type_delete', 'o tipo de tarefa', 'Tipo de tarefa', 'ordens de serviço'],
+  questionnaire: ['questionnaire_delete', 'o questionário', 'Questionário', 'ordens de serviço que já responderam'],
+};
+async function deleteRecord(kind, id, name) {
+  const [route, art, label, where] = DELETE_KINDS[kind];
+  if (!(await confirmBox(`Excluir ${art} "${name}"? Se já foi usado, continua aparecendo nos ${where} onde está, mas some das listas e não pode ser escolhido de novo.`, { ok: 'Excluir', danger: true }))) return false;
+  const r = await api(route, { body: { id } });
+  toast(r.result === 'apagado' ? `${label} apagado` : `${label} excluído (mantido onde já foi usado)`);
+  return true;
+}
+const deletedBanner = (what) => `<div class="alert warn">${icon('info')} ${what} foi excluído. Ele continua aparecendo onde já foi usado, mas não pode ser alterado nem escolhido de novo.</div>`;
+
 async function viewCustomer(v, id) {
   const c = await api('customer', { params: { id } });
   const st = c.stats || {};
   const addr = [[c.street, c.number].filter(Boolean).join(', '), c.complement, c.district, [c.city, c.state].filter(Boolean).join('/'), cepFmt(c.cep)].filter(Boolean).join(' · ');
-  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/clientes">← Clientes</a></p><h1>${esc(custName(c))} ${+c.active ? '' : '<span class="badge">inativo</span>'}</h1>
+  const del = !!c.deleted_at;
+  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/clientes">← Clientes</a></p><h1>${esc(custName(c))} ${del ? '<span class="badge err">excluído</span>' : +c.active ? '' : '<span class="badge">inativo</span>'}</h1>
       <p class="muted">${c.trade_name ? esc(c.name) + ' · ' : ''}${c.type === 'pj' ? 'Empresa' : 'Pessoa física'}${c.document ? ' · ' + docFmt(c.document) : ''}</p></div>
-    <div class="actions">${+c.active ? `<button class="btn primary" id="sell">${icon('cart')}Nova venda</button>` : ''}<button class="btn" id="edit">Editar</button>
-      ${isAdmin() ? `<button class="btn ${+c.active ? 'danger' : ''}" id="toggle">${+c.active ? 'Desativar' : 'Reativar'}</button>` : ''}</div></div>
+    <div class="actions">${del ? '' : `${+c.active ? `<button class="btn primary" id="sell">${icon('cart')}Nova venda</button>` : ''}<button class="btn" id="edit">Editar</button>
+      ${isAdmin() ? `<button class="btn ${+c.active ? 'danger' : ''}" id="toggle">${+c.active ? 'Desativar' : 'Reativar'}</button><button class="btn danger" id="cdel">${icon('trash')}Excluir</button>` : ''}`}</div></div>
+    ${del ? deletedBanner('Este cliente') : ''}
     <div class="kpis">
       <div class="kpi"><div class="label">Total comprado</div><div class="value">${money(st.total)}</div><div class="sub">${st.n || 0} compra(s)</div></div>
       <div class="kpi pos"><div class="label">Lucro gerado</div><div class="value">${money(st.profit)}</div></div>
@@ -2386,13 +2451,14 @@ async function viewCustomer(v, id) {
       </dl></div>
       <div class="card"><h2>O que mais compra</h2>${c.top_products.length ? `<div class="table-wrap"><table><tbody>${c.top_products.map((p) => `<tr><td><a href="#/produto/${p.id}">${esc(p.name)}</a></td><td class="num">${qty(p.qty)} ${esc(p.unit)}</td><td class="num">${money(p.total)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nenhuma compra ainda.</p>'}</div>
     </div>
-    ${c.portal ? portalCardHtml(c) : ''}
+    ${c.portal && !del ? portalCardHtml(c) : ''}
     <div class="card"><h2>Compras</h2>${c.sales.length ? `<div class="table-wrap"><table><thead><tr><th>#</th><th>Data</th><th>Pagamento</th><th class="num">Itens</th><th class="num">Total</th><th>Vendedor</th></tr></thead><tbody>
       ${c.sales.map((s) => `<tr class="click" data-go="venda/${s.id}"><td>${s.id}</td><td class="nowrap">${dt(s.created_at)}</td><td>${esc(payLabel(s.payment_method))}</td><td class="num">${s.items}</td><td class="num">${s.status === 'cancelada' ? `<s class="muted">${money(s.total)}</s> <span class="badge err">cancelada</span>` : money(s.total)}</td><td class="small muted">${esc(s.user_name || '')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nenhuma compra ainda.</p>'}</div>
     <div id="custhist"></div>`;
   v.addEventListener('click', (e) => { const r = e.target.closest('[data-go]'); if (r) go(r.dataset.go); });
-  $('#edit', v).onclick = () => customerForm(c, () => route(), { editing: true });
-  if (c.portal) bindPortalCard(v, c);
+  if ($('#edit', v)) $('#edit', v).onclick = () => customerForm(c, () => route(), { editing: true });
+  if ($('#cdel', v)) $('#cdel', v).onclick = (e) => busy(e.currentTarget, async () => { if (await deleteRecord('customer', c.id, custName(c))) go('clientes'); }).catch(fail);
+  if (c.portal && !del) bindPortalCard(v, c);
   if (can('ordens')) loadCustomerHistory(v, c).catch(fail);
   if ($('#sell', v)) $('#sell', v).onclick = () => { sessionStorage.setItem('saleCustomer', JSON.stringify(c)); go('vendas/nova'); };
   if ($('#toggle', v)) $('#toggle', v).onclick = async (e) => {
@@ -2603,7 +2669,7 @@ function qFieldHtml(q, v) {
   switch (q.type) {
     case 'area': return `<textarea data-q="${id}" rows="3" maxlength="5000">${esc(v || '')}</textarea>`;
     case 'numerica': return `<input data-q="${id}" data-num="dec" inputmode="decimal" value=""${esc(String(v ?? '').replace('.', ','))}">`;
-    case 'monetaria': return `<input data-q="${id}" data-num="money" inputmode="decimal" placeholder="R$ 0,00" value="${v ? esc(Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })) : ''}">`;
+    case 'monetaria': return `<input data-q="${id}" data-num="money" inputmode="numeric" placeholder="R$ 0,00" value="${esc(moneyMaskVal(v))}">`;
     case 'data': return `<input data-q="${id}" type="date" value="${esc(v || '')}">`;
     case 'hora': return `<input data-q="${id}" type="time" value="${esc(v || '')}">`;
     case 'documento': return `<input data-q="${id}" data-mask="doc" inputmode="numeric" value="${esc(v ? docFmt(v) : '')}">`;
@@ -2642,7 +2708,7 @@ async function viewServiceOrderForm(v, id) {
     return list.map((t) => `<option value="${t.id}" ${+o.task_type_id === +t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
   })();
   const detailsForm = `<form class="form" id="soform">
-      <label>Cliente * <select name="customer_id" id="cust" required><option value="">Selecione…</option>${customers.rows.map((c) => `<option value="${c.id}" ${+o.customer_id === +c.id ? 'selected' : ''}>${esc(custName(c))}</option>`).join('')}</select></label>
+      <label>Cliente * <select name="customer_id" id="cust" required><option value="">Selecione…</option>${custOptions(customers.rows, o.customer_id, o.customer_trade_name || o.customer_name)}</select></label>
       <div class="grid two"><label>Equipamento <span id="eqs"></span></label>
         <label>Tipo de tarefa <select name="task_type_id" required><option value="">Selecione…</option>${taskOpts}</select></label></div>
       <fieldset class="fset"><legend>Origem</legend>
@@ -3198,6 +3264,13 @@ async function viewEquipments(v) {
   await load();
 }
 
+/** Opções de cliente; o cliente atual do registro aparece mesmo se estiver inativo ou excluído. */
+const custOptions = (rows, curId, curName) => {
+  const list = rows.map((c) => ({ id: c.id, name: custName(c) }));
+  if (curId && !list.some((c) => +c.id === +curId)) list.unshift({ id: curId, name: `${curName || 'Cliente'} (excluído ou inativo)` });
+  return list.map((c) => `<option value="${c.id}" ${+curId === +c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+};
+
 async function equipmentForm(eq, onSaved) {
   const isNew = !eq;
   const customers = await api('customers', { params: { active: '1', limit: 200, sort: 'asc' } });
@@ -3207,7 +3280,7 @@ async function equipmentForm(eq, onSaved) {
     body: `<div class="seg" id="eqtabs"><button type="button" data-et="geral" class="on">Geral</button><button type="button" data-et="specs">Especificações</button>${isNew ? '' : '<button type="button" data-et="ordens">Ordens</button>'}</div>
     <form class="form" id="eqf">
       <div data-pane="geral">
-        <label>Cliente * <select name="customer_id" required><option value="">Selecione…</option>${customers.rows.map((c) => `<option value="${c.id}" ${eq && +eq.customer_id === +c.id ? 'selected' : ''}>${esc(custName(c))}</option>`).join('')}</select></label>
+        <label>Cliente * <select name="customer_id" required><option value="">Selecione…</option>${custOptions(customers.rows, eq?.customer_id, eq?.customer_trade_name || eq?.customer_name)}</select></label>
         <label>Nome do equipamento * <input name="name" required maxlength="120" value="${esc(eq?.name)}" placeholder="Ex.: Compressor de parafuso"></label>
         <div class="grid two"><label>Identificador <input name="serial" maxlength="80" value="${esc(eq?.serial)}" placeholder="Nº de série ou código"></label><label>Categoria <input name="category" maxlength="80" value="${esc(eq?.category)}" placeholder="Ex.: Compressores"></label></div>
         <div class="grid two"><label>Marca <input name="brand" maxlength="80" value="${esc(eq?.brand)}"></label><label>Modelo <input name="model" maxlength="80" value="${esc(eq?.model)}"></label></div>
@@ -3221,7 +3294,7 @@ async function equipmentForm(eq, onSaved) {
       </div>
       ${isNew ? '' : '<div data-pane="ordens" hidden><div id="eqhist"><p class="muted">Carregando…</p></div></div>'}
     </form>`,
-    foot: `${!isNew ? `<button class="btn ghost" id="eqact" style="margin-right:auto">${+eq.active ? 'Desativar' : 'Reativar'}</button>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="eqsave">Salvar equipamento</button>`,
+    foot: `${!isNew ? `<span class="inline" style="margin-right:auto"><button class="btn ghost" id="eqact">${+eq.active ? 'Desativar' : 'Reativar'}</button>${isAdmin() ? `<button class="btn danger" id="eqdel">${icon('trash')}Excluir</button>` : ''}</span>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="eqsave">Salvar equipamento</button>`,
   });
   const f = $('#eqf', m.el);
   const splist = $('#splist', m.el);
@@ -3266,6 +3339,8 @@ async function equipmentForm(eq, onSaved) {
   editLock(m.el, f, !isNew);
   $('#eqsave', m.el).onclick = (e) => save(e.currentTarget);
   f.onsubmit = (e) => { e.preventDefault(); save($('#eqsave', m.el)); };
+  const del = $('#eqdel', m.el);
+  if (del) del.onclick = () => busy(del, async () => { if (await deleteRecord('equipment', eq.id, eq.name)) { m.close(); onSaved && onSaved(); } }).catch(fail);
   const act = $('#eqact', m.el);
   if (act) act.onclick = () => busy(act, async () => {
     const to = !+eq.active;
@@ -3607,7 +3682,7 @@ function taskTypeForm(t, meta, qRows, onSaved) {
         <label class="check"><input type="checkbox" name="send_survey" ${t && +t.send_survey ? 'checked' : ''}> Enviar pesquisa de satisfação</label>
         <label class="check"><input type="checkbox" name="send_os_email" ${t && +t.send_os_email ? 'checked' : ''}> Enviar OS digital por e-mail</label></fieldset>
     </form>`,
-    foot: `${!isNew ? `<button class="btn ghost" id="ttact" style="margin-right:auto">${+t.active ? 'Desativar' : 'Reativar'}</button>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="ttsave">Salvar tipo</button>`,
+    foot: `${!isNew ? `<span class="inline" style="margin-right:auto"><button class="btn ghost" id="ttact">${+t.active ? 'Desativar' : 'Reativar'}</button>${isAdmin() ? `<button class="btn danger" id="ttdel">${icon('trash')}Excluir</button>` : ''}</span>` : ''}<button class="btn js-edit-only" data-close>Cancelar</button><button class="btn js-view-only" data-close>Fechar</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn primary js-edit-only" id="ttsave">Salvar tipo</button>`,
   });
   const f = $('#ttf', md.el);
   const save = (btn) => busy(btn, async () => {
@@ -3628,6 +3703,8 @@ function taskTypeForm(t, meta, qRows, onSaved) {
   editLock(md.el, f, !isNew);
   $('#ttsave', md.el).onclick = (e) => save(e.currentTarget);
   f.onsubmit = (e) => { e.preventDefault(); save($('#ttsave', md.el)); };
+  const del = $('#ttdel', md.el);
+  if (del) del.onclick = () => busy(del, async () => { if (await deleteRecord('task_type', t.id, t.name)) { md.close(); onSaved && onSaved(); } }).catch(fail);
   const act = $('#ttact', md.el);
   if (act) act.onclick = () => busy(act, async () => {
     const to = !+t.active;
@@ -3672,7 +3749,7 @@ async function viewQuestionnaireForm(v, id) {
 
   v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/questionarios">← Questionários</a></p><h1>${isNew ? 'Novo questionário' : esc(q.name)}</h1>
       ${isNew ? '' : `<p class="muted">${+q.active ? '' : '<span class="badge">inativo</span>'} ${q.questions_count} pergunta(s)</p>`}</div>
-      <div class="actions">${isNew ? '' : `<button class="btn ghost" id="qact">${+q.active ? 'Desativar' : 'Reativar'}</button><button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn js-edit-only" id="qcancel">${icon('x')}Cancelar</button>`}<button class="btn primary js-edit-only" id="qsave">${icon('check')}Salvar questionário</button></div></div>
+      <div class="actions">${isNew ? '' : `<button class="btn ghost" id="qact">${+q.active ? 'Desativar' : 'Reativar'}</button>${isAdmin() ? `<button class="btn danger js-view-only" id="qdel">${icon('trash')}Excluir</button>` : ''}<button class="btn js-view-only" data-edit>${icon('pencil')}Editar</button><button class="btn js-edit-only" id="qcancel">${icon('x')}Cancelar</button>`}<button class="btn primary js-edit-only" id="qsave">${icon('check')}Salvar questionário</button></div></div>
     <div class="card"><form class="form" id="qform">
       <label>Nome * <input name="name" required maxlength="120" value="${esc(q.name)}" placeholder="Ex.: Checklist de compressor"></label>
       <div class="grid two"><label>Perguntas por linha <select name="per_line">${[1, 2, 3, 4].map((n) => `<option value="${n}" ${+q.per_line === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
@@ -3728,7 +3805,7 @@ async function viewQuestionnaireForm(v, id) {
       case 'check': return `<select ${d} data-k="condv"><option value="">Selecione</option><option value="sim" ${val === 'sim' ? 'selected' : ''}>Verdadeiro</option><option value="nao" ${val === 'nao' ? 'selected' : ''}>Falso</option></select>`;
       case 'data': return `<input ${d} data-k="condv" type="date" value="${esc(val || '')}">`;
       case 'hora': return `<input ${d} data-k="condv" type="time" value="${esc(val || '')}">`;
-      case 'monetaria': return `<input ${d} data-k="condv" data-num="money" inputmode="decimal" placeholder="R$ 0,00" value="${esc(String(val || '').replace('.', ','))}">`;
+      case 'monetaria': return `<input ${d} data-k="condv" data-num="money" inputmode="numeric" placeholder="R$ 0,00" value="${esc(moneyMaskVal(val))}">`;
       default: return `<input ${d} data-k="condv" data-num="dec" inputmode="decimal" value="${esc(String(val || '').replace('.', ','))}">`;
     }
   };
@@ -3891,6 +3968,8 @@ async function viewQuestionnaireForm(v, id) {
   });
   $('#qsave', v).onclick = (e) => save(e.currentTarget).catch(fail);
 
+  const qdel = $('#qdel', v);
+  if (qdel) qdel.onclick = () => busy(qdel, async () => { if (await deleteRecord('questionnaire', q.id, q.name)) go('questionarios'); }).catch(fail);
   const act = $('#qact', v);
   if (act) act.onclick = () => busy(act, async () => {
     const to = !+q.active;
@@ -3932,10 +4011,12 @@ async function viewSupplier(v, id) {
   const st = c.stats || {};
   const addr = [[c.street, c.number].filter(Boolean).join(', '), c.complement, c.district, [c.city, c.state].filter(Boolean).join('/'), cepFmt(c.cep)].filter(Boolean).join(' · ');
   const phone = String(c.phone || '').replace(/\D/g, '');
-  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/fornecedores">← Fornecedores</a></p><h1>${esc(custName(c))} ${+c.active ? '' : '<span class="badge">inativo</span>'}</h1>
+  const del = !!c.deleted_at;
+  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/fornecedores">← Fornecedores</a></p><h1>${esc(custName(c))} ${del ? '<span class="badge err">excluído</span>' : +c.active ? '' : '<span class="badge">inativo</span>'}</h1>
       <p class="muted">${c.trade_name ? esc(c.name) + ' · ' : ''}${c.type === 'pj' ? 'Empresa' : 'Pessoa física'}${c.document ? ' · ' + docFmt(c.document) : ''}</p></div>
-    <div class="actions">${can('notas') ? `<a class="btn" href="#/notas/importar">${icon('upload')}Importar nota</a>` : ''}<button class="btn primary" id="edit">Editar</button>
-      ${isAdmin() ? `<button class="btn ${+c.active ? 'danger' : ''}" id="toggle">${+c.active ? 'Desativar' : 'Reativar'}</button>` : ''}</div></div>
+    <div class="actions">${del ? '' : `${can('notas') ? `<a class="btn" href="#/notas/importar">${icon('upload')}Importar nota</a>` : ''}<button class="btn primary" id="edit">Editar</button>
+      ${isAdmin() ? `<button class="btn ${+c.active ? 'danger' : ''}" id="toggle">${+c.active ? 'Desativar' : 'Reativar'}</button><button class="btn danger" id="sdel">${icon('trash')}Excluir</button>` : ''}`}</div></div>
+    ${del ? deletedBanner('Este fornecedor') : ''}
     <div class="kpis">
       <div class="kpi"><div class="label">Total comprado</div><div class="value">${money(st.total)}</div><div class="sub">${st.n || 0} nota(s)</div></div>
       <div class="kpi"><div class="label">Última compra</div><div class="value" style="font-size:1.1rem">${st.last_purchase ? dOnly(st.last_purchase) : '—'}</div><div class="sub">${st.first_purchase ? 'desde ' + dOnly(st.first_purchase) : ''}</div></div>
@@ -3954,7 +4035,8 @@ async function viewSupplier(v, id) {
     <div class="card"><h2>Notas fiscais</h2>${c.invoices.length ? `<div class="table-wrap"><table><thead><tr><th>Data</th><th>Nota</th><th>Origem</th><th class="num">Itens</th><th class="num">Total</th><th>Por</th></tr></thead><tbody>
       ${c.invoices.map((i) => `<tr class="click" data-go="nota/${i.id}"><td class="nowrap">${dOnly(i.issued_at || i.created_at)}</td><td>${esc(i.number || 's/n')}${i.series ? ' / ' + esc(i.series) : ''}</td><td><span class="badge">${KIND_LABEL[i.kind] || i.kind}</span></td><td class="num">${i.items}</td><td class="num">${money(i.total)}</td><td class="small muted">${esc(i.user_name || '')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nenhuma nota importada deste fornecedor.</p>'}</div>`;
   v.addEventListener('click', (e) => { const r = e.target.closest('[data-go]'); if (r) go(r.dataset.go); });
-  $('#edit', v).onclick = () => customerForm(c, () => route(), { entity: 'supplier', editing: true });
+  if ($('#edit', v)) $('#edit', v).onclick = () => customerForm(c, () => route(), { entity: 'supplier', editing: true });
+  if ($('#sdel', v)) $('#sdel', v).onclick = (e) => busy(e.currentTarget, async () => { if (await deleteRecord('supplier', c.id, custName(c))) go('fornecedores'); }).catch(fail);
   if ($('#toggle', v)) $('#toggle', v).onclick = async (e) => {
     if (+c.active && !(await confirmBox(`Desativar "${custName(c)}"? O histórico de notas é mantido.`, { ok: 'Desativar', danger: true }))) return;
     busy(e.target, async () => { await api('supplier_save', { body: { ...c, active: !+c.active } }); toast('Fornecedor atualizado'); route(); });
