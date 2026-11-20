@@ -14,7 +14,10 @@
 
 class GDrive
 {
-    const FILE_PREFIX = 'backup-estoque-';
+    /** Nome genérico dos backups (não depende do nome do sistema): bkp-db-AAAA-MM-DD-HHMMSS.sql.gz */
+    const FILE_PREFIX = 'bkp-db-';
+    /** Prefixos antigos: entram na limpeza dos backups mais velhos (scripts copiados a partir da v3.2.1). */
+    const OLD_PREFIXES = ['backup-estoque-'];
     const KEEP_DEFAULT = 30;
     const MAX_BYTES = 35 * 1024 * 1024; // o Apps Script aceita até ~50 MB por envio (o base64 aumenta um terço)
     const WEEKDAYS = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
@@ -158,7 +161,8 @@ function doPost(e) {
       if (d.guardar > 0) {
         const lista = [];
         const it = pasta.getFiles();
-        while (it.hasNext()) { const f = it.next(); if (f.getName().indexOf(d.prefixo) === 0) lista.push(f); }
+        const prefixos = d.prefixos || [d.prefixo];
+        while (it.hasNext()) { const f = it.next(); const n = f.getName(); if (prefixos.some(function (p) { return n.indexOf(p) === 0; })) lista.push(f); }
         lista.sort(function (a, b) { return b.getDateCreated() - a.getDateCreated(); });
         lista.slice(d.guardar).forEach(function (f) { f.setTrashed(true); removidos++; });
       }
@@ -201,6 +205,7 @@ JS;
             $res = self::call(self::get('url'), [
                 'acao' => 'enviar', 'pasta' => self::get('folder_id'), 'nome' => $name, 'dados' => base64_encode($data),
                 'guardar' => (int)self::get('keep', (string)self::KEEP_DEFAULT), 'prefixo' => self::FILE_PREFIX,
+                'prefixos' => array_merge([self::FILE_PREFIX], self::OLD_PREFIXES),
             ]);
             self::set('last_ok', $now);
             self::set('last_file', $name);
