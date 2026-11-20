@@ -635,6 +635,19 @@ const MASKS = [
   { sel: DOC_SEL, fmt: (v, el) => docMask(v, el.dataset.mask), free: () => false, im: 'numeric',
     ph: (el) => el.dataset.mask === 'cpf' ? '000.000.000-00' : el.dataset.mask === 'cnpj' || /cnpj|company_document/.test((el.name || '') + (el.dataset.k || '')) ? '00.000.000/0000-00' : 'CPF ou CNPJ' },
 ];
+// Campos só de número (respostas Numérica e Monetária dos questionários): aceita algarismos, vírgula e ponto;
+// data-num="dec" aceita também o sinal de menos no começo. Letras e outros caracteres somem enquanto digita.
+const numOnly = (v, neg) => { const t = String(v).replace(neg ? /[^\d.,-]/g : /[^\d.,]/g, ''); return neg ? t.replace(/(?!^)-/g, '') : t; };
+document.addEventListener('input', (e) => {
+  const el = e.target;
+  if (!el.matches || !el.matches('input[data-num]')) return;
+  const neg = el.dataset.num === 'dec', before = el.value, caret = el.selectionStart ?? before.length;
+  const clean = numOnly(before, neg);
+  if (clean === before) return;
+  const pos = numOnly(before.slice(0, caret), neg).length;
+  el.value = clean;
+  try { el.setSelectionRange(pos, pos); } catch (_) {}
+}, true);
 const maskOf = (el) => (el && el.matches ? MASKS.find((m) => el.matches(m.sel)) : null);
 const maskFmtEl = (el, m = maskOf(el)) => { if (!m) return; if (el.value && !m.free(el)) el.value = m.fmt(el.value, el); el.dataset.pd = el.value.replace(/\D/g, ''); };
 const phoneFmtEl = (el) => maskFmtEl(el);
@@ -2589,8 +2602,8 @@ function qFieldHtml(q, v) {
   const opt = (o, on) => `<option value="${esc(o)}" ${on ? 'selected' : ''}>${esc(o)}</option>`;
   switch (q.type) {
     case 'area': return `<textarea data-q="${id}" rows="3" maxlength="5000">${esc(v || '')}</textarea>`;
-    case 'numerica': return `<input data-q="${id}" inputmode="decimal" value="${esc(String(v ?? '').replace('.', ','))}">`;
-    case 'monetaria': return `<input data-q="${id}" inputmode="decimal" placeholder="R$ 0,00" value="${v ? esc(Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })) : ''}">`;
+    case 'numerica': return `<input data-q="${id}" data-num="dec" inputmode="decimal" value=""${esc(String(v ?? '').replace('.', ','))}">`;
+    case 'monetaria': return `<input data-q="${id}" data-num="money" inputmode="decimal" placeholder="R$ 0,00" value="${v ? esc(Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })) : ''}">`;
     case 'data': return `<input data-q="${id}" type="date" value="${esc(v || '')}">`;
     case 'hora': return `<input data-q="${id}" type="time" value="${esc(v || '')}">`;
     case 'documento': return `<input data-q="${id}" data-mask="doc" inputmode="numeric" value="${esc(v ? docFmt(v) : '')}">`;
@@ -3715,8 +3728,8 @@ async function viewQuestionnaireForm(v, id) {
       case 'check': return `<select ${d} data-k="condv"><option value="">Selecione</option><option value="sim" ${val === 'sim' ? 'selected' : ''}>Verdadeiro</option><option value="nao" ${val === 'nao' ? 'selected' : ''}>Falso</option></select>`;
       case 'data': return `<input ${d} data-k="condv" type="date" value="${esc(val || '')}">`;
       case 'hora': return `<input ${d} data-k="condv" type="time" value="${esc(val || '')}">`;
-      case 'monetaria': return `<input ${d} data-k="condv" inputmode="decimal" placeholder="R$ 0,00" value="${esc(String(val || '').replace('.', ','))}">`;
-      default: return `<input ${d} data-k="condv" inputmode="decimal" value="${esc(String(val || '').replace('.', ','))}">`;
+      case 'monetaria': return `<input ${d} data-k="condv" data-num="money" inputmode="decimal" placeholder="R$ 0,00" value="${esc(String(val || '').replace('.', ','))}">`;
+      default: return `<input ${d} data-k="condv" data-num="dec" inputmode="decimal" value="${esc(String(val || '').replace('.', ','))}">`;
     }
   };
 
