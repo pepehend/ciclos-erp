@@ -1,214 +1,194 @@
 #!/bin/bash
-# Instala o sistema numa VM Debian 13 (trixie) limpa: Apache + PHP + MariaDB + Git + Cron.
+# Instala o CiclosERP num container LXC Debian 13 (Proxmox), numa VM Debian 13 ou em qualquer Debian/Ubuntu.
+# Apache + PHP + MariaDB no mesmo servidor, atualização automática pelo GitHub e backup diário.
 #
-# Uso (como root), sem precisar do link "raw" do GitHub:
-#   apt-get install -y git && git clone https://github.com/pepehend/ciclos-erp.git /opt/ciclos-erp
-#   bash /opt/ciclos-erp/deploy/debian/install.sh
-# Sem --domain, o script pergunta (Enter = IP da VM). Opções:
-#   --domain sistema.exemplo.com.br  --ssl email@exemplo.com  --db mysql|sqlite  --branch main
-#   --site /var/www/ciclos-erp  --repo-dir /opt/ciclos-erp  --repo URL
-# Rodado de dentro de um clone, usa esse mesmo clone (não baixa de novo).
+# Uso (como root, ou com sudo a partir de um usuário comum) — veja o README do repositório ciclos-erp:
+#   sudo apt-get update && sudo apt-get install -y git
+#   sudo git clone https://github.com/pepehend/ciclos-erp.git /opt/ciclos-erp
+#   sudo bash /opt/ciclos-erp/deploy/debian/install.sh
 #
-# Depois de rodar, abra http(s)://<domínio>/install.php no navegador e use os dados do banco que
-# o script mostra no fim (ficam também em /root/ciclos-erp-banco.txt).
-#
-# Atualizações: o cron do root chama deploy/auto-deploy.sh a cada 5 minutos, igual ao cPanel
-# (publica a branch main quando o Pedro aprova o PR) e roda as tarefas do sistema (backup no Google Drive).
+# O repositório é público: não precisa de chave, token nem do link "raw" do GitHub.
+# Ele usa o clone em /opt/ciclos-erp (scripts do servidor em deploy/debian/) e publica
+# o sistema em /var/www/ciclos-erp. Pode rodar de novo sem problema: o que já existe é mantido.
+
 set -euo pipefail
 
-# Tudo numa função: o bash lê o script inteiro antes de rodar, então o git pode atualizar
-# este arquivo (no clone que o próprio script usa) sem quebrar a instalação no meio.
-main() {
-DOMAIN=""
 REPO_URL="https://github.com/pepehend/ciclos-erp.git"
 BRANCH="main"
-SITE="/var/www/ciclos-erp"
-REPO_DIR=""
-DB="mysql"
-SSL_EMAIL=""
+SRC="/opt/ciclos-erp"               # cópia deste repositório (atualizada pelo GitHub)
+KIT="$SRC/deploy/debian"            # scripts do servidor
+SITE="/var/www/ciclos-erp"          # o que o Apache publica
+DB_NAME="ciclos_erp"
+DB_USER="ciclos_erp"
+LOGS="/var/log/ciclos-erp"
+BACKUPS="/var/backups/ciclos-erp"
 
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --domain) DOMAIN="$2"; shift 2 ;;
-        --repo) REPO_URL="$2"; shift 2 ;;
-        --branch) BRANCH="$2"; shift 2 ;;
-        --site) SITE="${2%/}"; shift 2 ;;
-        --repo-dir) REPO_DIR="${2%/}"; shift 2 ;;
-        --db) DB="$2"; shift 2 ;;
-        --ssl) SSL_EMAIL="$2"; shift 2 ;;
-        -h|--help) sed -n '2,19p' "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "Veja o README (Instalação numa VM Debian 13)."; exit 0 ;;
-        *) echo "Opção desconhecida: $1" >&2; exit 1 ;;
-    esac
-done
+azul() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
+ok() { printf '\033[1;32m%s\033[0m\n' "$*"; }
+erro() { printf '\033[1;31mERRO: %s\033[0m\n' "$*" >&2; exit 1; }
 
-[ "$(id -u)" = "0" ] || { echo "Rode como root (sudo bash install.sh ...)" >&2; exit 1; }
-
-# Clone onde este script está (rodado de dentro do repositório): usa ele mesmo
-if [ -z "$REPO_DIR" ]; then
-    local SELF=""
-    if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
-        SELF=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd || true)
-    fi
-    if [ -n "$SELF" ] && [ -d "$SELF/.git" ] && [ -f "$SELF/.cpanel.yml" ]; then REPO_DIR="$SELF"; else REPO_DIR="/opt/ciclos-erp"; fi
+# Precisa de root: se foi chamado por um usuário comum, roda de novo com sudo (pede a senha dele)
+if [ "$(id -u)" != 0 ]; then
+    command -v sudo >/dev/null || { echo "Este comando precisa de root: rode como root ou instale o sudo (apt-get install sudo)." >&2; exit 1; }
+    exec sudo bash "$0" "$@"
 fi
+export HOME=/root   # configurações ficam no root, mesmo vindo do sudo
+# Rodando a cópia de dentro de $SRC: o git vai reescrever este arquivo, então roda uma cópia temporária
+case "$(readlink -f "$0")" in
+    "$SRC"/*) TMP_SELF="$(mktemp /tmp/ciclos-erp-install.XXXXXX)"; cp "$0" "$TMP_SELF"; exec bash "$TMP_SELF" "$@" ;;
+esac
+command -v apt-get >/dev/null || erro "este instalador é para Debian/Ubuntu."
 
-# Domínio: pergunta se não veio na linha de comando (Enter = IP da VM)
-if [ -z "$DOMAIN" ]; then
-    local IP; IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
-    [ -n "$IP" ] || IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' || true)
-    [ -n "$IP" ] || IP=$(hostname -i 2>/dev/null | awk '{print $1}' || true)
-    if [ -r /dev/tty ]; then
-        { read -r -p "Domínio do sistema (Enter para usar o IP ${IP:-da VM}): " DOMAIN < /dev/tty; } 2>/dev/null || true
-    fi
-    DOMAIN="${DOMAIN:-$IP}"
-fi
-[ -n "$DOMAIN" ] || { echo "Informe o domínio: --domain sistema.exemplo.com.br (ou o IP da VM)" >&2; exit 1; }
-echo "Instalando em http${SSL_EMAIL:+s}://$DOMAIN (repositório em $REPO_DIR, site em $SITE)"
-case "$DB" in mysql|sqlite) ;; *) echo "--db precisa ser mysql ou sqlite" >&2; exit 1 ;; esac
-if [ -r /etc/os-release ]; then
-    . /etc/os-release
-    [ "${ID:-}" = "debian" ] || echo "Aviso: feito para Debian 13; este sistema é ${PRETTY_NAME:-desconhecido}."
-fi
+# ---------------------------------------------------------------- pacotes
+echo "Instalador do CiclosERP (ciclos-erp)"
 
-
-passo "Instalando pacotes (Apache, PHP, MariaDB, Git, Cron)"
+azul "Instalando Apache, PHP, MariaDB e utilitários"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -q
-PKGS="apache2 libapache2-mod-php php-cli php-mysql php-sqlite3 php-mbstring php-xml php-curl php-gd php-zip git cron ca-certificates curl"
-[ "$DB" = "mysql" ] && PKGS="$PKGS mariadb-server"
-[ -n "$SSL_EMAIL" ] && PKGS="$PKGS certbot python3-certbot-apache"
-# shellcheck disable=SC2086
-apt-get install -y -q $PKGS
+apt-get update -qq
+apt-get install -y -qq apache2 libapache2-mod-php php-cli php-mysql php-mbstring php-xml php-curl php-gd \
+    mariadb-server git cron curl ca-certificates locales sudo >/dev/null
+systemctl enable --now apache2 mariadb cron >/dev/null 2>&1 || true
+ok "Pacotes instalados ($(php -r 'echo PHP_VERSION;'))"
 
-passo "Baixando o sistema do GitHub em $REPO_DIR"
-if [ -d "$REPO_DIR/.git" ]; then
-    git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
-    git -C "$REPO_DIR" fetch -q origin "$BRANCH"
-    git -C "$REPO_DIR" checkout -q "$BRANCH"
-    git -C "$REPO_DIR" reset -q --hard "origin/$BRANCH"
+# ---------------------------------------------------------------- código
+azul "Baixando o sistema"
+git config --global --add safe.directory "$SRC" 2>/dev/null || true
+if [ -d "$SRC/.git" ]; then
+    git -C "$SRC" remote set-url origin "$REPO_URL"
+    git -C "$SRC" fetch -q origin "$BRANCH" && git -C "$SRC" checkout -q "$BRANCH" && git -C "$SRC" reset -q --hard "origin/$BRANCH"
 else
-    git clone -q --branch "$BRANCH" "$REPO_URL" "$REPO_DIR" || {
-        echo "Não consegui baixar $REPO_URL (confira a internet da VM e o endereço do repositório)." >&2
-        exit 1
-    }
+    if [ -e "$SRC" ]; then mv "$SRC" "$SRC.antigo.$(date +%s)"; fi
+    git clone -q -b "$BRANCH" "$REPO_URL" "$SRC" || erro "não consegui baixar $REPO_URL (confira a internet do servidor)."
 fi
+VERSION="$(grep -oP "APP_VERSION = '\K[^']+" "$SRC/app/bootstrap.php" || echo '?')"
+chmod 755 "$KIT"/*.sh "$SRC/deploy/auto-deploy.sh"
+ok "Código em $SRC: versão $VERSION ($(git -C "$SRC" log -1 --format='%h %s'))"
 
-passo "Configurando a publicação (deploy/servidor.conf)"
-cat > "$REPO_DIR/deploy/servidor.conf" <<CONF
+# Publicação deste servidor: deploy/auto-deploy.sh lê este arquivo (fora do Git) para saber onde publicar
+cat > "$SRC/deploy/servidor.conf" <<CONF
 # Criado por deploy/debian/install.sh. Lido por deploy/auto-deploy.sh.
 MODE=vm
 DEPLOYPATH=$SITE/
 OWNER=www-data
+LOG_DIR=$LOGS
 CONF
 
-passo "Publicando os arquivos em $SITE"
-mkdir -p "$SITE"
-# A 1ª publicação copia direto, com as tarefas do .cpanel.yml (depois o auto-deploy cuida das novas versões)
-(
-    cd "$REPO_DIR"
-    TASKS=$(sed -n 's/^[[:space:]]*- \(.*\)$/\1/p' .cpanel.yml | sed "s#^export DEPLOYPATH=.*#export DEPLOYPATH=$SITE/#")
-    set -e; eval "$TASKS"
-)
-# O instalador só vai na primeira vez (ele se bloqueia depois de instalar; apague-o depois)
-[ -f "$SITE/app/config.php" ] || cp "$REPO_DIR/install.php" "$SITE/"
-chown -R www-data:www-data "$SITE"
-find "$SITE" -type d -exec chmod 755 {} +
-find "$SITE" -type f -exec chmod 644 {} +
+# ---------------------------------------------------------------- banco de dados
+azul "Banco de dados"
+CFG="$SITE/app/config.php"
+if [ -f "$CFG" ]; then
+    ok "Configuração existente mantida ($CFG)"
+else
+    DB_PASS="$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 28)"
+    mariadb <<SQL
+CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';
+ALTER USER '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';
+GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+    mkdir -p "$SITE/app"
+    cat > "$CFG" <<PHP
+<?php
+// Gerado pelo install.sh (ciclos-erp) em $(date '+%d/%m/%Y %H:%M')
+return [
+    'db' => ['driver' => 'mysql', 'host' => 'localhost', 'port' => 3306, 'name' => '$DB_NAME', 'user' => '$DB_USER', 'pass' => '$DB_PASS'],
+    'debug' => false,
+];
+PHP
+    ok "Banco \"$DB_NAME\" criado (a senha fica só em $CFG)"
+fi
 
-passo "Configurando o PHP"
-for d in /etc/php/*/apache2/conf.d /etc/php/*/cli/conf.d; do
-    [ -d "$d" ] || continue
-    cat > "$d/99-ciclos-erp.ini" <<'INI'
-; CiclosERP (mesmos limites do .user.ini do cPanel)
+# ---------------------------------------------------------------- publicar
+azul "Publicando o sistema em $SITE"
+mkdir -p "$LOGS"
+bash "$SRC/deploy/auto-deploy.sh" --forcar || erro "falha ao publicar (veja $LOGS/update.log)"
+rm -f "$SITE/install.php"   # aqui o banco e o administrador são preparados pelo console, sem instalador web
+php "$KIT/setup.php" "$SITE"
+
+# ---------------------------------------------------------------- PHP
+azul "Ajustando o PHP"
+for dir in /etc/php/*/apache2/conf.d /etc/php/*/cli/conf.d; do
+    [ -d "$dir" ] || continue
+    cat > "$dir/99-ciclos-erp.ini" <<'INI'
+; CiclosERP
 upload_max_filesize = 16M
 post_max_size = 18M
 memory_limit = 256M
 max_execution_time = 120
+date.timezone = America/Sao_Paulo
 expose_php = Off
+; O Debian apaga sessões paradas pelo valor daqui (padrão 24 min); o sistema usa 12 h
+session.gc_maxlifetime = 43200
 INI
 done
-TZ_NAME=$(timedatectl show -p Timezone --value 2>/dev/null || echo "America/Sao_Paulo")
-[ -n "$TZ_NAME" ] && [ "$TZ_NAME" != "UTC" ] || TZ_NAME="America/Sao_Paulo"
-for d in /etc/php/*/apache2/conf.d /etc/php/*/cli/conf.d; do
-    [ -d "$d" ] && echo "date.timezone = $TZ_NAME" >> "$d/99-ciclos-erp.ini"
-done
 
-passo "Configurando o Apache ($DOMAIN)"
+# ---------------------------------------------------------------- Apache
+azul "Configurando o Apache"
 cat > /etc/apache2/sites-available/ciclos-erp.conf <<APACHE
 <VirtualHost *:80>
-    ServerName $DOMAIN
+    ServerName ciclos-erp
     DocumentRoot $SITE
+
     <Directory $SITE>
-        # O sistema usa .htaccess (bloqueio de arquivos e da pasta data/), como no cPanel
+        Options -Indexes +FollowSymLinks
         AllowOverride All
         Require all granted
-        Options -Indexes +FollowSymLinks
     </Directory>
+
+    # Quando vier pelo Cloudflare Tunnel, usa o IP real do visitante (o login bloqueia por IP)
+    <IfModule mod_remoteip.c>
+        RemoteIPHeader CF-Connecting-IP
+        RemoteIPInternalProxy 127.0.0.1 ::1
+    </IfModule>
+
     ErrorLog \${APACHE_LOG_DIR}/ciclos-erp-error.log
     CustomLog \${APACHE_LOG_DIR}/ciclos-erp-access.log combined
 </VirtualHost>
 APACHE
-a2enmod -q rewrite headers >/dev/null
-a2ensite -q ciclos-erp >/dev/null
+a2enmod -q headers remoteip >/dev/null
 a2dissite -q 000-default >/dev/null 2>&1 || true
-apache2ctl configtest
-systemctl enable --now apache2 cron >/dev/null
-systemctl reload apache2
+a2ensite -q ciclos-erp >/dev/null
+apache2ctl configtest >/dev/null 2>&1 || erro "configuração do Apache inválida (rode: apache2ctl configtest)"
+systemctl reload apache2 || systemctl restart apache2
+ok "Apache servindo $SITE na porta 80"
 
-DBINFO=""
-if [ "$DB" = "mysql" ]; then
-    passo "Criando o banco de dados MariaDB"
-    systemctl enable --now mariadb >/dev/null
-    DBNAME="ciclos_erp"; DBUSER="ciclos_erp"
-    if [ -f /root/ciclos-erp-banco.txt ]; then
-        DBPASS=$(sed -n 's/^Senha: //p' /root/ciclos-erp-banco.txt)
-    else
-        DBPASS=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)
-    fi
-    mysql <<SQL
-CREATE DATABASE IF NOT EXISTS \`$DBNAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '$DBUSER'@'localhost' IDENTIFIED BY '$DBPASS';
-ALTER USER '$DBUSER'@'localhost' IDENTIFIED BY '$DBPASS';
-GRANT ALL PRIVILEGES ON \`$DBNAME\`.* TO '$DBUSER'@'localhost';
-FLUSH PRIVILEGES;
-SQL
-    DBINFO="Servidor: localhost
-Banco: $DBNAME
-Usuário: $DBUSER
-Senha: $DBPASS"
-    umask 077
-    printf '%s\n' "$DBINFO" > /root/ciclos-erp-banco.txt
-fi
+# ---------------------------------------------------------------- administrador
+# Sistema novo, banco vazio: cria o primeiro usuário (se já existir algum, não pergunta nada)
+azul "Primeiro usuário"
+until php "$KIT/setup.php" "$SITE" --admin-se-vazio; do
+    echo "Vamos tentar de novo."
+done
 
-passo "Agendando a publicação automática e as tarefas do sistema (cron a cada 5 minutos)"
+# ---------------------------------------------------------------- tarefas automáticas
+azul "Atualização automática e backup diário"
+mkdir -p "$LOGS" "$BACKUPS"
+chmod 700 "$BACKUPS"
 cat > /etc/cron.d/ciclos-erp <<CRON
-# CiclosERP: publica a branch $BRANCH aprovada e roda o backup automático
-*/5 * * * * root /bin/bash $REPO_DIR/deploy/auto-deploy.sh >/dev/null 2>&1
+# CiclosERP
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Confere o GitHub a cada 5 minutos e publica a versão aprovada (branch main); depois roda o backup no Google Drive
+*/5 * * * * root bash $SRC/deploy/auto-deploy.sh >/dev/null 2>&1
+# Backup do banco todo dia às 3h (guarda 30 dias em $BACKUPS)
+0 3 * * * root bash $KIT/backup.sh >/dev/null 2>&1
 CRON
 chmod 644 /etc/cron.d/ciclos-erp
+ok "Agendado: atualização a cada 5 min e backup diário às 3h"
 
-if [ -n "$SSL_EMAIL" ]; then
-    passo "Ativando HTTPS (Let's Encrypt)"
-    certbot --apache -n --agree-tos -m "$SSL_EMAIL" -d "$DOMAIN" --redirect || echo "Aviso: não consegui ativar o HTTPS agora. Confira o DNS do domínio e rode: certbot --apache -d $DOMAIN"
-fi
+IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+azul "Pronto!"
+cat <<FIM
+Acesse na sua rede:  http://${IP:-IP-DO-SERVIDOR}/
 
-echo
-echo "============================================================"
-echo " Pronto! Abra no navegador: http${SSL_EMAIL:+s}://$DOMAIN/install.php"
-if [ "$DB" = "mysql" ]; then
-    echo " Escolha MySQL e use:"
-    echo "$DBINFO" | sed 's/^/   /'
-    echo " (guardado em /root/ciclos-erp-banco.txt)"
-else
-    echo " Escolha SQLite (o banco fica em $SITE/data, protegido pelo .htaccess)."
-fi
-echo " Depois de instalar, apague o instalador: rm $SITE/install.php"
-echo " E-mails (OS digital, pesquisa, convites do portal) usam a função mail() do PHP:"
-echo " instale e configure um envio de e-mail (ex.: apt install msmtp-mta) para eles saírem."
-echo " Registro das publicações: /root/logs/ciclos-erp-deploy.log"
-echo "============================================================"
-}
+Entre com o e-mail e a senha do administrador e preencha Configurações → Dados da empresa.
 
-passo() { echo; echo "==> $*"; }
+Próximos passos (detalhes no README do repositório ciclos-erp):
+  Acesso pela internet (links do orçamento, da OS e portal do cliente): sudo bash $KIT/tunnel.sh
+  Usuários pelo console:  sudo bash $KIT/users.sh listar
+  Restaurar um backup:    sudo bash $KIT/restore.sh $BACKUPS/<arquivo>.sql.gz
+  E-mails (OS digital, pesquisa, convite do portal) saem pela função mail() do PHP:
+  instale e configure um envio de e-mail no servidor (ex.: apt install msmtp-mta).
 
-main "$@"
+Registros: $LOGS/  ·  Backups: $BACKUPS/
+FIM

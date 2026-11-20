@@ -8,18 +8,23 @@
 #
 # Na VM Debian (deploy/debian/install.sh), o cron do root chama este mesmo script; o arquivo
 # deploy/servidor.conf (criado pelo instalador, fora do Git) diz a pasta do site e o dono dos arquivos.
+#   bash deploy/auto-deploy.sh            # só se houver versão nova
+#   bash deploy/auto-deploy.sh --forcar   # publica mesmo sem novidade (o instalador usa)
 #
-# O registro fica em ~/logs/ciclos-erp-deploy.log (só quando algo é publicado ou dá erro).
+# O registro fica em ~/logs/ciclos-erp-deploy.log no cPanel e em /var/log/ciclos-erp/update.log na VM
+# (só quando algo é publicado ou dá erro).
 
-# Lê deploy/servidor.conf (VM): MODE=vm, DEPLOYPATH=/var/www/..., OWNER=www-data
+# Lê deploy/servidor.conf (VM): MODE=vm, DEPLOYPATH=/var/www/..., OWNER=www-data, LOG_DIR=/var/log/...
 servidor_conf() {
     local REPO="$1"
-    MODE="cpanel"; OWNER=""; CONF_DEPLOYPATH=""
+    MODE="cpanel"; OWNER=""; CONF_DEPLOYPATH=""; LOG_DIR=""
     if [ -f "$REPO/deploy/servidor.conf" ]; then
         # shellcheck disable=SC1091
         . "$REPO/deploy/servidor.conf"
         CONF_DEPLOYPATH="${DEPLOYPATH:-}"
     fi
+    [ -n "$LOG_DIR" ] || LOG_DIR="$HOME/logs"
+    if [ "$MODE" = "vm" ]; then DEPLOY_LOG="$LOG_DIR/update.log"; else DEPLOY_LOG="$LOG_DIR/ciclos-erp-deploy.log"; fi
 }
 
 # Copia os arquivos para o site, com as mesmas tarefas do .cpanel.yml.
@@ -31,7 +36,15 @@ copiar() {
         TASKS=$(printf '%s\n' "$TASKS" | sed "s#^export DEPLOYPATH=.*#export DEPLOYPATH=${CONF_DEPLOYPATH%/}/#")
     fi
     (set -e; eval "$TASKS") || return 1
-    if [ -n "$OWNER" ] && [ -n "$CONF_DEPLOYPATH" ]; then chown -R "$OWNER:$OWNER" "$CONF_DEPLOYPATH"; fi
+    # VM: dono root com leitura para o Apache; só data/ é do Apache e o config.php fica fechado
+    if [ -n "$OWNER" ] && [ -n "$CONF_DEPLOYPATH" ]; then
+        local S="${CONF_DEPLOYPATH%/}"
+        chown -R "root:$OWNER" "$S" || return 1
+        find "$S" -type d -exec chmod 755 {} + && find "$S" -type f -exec chmod 644 {} + || return 1
+        mkdir -p "$S/data" && chown "$OWNER:$OWNER" "$S/data" && chmod 750 "$S/data" || return 1
+        find "$S/data" -mindepth 1 -exec chown "$OWNER:$OWNER" {} + 2>/dev/null || true
+        if [ -f "$S/app/config.php" ]; then chmod 640 "$S/app/config.php"; fi
+    fi
 }
 
 # Tudo dentro de uma função: o bash lê o script inteiro antes de rodar,
@@ -40,10 +53,11 @@ main() {
     set -u
     # Pasta do repositório no cPanel = a pasta acima deste script (vale para qualquer nome de pasta)
     local REPO; REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-    local BRANCH="main"
-    local LOG_DIR="$HOME/logs"
-    local LOG="$LOG_DIR/ciclos-erp-deploy.log"
+    local BRANCH="main" FORCAR=0
+    [ "${1:-}" = "--forcar" ] && FORCAR=1
     local LOCK="$HOME/.ciclos-erp-deploy.lock"
+    servidor_conf "$REPO"
+    local LOG="$DEPLOY_LOG"
 
     mkdir -p "$LOG_DIR"
     log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"; }
@@ -55,7 +69,6 @@ main() {
     fi
 
     cd "$REPO" || { log "ERRO: pasta $REPO não encontrada"; return 1; }
-    servidor_conf "$REPO"
 
     if ! git fetch -q origin "$BRANCH" 2>>"$LOG"; then
         log "ERRO: não consegui consultar o GitHub (veja a mensagem acima)"
@@ -65,9 +78,9 @@ main() {
     local LOCAL REMOTE
     LOCAL=$(git rev-parse HEAD)
     REMOTE=$(git rev-parse "origin/$BRANCH")
-    [ "$LOCAL" = "$REMOTE" ] && return 0   # nada novo
+    [ "$LOCAL" = "$REMOTE" ] && [ "$FORCAR" = 0 ] && return 0   # nada novo
 
-    log "Nova versão encontrada: ${LOCAL:0:7} -> ${REMOTE:0:7} ($(git log -1 --format=%s "origin/$BRANCH"))"
+    [ "$LOCAL" != "$REMOTE" ] && log "Nova versão encontrada: ${LOCAL:0:7} -> ${REMOTE:0:7} ($(git log -1 --format=%s "origin/$BRANCH"))"
     git checkout -q "$BRANCH" 2>>"$LOG"
     if ! git reset -q --hard "origin/$BRANCH" 2>>"$LOG"; then
         log "ERRO: não consegui atualizar o repositório"
@@ -85,7 +98,11 @@ main() {
     # 2ª opção (e a única na VM): executa as mesmas tarefas do .cpanel.yml diretamente
     [ "$MODE" = "vm" ] || log "Implantação do cPanel indisponível; executando as tarefas do .cpanel.yml."
     if copiar >>"$LOG" 2>&1; then
-        log "Publicado com sucesso."
+        # VM: deixa o banco pronto para a versão nova (no cPanel isso acontece no primeiro acesso)
+        if [ "$MODE" = "vm" ] && [ -f "${CONF_DEPLOYPATH%/}/app/config.php" ]; then
+            php "$REPO/deploy/debian/setup.php" "${CONF_DEPLOYPATH%/}" --quieto >>"$LOG" 2>&1 || log "AVISO: setup.php terminou com erro (veja acima)"
+        fi
+        log "Publicado com sucesso: $(git log -1 --format='%h %s')"
     else
         log "ERRO: falha ao copiar os arquivos para o site"
         return 1
@@ -95,9 +112,10 @@ main() {
 # Tarefas agendadas do sistema (backup automático no Google Drive): roda a cada chamada,
 # mesmo sem versão nova. O próprio sistema decide se chegou a hora.
 tarefas() {
-    local REPO LOG="$HOME/logs/ciclos-erp-deploy.log" SITE PHP
+    local REPO LOG SITE PHP
     REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
     servidor_conf "$REPO"
+    LOG="$DEPLOY_LOG"
     if [ -n "$CONF_DEPLOYPATH" ]; then
         SITE="$CONF_DEPLOYPATH"
     else
