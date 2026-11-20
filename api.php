@@ -328,7 +328,7 @@ try {
         'GET customers' => function () {
             Auth::require();
             [$limit, $off] = page();
-            $w = ['1=1']; $p = [];
+            $w = ['deleted_at IS NULL']; $p = [];
             if (($s = trim((string)q('q', ''))) !== '') {
                 $digits = preg_replace('/\D/', '', $s);
                 $like = '%' . mb_strtolower($s) . '%';
@@ -383,6 +383,10 @@ try {
             if (isset($in['active']) && !$in['active']) Auth::requireAdmin();
             return ['id' => Customers::save($in, $id)];
         },
+        'POST customer_delete' => function () {
+            Auth::requireAdmin();
+            return ['result' => Removals::delete('customers', (int)(input()['id'] ?? 0))];
+        },
         'GET cnpj' => function () { Auth::require(); return Customers::lookupCnpj((string)q('cnpj', '')); },
         'GET cep' => function () { Auth::require(); return Customers::lookupCep((string)q('cep', '')); },
 
@@ -390,7 +394,7 @@ try {
         'GET suppliers' => function () {
             Auth::requirePerm('fornecedores', 'notas', 'compras', 'financeiro');
             [$limit, $off] = page();
-            $w = ['1=1']; $p = [];
+            $w = ['deleted_at IS NULL']; $p = [];
             if (($s = trim((string)q('q', ''))) !== '') {
                 $digits = preg_replace('/\D/', '', $s);
                 $like = '%' . mb_strtolower($s) . '%';
@@ -428,6 +432,11 @@ try {
             $id = !empty($in['id']) ? (int)$in['id'] : null;
             if (isset($in['active']) && !$in['active']) Auth::requireAdmin();
             return ['id' => Customers::save($in, $id, 'suppliers')];
+        },
+
+        'POST supplier_delete' => function () {
+            Auth::requireAdmin();
+            return ['result' => Removals::delete('suppliers', (int)(input()['id'] ?? 0))];
         },
 
         // ---- Orçamentos ----
@@ -657,6 +666,18 @@ try {
             $in = input();
             Equipments::setActive((int)($in['id'] ?? 0), !empty($in['active']));
             return ['ok' => true];
+        },
+        'POST equipment_delete' => function () {
+            Auth::requireAdmin();
+            return ['result' => Removals::delete('equipments', (int)(input()['id'] ?? 0))];
+        },
+        'POST questionnaire_delete' => function () {
+            Auth::requireAdmin();
+            return ['result' => Removals::delete('questionnaires', (int)(input()['id'] ?? 0))];
+        },
+        'POST task_type_delete' => function () {
+            Auth::requireAdmin();
+            return ['result' => Removals::delete('task_types', (int)(input()['id'] ?? 0))];
         },
         'GET questionnaires' => function () {
             Auth::requirePerm('ordens');

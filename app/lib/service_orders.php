@@ -19,6 +19,7 @@ class Equipments
     public static function list(array $f): array
     {
         $w = ['1=1']; $p = [];
+        $w[] = 'e.deleted_at IS NULL';
         if (empty($f['all'])) { $w[] = 'e.active = 1'; }
         if (!empty($f['customer_id'])) { $w[] = 'e.customer_id = ?'; $p[] = (int)$f['customer_id']; }
         if (($s = trim((string)($f['q'] ?? ''))) !== '') {
@@ -40,6 +41,7 @@ class Equipments
         $customerId = (int)($in['customer_id'] ?? 0);
         if (!$customerId) throw new AppError('Selecione o cliente do equipamento');
         Customers::get($customerId);
+        Removals::check('customers', $customerId, $id ? (int)DB::val('SELECT customer_id FROM equipments WHERE id = ?', [$id]) : null);
         $data = [
             'customer_id' => $customerId,
             'name' => mb_substr($name, 0, 120),
@@ -54,7 +56,7 @@ class Equipments
             'updated_at' => now(),
         ];
         if ($id) {
-            self::get($id);
+            if (self::get($id)['deleted_at']) throw new AppError('Equipamento excluído não pode ser alterado');
             DB::update('equipments', $id, $data);
             return $id;
         }
@@ -97,7 +99,7 @@ class Equipments
 
     public static function setActive(int $id, bool $active): void
     {
-        self::get($id);
+        if (self::get($id)['deleted_at']) throw new AppError('Equipamento excluído não pode ser alterado');
         DB::update('equipments', $id, ['active' => $active ? 1 : 0, 'updated_at' => now()]);
     }
 }
@@ -191,6 +193,7 @@ class ServiceOrders
         $customerId = (int)($in['customer_id'] ?? 0);
         if (!$customerId) throw new AppError('Selecione o cliente');
         Customers::get($customerId);
+        Removals::check('customers', $customerId, $old ? (int)$old['customer_id'] : null);
         $description = trim((string)($in['description'] ?? ''));
         if ($description === '') throw new AppError('Descreva o serviço solicitado');
 
@@ -208,13 +211,14 @@ class ServiceOrders
         if ($equipmentId) {
             $eq = Equipments::get($equipmentId);
             if ((int)$eq['customer_id'] !== $customerId) throw new AppError('O equipamento não pertence a este cliente');
+            Removals::check('equipments', $equipmentId, $old ? (int)$old['equipment_id'] : null);
         }
 
         // Tipo de tarefa: só tipos ativos (um tipo já usado pela OS continua aceito ao editar)
         $taskTypeId = (int)($in['task_type_id'] ?? 0) ?: null;
         if ($taskTypeId && (!$old || (int)$old['task_type_id'] !== $taskTypeId)) {
             $tt = TaskTypes::get($taskTypeId);
-            if (!(int)$tt['active']) throw new AppError('Este tipo de tarefa está inativo');
+            if (!(int)$tt['active']) throw new AppError('Este tipo de tarefa está ' . ($tt['deleted_at'] ? 'excluído' : 'inativo'));
         }
 
         $technicianId = (int)($in['technician_id'] ?? 0) ?: null;

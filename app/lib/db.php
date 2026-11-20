@@ -198,6 +198,7 @@ class DB
                 state VARCHAR(2) NULL,
                 notes VARCHAR(500) NULL,
                 active TINYINT NOT NULL DEFAULT 1,
+                deleted_at $dt NULL,
                 created_at $dt NOT NULL,
                 updated_at $dt NOT NULL
             )$end",
@@ -219,6 +220,7 @@ class DB
                 state VARCHAR(2) NULL,
                 notes VARCHAR(500) NULL,
                 active TINYINT NOT NULL DEFAULT 1,
+                deleted_at $dt NULL,
                 created_at $dt NOT NULL,
                 updated_at $dt NOT NULL
             )$end",
@@ -425,6 +427,7 @@ class DB
                 specs $big NULL,
                 notes VARCHAR(500) NULL,
                 active TINYINT NOT NULL DEFAULT 1,
+                deleted_at $dt NULL,
                 created_at $dt NOT NULL,
                 updated_at $dt NOT NULL
             )$end",
@@ -448,6 +451,7 @@ class DB
                 allow_equipment TINYINT NOT NULL DEFAULT 0,
                 equipment_required TINYINT NOT NULL DEFAULT 0,
                 active TINYINT NOT NULL DEFAULT 1,
+                deleted_at $dt NULL,
                 created_at $dt NOT NULL,
                 updated_at $dt NOT NULL
             )$end",
@@ -461,6 +465,7 @@ class DB
                 send_survey TINYINT NOT NULL DEFAULT 0,
                 send_os_email TINYINT NOT NULL DEFAULT 0,
                 active TINYINT NOT NULL DEFAULT 1,
+                deleted_at $dt NULL,
                 created_at $dt NOT NULL,
                 updated_at $dt NOT NULL
             )$end",
@@ -787,6 +792,16 @@ class DB
             try { self::pdo()->exec('CREATE INDEX idx_quotes_so ON quotes (service_order_id)'); } catch (PDOException $e2) {}
         }
         try { self::run("UPDATE service_orders SET status = 'concluida' WHERE status = 'faturada'"); } catch (PDOException $e) {}
+        // v2.4.0: exclusão de clientes, fornecedores, equipamentos, tipos de tarefa e questionários (os já usados ficam
+        // marcados com deleted_at e continuam aparecendo onde foram usados)
+        foreach (['customers', 'suppliers', 'equipments', 'questionnaires', 'task_types'] as $t) {
+            try {
+                self::pdo()->query("SELECT deleted_at FROM $t LIMIT 1");
+            } catch (PDOException $e) {
+                $dtc = self::$driver === 'mysql' ? 'DATETIME' : 'TEXT';
+                try { self::pdo()->exec("ALTER TABLE $t ADD COLUMN deleted_at $dtc NULL"); } catch (PDOException $e2) { /* tabela ainda não existe */ }
+            }
+        }
         // v1.10.0: ajuste manual do controle de horas (horário original, justificativa, motivo da pausa, inclusão e exclusão de pausas)
         try {
             self::pdo()->query('SELECT deleted_at FROM so_events LIMIT 1');

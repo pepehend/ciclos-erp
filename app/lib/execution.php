@@ -677,7 +677,7 @@ class OrderExec
             'sends' => DB::all('SELECT s.*, u.name user_name FROM so_sends s LEFT JOIN users u ON u.id = s.user_id WHERE s.order_id = ? ORDER BY s.id DESC', [$id]),
             'pending' => self::pending($o),
             'quotes' => self::quotes($o),
-            'equipments' => DB::all('SELECT id, name, serial FROM equipments WHERE customer_id = ? ORDER BY name', [$o['customer_id']]),
+            'equipments' => DB::all('SELECT id, name, serial FROM equipments WHERE customer_id = ? AND (deleted_at IS NULL OR id IN (SELECT equipment_id FROM so_answers WHERE order_id = ?)) ORDER BY name', [$o['customer_id'], $o['id']]),
             'kinds' => self::KINDS,
             'types' => Questionnaires::TYPES,
         ];

@@ -65,6 +65,8 @@ class Finance
         $customerId = $supplierId = null;
         if ($type === 'receber' && !empty($in['customer_id'])) { Customers::get((int)$in['customer_id']); $customerId = (int)$in['customer_id']; }
         if ($type === 'pagar' && !empty($in['supplier_id'])) { Customers::get((int)$in['supplier_id'], 'suppliers'); $supplierId = (int)$in['supplier_id']; }
+        Removals::check('customers', $customerId, isset($old['customer_id']) ? (int)$old['customer_id'] : null);
+        Removals::check('suppliers', $supplierId, isset($old['supplier_id']) ? (int)$old['supplier_id'] : null);
 
         $base = [
             'description' => mb_substr($desc, 0, 200),

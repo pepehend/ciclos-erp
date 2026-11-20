@@ -381,7 +381,7 @@ class Inventory
         $customerId = (int)($in['customer_id'] ?? 0);
         if (!$customerId) throw new AppError('Selecione o cliente da venda');
         $customer = Customers::get($customerId);
-        if (!$customer['active']) throw new AppError('O cliente "' . $customer['name'] . '" está inativo');
+        if (!$customer['active']) throw new AppError('O cliente "' . $customer['name'] . '" está ' . ($customer['deleted_at'] ? 'excluído' : 'inativo'));
         $at = now();
 
         return DB::tx(function () use ($items, $method, $discount, $surcharge, $extras, $in, $userId, $at, $customer, $instN, $instDays, $instEntry) {

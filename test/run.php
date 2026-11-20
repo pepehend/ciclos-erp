@@ -1576,6 +1576,38 @@ throws(fn() => Quotes::save(['target' => 'lead', 'lead_name' => 'Lead', 'service
 Quotes::save(['target' => 'cliente', 'customer_id' => $oqCli, 'service_order_id' => 999999, 'items' => [['product_id' => $oqSvc, 'quantity' => 3]]], $uid, $q2);
 ok((int)Quotes::get($q2)['service_order_id'] === $oqOs, 'editar o orçamento não troca a OS de origem');
 
+echo "\nExclusão de cadastros\n";
+$rxNovo = Customers::save(['type' => 'pf', 'name' => 'Nunca usado']);
+ok(Removals::delete('customers', $rxNovo) === 'apagado' && !DB::val('SELECT id FROM customers WHERE id = ?', [$rxNovo]), 'cliente nunca usado é apagado de vez');
+$rxCli = Customers::save(['type' => 'pf', 'document' => '987.654.321-00', 'name' => 'Cliente X']);
+$rxQ = Quotes::save(['target' => 'cliente', 'customer_id' => $rxCli, 'items' => [['product_id' => $oqSvc, 'quantity' => 1]]], $uid);
+$rxEq = Equipments::save(['customer_id' => $rxCli, 'name' => 'Compressor X']);
+$rxTt = TaskTypes::save(['name' => 'Tipo X']);
+$rxQn = Questionnaires::save(['name' => 'Quest X', 'questions' => [['id' => 'p1', 'label' => 'Ok?', 'type' => 'texto']]]);
+TaskTypes::save(['name' => 'Tipo X', 'questionnaire_ids' => [$rxQn]], $rxTt);
+$rxOs = ServiceOrders::save(['customer_id' => $rxCli, 'equipment_id' => $rxEq, 'task_type_id' => $rxTt, 'description' => 'Atendimento X'], $uid);
+OrderExec::saveAnswers($rxOs, $rxQn, ['p1' => 'sim'], null, $uid);
+ok(Removals::delete('customers', $rxCli) === 'excluido', 'cliente já usado fica guardado como excluído');
+$rxQq = Quotes::get($rxQ);
+ok($rxQq['customer_name'] === 'Cliente X' && ServiceOrders::get($rxOs)['customer_name'] === 'Cliente X', 'orçamento e OS continuam mostrando o cliente excluído');
+$rxList = array_column(DB::all('SELECT id FROM customers WHERE deleted_at IS NULL'), 'id');
+ok(!in_array($rxCli, array_map('intval', $rxList), true), 'cliente excluído sai da lista');
+Quotes::save(['target' => 'cliente', 'customer_id' => $rxCli, 'items' => [['product_id' => $oqSvc, 'quantity' => 2]]], $uid, $rxQ);
+ok((int)Quotes::get($rxQ)['customer_id'] === $rxCli, 'editar o orçamento mantém o cliente excluído que já estava nele');
+throws(fn() => Quotes::save(['target' => 'cliente', 'customer_id' => $rxCli, 'items' => [['product_id' => $oqSvc, 'quantity' => 1]]], $uid), 'Cliente excluído', 'orçamento novo não aceita cliente excluído');
+throws(fn() => ServiceOrders::save(['customer_id' => $rxCli, 'description' => 'Nova'], $uid), 'Cliente excluído', 'OS nova não aceita cliente excluído');
+throws(fn() => Customers::save(['type' => 'pf', 'name' => 'Mudou'], $rxCli), 'excluído não pode ser alterado', 'cliente excluído não é editado');
+throws(fn() => Removals::delete('customers', Customers::ensureDefault()), 'não pode ser excluído', 'Consumidor final não se exclui');
+ok(Removals::delete('equipments', $rxEq) === 'excluido' && ServiceOrders::get($rxOs)['equipment_id'] == $rxEq, 'equipamento usado fica guardado e a OS continua com ele');
+ok(!in_array($rxEq, array_map(fn($e) => (int)$e['id'], Equipments::list(['all' => 1])), true), 'equipamento excluído sai da lista');
+ok(Removals::delete('task_types', $rxTt) === 'excluido' && !in_array($rxTt, array_map(fn($t) => (int)$t['id'], TaskTypes::list(true)), true), 'tipo de tarefa usado fica guardado e sai da lista');
+ok(Removals::delete('questionnaires', $rxQn) === 'excluido' && !in_array($rxQn, TaskTypes::get($rxTt)['questionnaire_ids'], true), 'questionário excluído sai dos tipos de tarefa');
+ok(in_array($rxQn, array_map(fn($q) => (int)$q['id'], OrderExec::questionnaires(ServiceOrders::get($rxOs))), true), 'OS que respondeu continua mostrando o questionário excluído');
+$rxBack = Customers::save(['type' => 'pf', 'document' => '98765432100', 'name' => 'Cliente X de volta']);
+ok($rxBack === $rxCli && !Customers::get($rxCli)['deleted_at'], 'cadastrar de novo o mesmo CPF traz de volta o cliente excluído');
+$rxSup = Customers::save(['type' => 'pj', 'name' => 'Fornecedor sem uso'], null, 'suppliers');
+ok(Removals::delete('suppliers', $rxSup) === 'apagado', 'fornecedor nunca usado é apagado');
+
 @unlink($db);
 echo "\n$passes passaram, $fails falharam\n";
 exit($fails ? 1 : 0);
