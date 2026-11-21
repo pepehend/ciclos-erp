@@ -111,7 +111,7 @@ function accentCss(hex) {
   const ink = (h) => { const l = rgb(h).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2] > 0.4 ? '#212529' : '#ffffff'; };
   const dark = mix(hex, '#ffffff', 0.78);
   return `:root{--accent:${hex};--accent-hover:${mix(hex, '#000000', 0.78)};--accent-ink:${ink(hex)};--accent-soft:${mix(hex, '#ffffff', 0.18)}}`
-    + `html[data-theme="dark"]{--accent:${dark};--accent-hover:${mix(hex, '#ffffff', 0.62)};--accent-ink:${ink(dark)};--accent-soft:${mix(hex, '#1c1c1f', 0.28)}}`;
+    + `html[data-theme="dark"]{--accent:${hex};--accent-hover:${mix(hex, '#ffffff', 0.84)};--accent-ink:${ink(hex)};--accent-text:${dark};--accent-soft:${mix(hex, '#0F3369', 0.28)}}`;
 }
 /** Aplica a cor do usuário e guarda o CSS no aparelho (o index.php aplica antes de desenhar, sem piscar). */
 function applyAccent(hex) {
@@ -126,7 +126,7 @@ const accentNow = () => { const h = String(state.me?.accent_color || '').toLower
 function applyTheme(t = getTheme()) {
   const dark = t === 'dark' || (t === 'auto' && systemDark());
   document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-  const meta = document.querySelector('meta[name=theme-color]'); if (meta) meta.content = dark ? '#1c1c1f' : (state.me ? accentNow() : ACCENT_DEFAULT);
+  const meta = document.querySelector('meta[name=theme-color]'); if (meta) meta.content = dark ? '#0B2A58' : (state.me ? accentNow() : ACCENT_DEFAULT);
   // O botão mostra o tema escolhido: sol (claro), lua (escuro) ou o do aparelho com um "A" (automático)
   const b = document.getElementById('themebtn');
   if (b) {
@@ -936,36 +936,14 @@ function navSection(path) {
   return path;
 }
 
-/** Cabeçalho do menu: logo e nome da empresa (Configurações → Dados da empresa); sem eles, o ícone e "CiclosERP". */
+/** Cabeçalho do menu: sempre o logo e o nome do sistema (CiclosERP); o nome da empresa vem logo abaixo, como subtítulo. */
 function brandHtml() {
-  const co = state.meta?.company || {};
-  const name = String(co.name || '').trim();
-  const logo = /^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,/.test(co.logo || '') ? co.logo : '';
-  return `${logo ? `<img class="brand-img" src="${esc(logo)}" alt="">` : `<span class="logo">${icon('box')}</span>`}<span class="brand-name" title="${esc(name || 'CiclosERP')}">${esc(name || 'CiclosERP')}</span>`;
+  const co = String(state.company?.name || state.meta?.company?.name || '').trim();
+  return `<img class="brand-img brand-light" src="assets/brand/ciclos-logo.svg" alt="CiclosERP"><img class="brand-img brand-dark" src="assets/brand/ciclos-logo-escuro.svg" alt="CiclosERP">${co ? `<span class="brand-name" title="${esc(co)}">${esc(co)}</span>` : ''}`;
 }
 function paintBrand() {
-  const b = document.getElementById('brand'); if (b) { b.innerHTML = brandHtml(); b.classList.toggle('has-img', !!b.querySelector('.brand-img')); }
-  brandTab();
-}
-/** Nome e ícone da aba do navegador: nome fantasia e logo da empresa (guardados no aparelho para já abrir certo). */
-function brandTab() {
-  const co = state.meta?.company || {};
-  const name = String(co.name || '').trim() || 'CiclosERP';
-  const link = document.querySelector('link[rel=icon]');
-  const save = (k, v) => { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (_) {} };
-  document.title = name; save('brandTitle', name === 'CiclosERP' ? '' : name);
-  if (!link) return;
-  const logo = /^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,/.test(co.logo || '') ? co.logo : '';
-  if (!logo) { link.href = link.dataset.default || link.href; save('brandIcon', ''); return; }
-  // Logo num quadrado transparente de 64 px (logos largos não ficam esticados)
-  const img = new Image();
-  img.onload = () => {
-    const c = document.createElement('canvas'); c.width = c.height = 64;
-    const s = Math.min(64 / img.width, 64 / img.height), w = img.width * s, h = img.height * s;
-    c.getContext('2d').drawImage(img, (64 - w) / 2, (64 - h) / 2, w, h);
-    try { const href = c.toDataURL('image/png'); link.href = href; save('brandIcon', href); } catch (_) {}
-  };
-  img.src = logo;
+  const b = document.getElementById('brand'); if (b) { b.innerHTML = brandHtml(); b.classList.add('has-img'); }
+  document.title = 'CiclosERP';
 }
 
 function renderShell() {
@@ -1102,20 +1080,17 @@ const go = (h) => { if (location.hash === '#/' + h) route(); else location.hash 
 // ============ Login ============
 // Figurinhas da tela de login (desenhos próprios: caixa de estoque e prancheta com gráfico)
 const LOGIN_STICKERS = {
-  box: `<svg viewBox="0 0 120 120" class="lg-st st1" aria-hidden="true"><g stroke="#1f1633" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+  box: `<svg viewBox="0 0 120 120" class="lg-st st1" aria-hidden="true"><g stroke="#0B2A58" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
     <path d="M20 42 60 24l40 18v44L60 104 20 86z" fill="#f4a259"/><path d="M20 42l40 18 40-18M60 60v44" fill="none"/><path d="M60 60 100 42 100 86 60 104z" fill="#e0823a"/>
     <path d="M40 33l40 18v14l-9-4-9 4V47L22 41" fill="#c6f04a"/><path d="M86 14l3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="#f78fb3"/><path d="M16 96l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" fill="#fff"/></g></svg>`,
-  board: `<svg viewBox="0 0 120 120" class="lg-st st2" aria-hidden="true"><g stroke="#1f1633" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+  board: `<svg viewBox="0 0 120 120" class="lg-st st2" aria-hidden="true"><g stroke="#0B2A58" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
     <rect x="24" y="18" width="66" height="86" rx="10" fill="#f78fb3"/><rect x="33" y="30" width="48" height="64" rx="5" fill="#fff"/><rect x="44" y="12" width="26" height="12" rx="4" fill="#c6f04a"/>
     <path d="M42 82V68M54 82V56M66 82V62M78 82V48" stroke-width="6"/><path d="M40 45h20" stroke="#a78bfa"/><path d="M96 70l3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="#c6f04a"/></g></svg>`,
 };
 function renderLogin() {
-  let b = state.brand || {};
-  if (!b.name) { try { b = { name: localStorage.getItem('brandTitle') || '', logo: localStorage.getItem('brandIcon') || '' }; } catch (_) {} }
-  const logo = /^data:image\//.test(b.logo || '') ? `<img src="${esc(b.logo)}" alt="">` : icon('box');
   const h = new Date().getHours(), hello = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
   $('#app').innerHTML = `<div class="lg-page">
-    <header class="lg-top"><div class="lg-brand"><span class="lg-logo ${/^data:image/.test(b.logo || '') ? 'img' : ''}">${logo}</span>${esc(b.name || 'CiclosERP')}</div><a class="lg-client" href="cliente/">${icon('user')}Área do cliente</a></header>
+    <header class="lg-top"><div class="lg-brand"><img class="lg-logo-img" src="assets/brand/ciclos-logo-escuro.svg" alt="CiclosERP"></div><a class="lg-client" href="cliente/">${icon('user')}Área do cliente</a></header>
     <main class="lg-main">
       <section class="lg-hero">
         ${state.version ? `<span class="lg-ver">Versão ${esc(state.version)}</span>` : ''}
@@ -1133,7 +1108,7 @@ function renderLogin() {
       </form>
     </main>
     <footer class="lg-foot"><svg viewBox="0 0 600 12" preserveAspectRatio="none" aria-hidden="true"><path d="M0 6 Q 15 0 30 6 T 60 6 T 90 6 T 120 6 T 150 6 T 180 6 T 210 6 T 240 6 T 270 6 T 300 6 T 330 6 T 360 6 T 390 6 T 420 6 T 450 6 T 480 6 T 510 6 T 540 6 T 570 6 T 600 6" fill="none" stroke="#c6f04a" stroke-width="2"/></svg>
-      <span>${new Date().getFullYear()} © ${esc(b.name || 'CiclosERP')}</span></footer>
+      <span>${new Date().getFullYear()} © CiclosERP</span></footer>
   </div>`;
   const f = $('#login');
   $('input', f).focus();
@@ -6085,7 +6060,7 @@ async function viewSettings(v) {
   // Endereço antigo (linha única) vai para "Rua" até a pessoa preencher os campos
   const legacy = !s.company_street && !s.company_cep && s.company_address ? s.company_address : '';
   let logo = s.company_logo || '';
-  v.innerHTML = `<div class="page-head"><div><h1>Dados da empresa</h1><p class="muted">Aparecem no cabeçalho dos orçamentos enviados aos clientes e no PDF.</p></div>
+  v.innerHTML = `<div class="page-head"><div><h1>Dados da empresa</h1><p class="muted">Aparecem no cabeçalho dos orçamentos enviados aos clientes e no PDF. O logo e o nome do sistema (CiclosERP) continuam no menu e na entrada; o nome da empresa aparece abaixo deles.</p></div>
       <div class="actions"><a class="btn" id="preview" href="#" title="Abre o último orçamento para ver como fica">Ver num orçamento</a></div></div>
     <div class="card" style="max-width:820px"><form class="form" id="sf" autocomplete="off">
       <fieldset><legend>Logo</legend>
