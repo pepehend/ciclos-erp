@@ -30,7 +30,7 @@ class PaymentMethods
     /** Todas, na ordem escolhida. */
     public static function rows(): array
     {
-        if (self::$cache === null) self::$cache = DB::all('SELECT * FROM payment_methods ORDER BY sort, id');
+        if (self::$cache === null) self::$cache = DB::all('SELECT * FROM payment_methods WHERE company_id = ? ORDER BY sort, id', [Tenant::id() ?? 0]);
         return self::$cache;
     }
 
@@ -185,11 +185,12 @@ class PaymentMethods
 
     public static function uses(string $code): int
     {
-        return (int)DB::val('SELECT COUNT(*) FROM sales WHERE payment_method = ?', [$code])
-            + (int)DB::val('SELECT COUNT(*) FROM financial_entries WHERE payment_method = ?', [$code])
-            + (int)DB::val('SELECT COUNT(*) FROM purchase_orders WHERE payment_method = ?', [$code])
-            + (int)DB::val('SELECT COUNT(*) FROM quotes WHERE payment_methods = ? OR payment_methods LIKE ? OR payment_methods LIKE ? OR payment_methods LIKE ?',
-                [$code, $code . ',%', '%,' . $code, '%,' . $code . ',%']);
+        $cid = Tenant::need();
+        return (int)DB::val('SELECT COUNT(*) FROM sales WHERE company_id = ? AND payment_method = ?', [$cid, $code])
+            + (int)DB::val('SELECT COUNT(*) FROM financial_entries WHERE company_id = ? AND payment_method = ?', [$cid, $code])
+            + (int)DB::val('SELECT COUNT(*) FROM purchase_orders WHERE company_id = ? AND payment_method = ?', [$cid, $code])
+            + (int)DB::val('SELECT COUNT(*) FROM quotes WHERE company_id = ? AND (payment_methods = ? OR payment_methods LIKE ? OR payment_methods LIKE ? OR payment_methods LIKE ?)',
+                [$cid, $code, $code . ',%', '%,' . $code, '%,' . $code . ',%']);
     }
 
     public static function save(array $in, ?int $id = null): int
@@ -197,11 +198,11 @@ class PaymentMethods
         $name = trim(preg_replace('/\s+/', ' ', (string)($in['name'] ?? '')));
         if ($name === '') throw new AppError('Informe o nome da forma de pagamento');
         if (mb_strlen($name) > 60) throw new AppError('Nome muito longo (máximo 60 caracteres)');
-        $dup = DB::val('SELECT id FROM payment_methods WHERE LOWER(name) = ? AND id <> ?', [mb_strtolower($name), (int)$id]);
+        $dup = DB::val('SELECT id FROM payment_methods WHERE company_id = ? AND LOWER(name) = ? AND id <> ?', [Tenant::need(), mb_strtolower($name), (int)$id]);
         if ($dup) throw new AppError('Já existe uma forma de pagamento chamada "' . $name . '"');
         self::reset();
         if ($id) {
-            $old = DB::one('SELECT * FROM payment_methods WHERE id = ?', [$id]);
+            $old = DB::one('SELECT * FROM payment_methods WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);
             if (!$old) throw new AppError('Forma de pagamento não encontrada', 404);
             $data = ['name' => $name, 'updated_at' => now()] + self::installmentFields($in);
             if (array_key_exists('active', $in)) {
@@ -216,7 +217,7 @@ class PaymentMethods
         $id = DB::insert('payment_methods', self::installmentFields($in) + [
             'code' => self::newCode($name), 'name' => $name, 'active' => 1,
             'max_installments' => 1, 'interval_mode' => 'fixo',
-            'sort' => (int)DB::val('SELECT COALESCE(MAX(sort), 0) + 1 FROM payment_methods'),
+            'sort' => (int)DB::val('SELECT COALESCE(MAX(sort), 0) + 1 FROM payment_methods WHERE company_id = ?', [Tenant::need()]),
             'created_at' => now(), 'updated_at' => now(),
         ]);
         self::reset();
@@ -238,11 +239,11 @@ class PaymentMethods
     /** Apaga se nunca foi usada; se já foi, pede para desativar (o histórico precisa do nome). */
     public static function delete(int $id): void
     {
-        $r = DB::one('SELECT * FROM payment_methods WHERE id = ?', [$id]);
+        $r = DB::one('SELECT * FROM payment_methods WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);
         if (!$r) throw new AppError('Forma de pagamento não encontrada', 404);
         if (self::uses($r['code'])) throw new AppError('"' . $r['name'] . '" já foi usada em vendas, orçamentos ou no financeiro. Desative em vez de excluir: ela some das listas e o histórico continua.');
         if ((int)$r['active'] && count(self::active()) <= 1) throw new AppError('Deixe pelo menos uma forma de pagamento ativa');
-        DB::run('DELETE FROM payment_methods WHERE id = ?', [$id]);
+        DB::run('DELETE FROM payment_methods WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);
         self::reset();
     }
 
@@ -250,7 +251,7 @@ class PaymentMethods
     public static function reorder(array $ids): void
     {
         DB::tx(function () use ($ids) {
-            foreach (array_values($ids) as $i => $id) DB::run('UPDATE payment_methods SET sort = ? WHERE id = ?', [$i + 1, (int)$id]);
+            foreach (array_values($ids) as $i => $id) DB::run('UPDATE payment_methods SET sort = ? WHERE id = ? AND company_id = ?', [$i + 1, (int)$id, Tenant::need()]);
         });
         self::reset();
     }
@@ -258,7 +259,7 @@ class PaymentMethods
     /** Cria as formas padrão se a tabela estiver vazia. */
     public static function seed(): void
     {
-        if ((int)DB::val('SELECT COUNT(*) FROM payment_methods')) return;
+        if ((int)DB::val('SELECT COUNT(*) FROM payment_methods WHERE company_id = ?', [Tenant::need()])) return;
         $i = 0;
         foreach (self::DEFAULTS as $code => $name) {
             [$max, $mode] = self::DEFAULT_INSTALLMENTS[$code] ?? [1, 'fixo'];
@@ -273,7 +274,7 @@ class PaymentMethods
         $base = strtolower(trim(preg_replace('/[^a-z0-9]+/i', '_', iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $name) ?: ''), '_'));
         $base = substr($base !== '' ? $base : 'forma', 0, 20);
         $code = $base; $n = 2;
-        while (DB::val('SELECT id FROM payment_methods WHERE code = ?', [$code])) $code = substr($base, 0, 17) . '_' . $n++;
+        while (DB::val('SELECT id FROM payment_methods WHERE code = ? AND company_id = ?', [$code, Tenant::need()])) $code = substr($base, 0, 17) . '_' . $n++;
         return $code;
     }
 }

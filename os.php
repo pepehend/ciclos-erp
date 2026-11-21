@@ -76,7 +76,7 @@ $answer = function (array $q, $v) use ($e, $date, $money, $doc) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>Ordem de serviço #<?= (int)$o['id'] ?> · <?= $e($company) ?></title>
+<title>Ordem de serviço #<?= (int)$o['number'] ?> · <?= $e($company) ?></title>
 <style>
   :root { --ink: #212529; --muted: #6c757d; --line: #dee2e6; --accent: #b02a37; --soft: #f8d7da; }
   * { box-sizing: border-box; }
@@ -138,7 +138,7 @@ $answer = function (array $q, $v) use ($e, $date, $money, $doc) {
   <?php if ($askRate): ?>
   <form class="rate no-print" method="post">
     <h2 style="margin-top:0">Como foi o atendimento?</h2>
-    <div>Dê uma nota de 1 a 5 para a ordem de serviço #<?= (int)$o['id'] ?>.</div>
+    <div>Dê uma nota de 1 a 5 para a ordem de serviço #<?= (int)$o['number'] ?>.</div>
     <div class="stars"><?php for ($i = 5; $i >= 1; $i--): ?><input type="radio" name="rating" id="r<?= $i ?>" value="<?= $i ?>" required><label for="r<?= $i ?>" title="<?= $i ?>">★</label><?php endfor; ?></div>
     <textarea name="comment" maxlength="1000" placeholder="Comentário (opcional)"></textarea>
     <div style="margin-top:10px"><button class="btn primary">Enviar avaliação</button></div>
@@ -156,7 +156,7 @@ $answer = function (array $q, $v) use ($e, $date, $money, $doc) {
     </div>
     </div>
     <div class="meta">
-      <div class="num-q">Ordem de serviço #<?= (int)$o['id'] ?></div>
+      <div class="num-q">Ordem de serviço #<?= (int)$o['number'] ?></div>
       <div>Aberta em <?= $date($o['created_at']) ?></div>
       <?php if ($o['finished_at']): ?><div>Concluída em <?= $dtm($o['finished_at']) ?></div><?php endif; ?>
       <div style="margin-top:6px"><span class="badge"><?= $e($o['status_label']) ?></span></div>
@@ -222,7 +222,7 @@ $answer = function (array $q, $v) use ($e, $date, $money, $doc) {
     <button class="btn" onclick="window.print()">Imprimir / salvar PDF</button>
     <?php if ($canRate && !$askRate): ?><a class="btn primary" href="?t=<?= $e($token) ?>&amp;pesquisa=1" style="text-decoration:none">Avaliar o atendimento</a><?php endif; ?>
   </div>
-  <footer>Ordem de serviço #<?= (int)$o['id'] ?> · <?= $e($company) ?></footer>
+  <footer>Ordem de serviço #<?= (int)$o['number'] ?> · <?= $e($company) ?></footer>
 </main>
 </body>
 </html>

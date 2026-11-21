@@ -17,7 +17,7 @@ class PaymentTerms
 
     public static function rows(bool $onlyActive = false): array
     {
-        return DB::all('SELECT * FROM payment_terms' . ($onlyActive ? ' WHERE active = 1' : '') . ' ORDER BY sort, id');
+        return DB::all('SELECT * FROM payment_terms WHERE company_id = ?' . ($onlyActive ? ' AND active = 1' : '') . ' ORDER BY sort, id', [Tenant::need()]);
     }
 
     /** Lista enxuta para os formulários. */
@@ -34,7 +34,7 @@ class PaymentTerms
         $name = trim(preg_replace('/\s+/', ' ', (string)($in['name'] ?? '')));
         if ($name === '') throw new AppError('Informe a condição de pagamento');
         if (mb_strlen($name) > 160) throw new AppError('Texto muito longo (máximo 160 caracteres)');
-        $dup = DB::one('SELECT id, active FROM payment_terms WHERE LOWER(name) = ? AND id <> ?', [mb_strtolower($name), (int)$id]);
+        $dup = DB::one('SELECT id, active FROM payment_terms WHERE company_id = ? AND LOWER(name) = ? AND id <> ?', [Tenant::need(), mb_strtolower($name), (int)$id]);
         if ($dup) {
             // Cadastrar de novo uma que estava desativada só reativa
             if (!$id && !(int)$dup['active']) { DB::update('payment_terms', (int)$dup['id'], ['active' => 1, 'updated_at' => now()]); return (int)$dup['id']; }
@@ -50,28 +50,28 @@ class PaymentTerms
         $data = ['name' => $name, 'installments' => $n, 'interval_days' => $days, 'entry' => $entry ? 1 : 0, 'entry_percent' => $pct, 'updated_at' => now()];
         if (array_key_exists('active', $in)) $data['active'] = $in['active'] ? 1 : 0;
         if ($id) {
-            if (!DB::val('SELECT id FROM payment_terms WHERE id = ?', [$id])) throw new AppError('Condição não encontrada', 404);
+            if (!DB::val('SELECT id FROM payment_terms WHERE id = ? AND company_id = ?', [$id, Tenant::need()])) throw new AppError('Condição não encontrada', 404);
             DB::update('payment_terms', $id, $data);
             return $id;
         }
-        return DB::insert('payment_terms', $data + ['active' => 1, 'sort' => (int)DB::val('SELECT COALESCE(MAX(sort), 0) + 1 FROM payment_terms'), 'created_at' => now()]);
+        return DB::insert('payment_terms', $data + ['active' => 1, 'sort' => (int)DB::val('SELECT COALESCE(MAX(sort), 0) + 1 FROM payment_terms WHERE company_id = ?', [Tenant::need()]), 'created_at' => now()]);
     }
 
     public static function delete(int $id): void
     {
-        DB::run('DELETE FROM payment_terms WHERE id = ?', [$id]);
+        DB::run('DELETE FROM payment_terms WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);
     }
 
     public static function reorder(array $ids): void
     {
         DB::tx(function () use ($ids) {
-            foreach (array_values($ids) as $i => $id) DB::run('UPDATE payment_terms SET sort = ? WHERE id = ?', [$i + 1, (int)$id]);
+            foreach (array_values($ids) as $i => $id) DB::run('UPDATE payment_terms SET sort = ? WHERE id = ? AND company_id = ?', [$i + 1, (int)$id, Tenant::need()]);
         });
     }
 
     public static function seed(): void
     {
-        if ((int)DB::val('SELECT COUNT(*) FROM payment_terms')) return;
+        if ((int)DB::val('SELECT COUNT(*) FROM payment_terms WHERE company_id = ?', [Tenant::need()])) return;
         foreach (self::DEFAULTS as $i => $d) {
             DB::insert('payment_terms', ['name' => $d[0], 'installments' => $d[1], 'interval_days' => $d[2], 'entry' => !empty($d[3]) ? 1 : 0,
                 'active' => 1, 'sort' => $i + 1, 'created_at' => now(), 'updated_at' => now()]);

@@ -70,8 +70,21 @@ class DB
         return $st->rowCount();
     }
 
+    /** Rodando DB::upgrade(): ainda não há empresa; os dados antigos ganham a empresa no fim da migração. */
+    private static bool $upgrading = false;
+
     public static function insert(string $table, array $data): int
     {
+        if (Tenant::scoped($table) && !array_key_exists('company_id', $data)) {
+            $cid = Tenant::id();
+            if ($cid === null) {
+                if (!self::$upgrading) throw new AppError('Nenhuma empresa selecionada.', 403);
+                $cid = 0;
+            }
+            $data['company_id'] = $cid;
+        } elseif ($table === 'users' && !array_key_exists('company_id', $data) && Tenant::id() !== null) {
+            $data['company_id'] = Tenant::id();
+        }
         $cols = array_keys($data);
         $sql = sprintf('INSERT INTO %s (%s) VALUES (%s)', $table,
             implode(',', $cols), implode(',', array_fill(0, count($cols), '?')));
@@ -79,10 +92,18 @@ class DB
         return (int)self::pdo()->lastInsertId();
     }
 
+    /** Grava por id. Em tabela de empresa só mexe em linha da empresa atual (outra empresa = 0 linhas). */
     public static function update(string $table, int $id, array $data): void
     {
         $sets = implode(',', array_map(fn($c) => "$c = ?", array_keys($data)));
-        self::run("UPDATE $table SET $sets WHERE id = ?", [...array_values($data), $id]);
+        $p = [...array_values($data), $id];
+        $where = 'id = ?';
+        if ((Tenant::scoped($table) || $table === 'users') && !self::$upgrading) {
+            $cid = Tenant::id();
+            if ($cid !== null) { $where .= ' AND company_id = ?'; $p[] = $cid; }
+            elseif ($table !== 'users') throw new AppError('Nenhuma empresa selecionada.', 403);
+        }
+        self::run("UPDATE $table SET $sets WHERE $where", $p);
     }
 
     /** Transação com suporte a aninhamento (só a mais externa faz COMMIT). */
@@ -121,9 +142,18 @@ class DB
         $dt = $my ? 'DATETIME' : 'TEXT';
         $big = $my ? 'MEDIUMTEXT' : 'TEXT';
 
-        return [
+        $list = [
+            "CREATE TABLE IF NOT EXISTS companies (
+                id $pk,
+                name VARCHAR(160) NOT NULL,
+                slug VARCHAR(60) NOT NULL UNIQUE,
+                document VARCHAR(14) NULL,
+                active TINYINT NOT NULL DEFAULT 1,
+                created_at $dt NOT NULL
+            )$end",
             "CREATE TABLE IF NOT EXISTS users (
                 id $pk,
+                company_id $fk NULL,
                 name VARCHAR(120) NOT NULL,
                 email VARCHAR(190) NOT NULL UNIQUE,
                 phone VARCHAR(30) NULL,
@@ -138,7 +168,8 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS permission_profiles (
                 id $pk,
-                name VARCHAR(80) NOT NULL UNIQUE,
+                company_id $fk NOT NULL DEFAULT 0,
+                name VARCHAR(80) NOT NULL,
                 permissions TEXT NULL,
                 created_at $dt NOT NULL
             )$end",
@@ -160,6 +191,7 @@ class DB
             "CREATE INDEX idx_api_tokens_user ON api_tokens (user_id)",
             "CREATE TABLE IF NOT EXISTS products (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 name VARCHAR(200) NOT NULL,
                 sku VARCHAR(60) NULL,
                 barcode VARCHAR(60) NULL,
@@ -185,6 +217,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS recipe_items (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 product_id $fk NOT NULL,
                 ingredient_id $fk NOT NULL,
                 quantity $qty NOT NULL,
@@ -193,10 +226,11 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS customers (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 type VARCHAR(2) NOT NULL DEFAULT 'pj',
                 name VARCHAR(200) NOT NULL,
                 trade_name VARCHAR(200) NULL,
-                document VARCHAR(14) NULL UNIQUE,
+                document VARCHAR(14) NULL,
                 state_registration VARCHAR(30) NULL,
                 email VARCHAR(190) NULL,
                 phone VARCHAR(40) NULL,
@@ -215,10 +249,11 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS suppliers (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 type VARCHAR(2) NOT NULL DEFAULT 'pj',
                 name VARCHAR(200) NOT NULL,
                 trade_name VARCHAR(200) NULL,
-                document VARCHAR(14) NULL UNIQUE,
+                document VARCHAR(14) NULL,
                 state_registration VARCHAR(30) NULL,
                 email VARCHAR(190) NULL,
                 phone VARCHAR(40) NULL,
@@ -237,6 +272,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS sales (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 customer_id $fk NULL,
                 customer VARCHAR(160) NULL,
                 payment_method VARCHAR(30) NOT NULL,
@@ -261,6 +297,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS sale_items (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 sale_id $fk NOT NULL,
                 product_id $fk NOT NULL,
                 quantity $qty NOT NULL,
@@ -272,7 +309,8 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS invoices (
                 id $pk,
-                access_key VARCHAR(44) NULL UNIQUE,
+                company_id $fk NOT NULL DEFAULT 0,
+                access_key VARCHAR(44) NULL,
                 kind VARCHAR(10) NOT NULL,
                 number VARCHAR(20) NULL,
                 series VARCHAR(10) NULL,
@@ -286,6 +324,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS invoice_items (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 invoice_id $fk NOT NULL,
                 product_id $fk NOT NULL,
                 supplier_code VARCHAR(60) NULL,
@@ -301,15 +340,17 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS supplier_map (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 supplier_cnpj VARCHAR(20) NOT NULL,
                 supplier_code VARCHAR(60) NOT NULL,
                 product_id $fk NOT NULL,
                 factor $qty NOT NULL DEFAULT 1,
-                UNIQUE (supplier_cnpj, supplier_code),
+                CONSTRAINT uq_supplier_map UNIQUE (company_id, supplier_cnpj, supplier_code),
                 FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
             )$end",
             "CREATE TABLE IF NOT EXISTS product_refs (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 product_id $fk NOT NULL,
                 manufacturer VARCHAR(80) NULL,
                 code VARCHAR(80) NOT NULL,
@@ -318,6 +359,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS customer_portal (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 customer_id $fk NOT NULL UNIQUE,
                 password_hash VARCHAR(255) NULL,
                 invite_hash VARCHAR(64) NULL,
@@ -328,6 +370,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS portal_requests (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 customer_id $fk NOT NULL,
                 message TEXT NOT NULL,
                 created_at $dt NOT NULL,
@@ -337,11 +380,13 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS settings (
                 id $pk,
-                name VARCHAR(60) NOT NULL UNIQUE,
+                company_id $fk NOT NULL DEFAULT 0,
+                name VARCHAR(60) NOT NULL,
                 value " . ($my ? 'MEDIUMTEXT' : 'TEXT') . " NULL
             )$end",
             "CREATE TABLE IF NOT EXISTS quotes (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 status VARCHAR(20) NOT NULL DEFAULT 'rascunho',
                 customer_id $fk NULL,
                 lead_name VARCHAR(200) NULL,
@@ -380,6 +425,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS quote_items (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 quote_id $fk NOT NULL,
                 product_id $fk NOT NULL,
                 kind VARCHAR(10) NOT NULL,
@@ -397,6 +443,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS quote_extras (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 quote_id $fk NOT NULL,
                 description VARCHAR(200) NOT NULL,
                 amount $money NOT NULL,
@@ -404,6 +451,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS financial_entries (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 type VARCHAR(10) NOT NULL,
                 status VARCHAR(12) NOT NULL DEFAULT 'aberto',
                 description VARCHAR(200) NOT NULL,
@@ -427,6 +475,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS equipments (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 customer_id $fk NOT NULL,
                 name VARCHAR(120) NOT NULL,
                 brand VARCHAR(80) NULL,
@@ -444,6 +493,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS checklist_models (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 name VARCHAR(120) NOT NULL,
                 service_type VARCHAR(20) NULL,
                 items $big NOT NULL,
@@ -453,6 +503,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS questionnaires (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 name VARCHAR(120) NOT NULL,
                 questions $big NOT NULL,
                 show_os TINYINT NOT NULL DEFAULT 1,
@@ -468,6 +519,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS task_types (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 name VARCHAR(120) NOT NULL,
                 tolerance_min INT NULL,
                 duration_min INT NULL,
@@ -482,6 +534,8 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS service_orders (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
+                number INT NOT NULL DEFAULT 0,
                 status VARCHAR(20) NOT NULL DEFAULT 'aberta',
                 origin VARCHAR(12) NOT NULL DEFAULT 'chamado',
                 customer_id $fk NOT NULL,
@@ -512,6 +566,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS so_answers (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 order_id $fk NOT NULL,
                 questionnaire_id $fk NOT NULL,
                 equipment_id $fk NULL,
@@ -521,6 +576,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS so_photos (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 order_id $fk NOT NULL,
                 image $big NOT NULL,
                 caption VARCHAR(200) NULL,
@@ -529,6 +585,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS so_items (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 order_id $fk NOT NULL,
                 kind VARCHAR(10) NOT NULL,
                 product_id $fk NULL,
@@ -540,6 +597,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS so_events (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 order_id $fk NOT NULL,
                 from_status VARCHAR(20) NULL,
                 to_status VARCHAR(20) NOT NULL,
@@ -556,6 +614,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS so_sends (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 order_id $fk NOT NULL,
                 kind VARCHAR(12) NOT NULL,
                 recipient VARCHAR(200) NOT NULL,
@@ -566,6 +625,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS purchase_orders (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 status VARCHAR(20) NOT NULL DEFAULT 'rascunho',
                 supplier_id $fk NULL,
                 order_date DATE NOT NULL,
@@ -588,6 +648,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS purchase_order_items (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 purchase_order_id $fk NOT NULL,
                 product_id $fk NOT NULL,
                 description VARCHAR(255) NOT NULL,
@@ -601,7 +662,8 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS payment_methods (
                 id $pk,
-                code VARCHAR(30) NOT NULL UNIQUE,
+                company_id $fk NOT NULL DEFAULT 0,
+                code VARCHAR(30) NOT NULL,
                 name VARCHAR(60) NOT NULL,
                 active TINYINT NOT NULL DEFAULT 1,
                 max_installments INT NOT NULL DEFAULT 1,
@@ -612,6 +674,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS payment_terms (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 name VARCHAR(160) NOT NULL,
                 installments INT NULL,
                 interval_days INT NULL,
@@ -624,6 +687,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS quote_statuses (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 code VARCHAR(20) NOT NULL,
                 name VARCHAR(60) NOT NULL,
                 color VARCHAR(9) NOT NULL,
@@ -634,6 +698,7 @@ class DB
             )$end",
             "CREATE TABLE IF NOT EXISTS movements (
                 id $pk,
+                company_id $fk NOT NULL DEFAULT 0,
                 product_id $fk NOT NULL,
                 type VARCHAR(30) NOT NULL,
                 quantity $qty NOT NULL,
@@ -677,11 +742,168 @@ class DB
             "CREATE INDEX idx_soi_order ON so_items (order_id)",
             "CREATE INDEX idx_soe_order ON so_events (order_id)",
             "CREATE INDEX idx_sos_order ON so_sends (order_id)",
+            "CREATE INDEX idx_users_company ON users (company_id)",
+            // Chaves naturais únicas só dentro da empresa
+            "CREATE UNIQUE INDEX uq_customers_doc ON customers (company_id, document)",
+            "CREATE UNIQUE INDEX uq_suppliers_doc ON suppliers (company_id, document)",
+            "CREATE UNIQUE INDEX uq_invoices_key ON invoices (company_id, access_key)",
+            "CREATE UNIQUE INDEX uq_settings_name ON settings (company_id, name)",
+            "CREATE UNIQUE INDEX uq_pmethods_code ON payment_methods (company_id, code)",
+            "CREATE UNIQUE INDEX uq_pprofiles_name ON permission_profiles (company_id, name)",
+            "CREATE UNIQUE INDEX uq_so_number ON service_orders (company_id, number)",
         ];
+        foreach (Tenant::TABLES as $t) $list[] = "CREATE INDEX idx_{$t}_company ON $t (company_id)";
+        return $list;
     }
 
     /** Atualiza bancos criados por versões anteriores. */
     public static function upgrade(): void
+    {
+        self::$upgrading = true;
+        $prev = Tenant::id();
+        try {
+            // 1) colunas company_id nas tabelas que já existem; 2) ajustes das versões antigas, na "empresa 0"
+            // (as linhas antigas ainda não têm empresa); 3) empresa #1 para os dados que já existiam
+            $changed = self::upgradeCompanyColumns();
+            // Banco de uma empresa só (usuários, nenhuma empresa ainda): os ajustes antigos rodam na "empresa 0" e depois
+            // tudo vai para a empresa #1. Em banco multiempresa ou recém-criado, os ajustes antigos não semeiam dados.
+            $fresh = false;
+            try { $legacy = !(int)self::val('SELECT COUNT(*) FROM companies') && (int)self::val('SELECT COUNT(*) FROM users'); }
+            catch (PDOException $e) { $legacy = false; $fresh = true; }   // banco vazio (ainda sem tabelas): o instalador cria tudo já atual
+            Tenant::set($legacy ? 0 : null);
+            if (!$fresh) self::upgradeLegacy();
+            Tenant::set($prev);
+            if ($changed || ($legacy && self::hasUnassignedRows())) self::upgradeCompanyData();
+            if (!$fresh) self::upgradeOrderNumbers();
+        } finally {
+            self::$upgrading = false;
+            Tenant::set($prev);
+        }
+    }
+
+    /**
+     * v3.6.0 (multiempresa): tabela companies, coluna company_id em todas as tabelas de dados,
+     * chaves únicas por empresa e empresa #1 para os dados que já existiam.
+     */
+    private static function upgradeCompanyColumns(): bool
+    {
+        $my = self::$driver === 'mysql';
+        $pdo = self::pdo();
+        try {
+            $pdo->query('SELECT id FROM companies LIMIT 1');
+        } catch (PDOException $e) {
+            foreach (self::schema() as $sql) {
+                if (str_starts_with($sql, 'CREATE TABLE IF NOT EXISTS companies ')) $pdo->exec($sql);
+            }
+        }
+        $need = [];
+        foreach ([...Tenant::TABLES, 'users'] as $t) {
+            try { $pdo->query("SELECT id FROM $t LIMIT 1"); }
+            catch (PDOException $e) { continue; }   // tabela ainda não existe: nasce com company_id (migrate)
+            try { $pdo->query("SELECT company_id FROM $t LIMIT 1"); }
+            catch (PDOException $e) { $need[] = $t; }
+        }
+        if (!$need) return false;
+
+        // Tabelas com chave única global que passa a valer só dentro da empresa
+        $uniqueCols = ['customers' => 'document', 'suppliers' => 'document', 'invoices' => 'access_key',
+            'supplier_map' => 'supplier_cnpj', 'settings' => 'name', 'payment_methods' => 'code', 'permission_profiles' => 'name'];
+        $fk = $my ? 'INT UNSIGNED' : 'INTEGER';
+        foreach ($need as $t) {
+            if ($my) {
+                $pdo->exec("ALTER TABLE $t ADD COLUMN company_id $fk " . ($t === 'users' ? 'NULL' : 'NOT NULL DEFAULT 0'));
+                if (isset($uniqueCols[$t])) {
+                    foreach (self::all("SHOW INDEX FROM $t") as $ix) {
+                        if ((int)$ix['Non_unique'] === 0 && $ix['Column_name'] === $uniqueCols[$t] && (int)$ix['Seq_in_index'] === 1 && $ix['Key_name'] !== 'PRIMARY') {
+                            $pdo->exec("ALTER TABLE $t DROP INDEX `{$ix['Key_name']}`");
+                        }
+                    }
+                    if ($t === 'supplier_map') $pdo->exec('ALTER TABLE supplier_map ADD CONSTRAINT uq_supplier_map UNIQUE (company_id, supplier_cnpj, supplier_code)');
+                }
+            } elseif (isset($uniqueCols[$t])) {
+                self::rebuildSqlite($t);   // SQLite não troca constraint: recria a tabela já com company_id
+            } else {
+                $pdo->exec("ALTER TABLE $t ADD COLUMN company_id $fk " . ($t === 'users' ? 'NULL' : 'NOT NULL DEFAULT 0'));
+            }
+        }
+        return true;
+    }
+
+    /** v3.7.0: número da OS por empresa (começa em 1 em cada uma, na ordem de criação). O `id` continua sendo o identificador interno. */
+    private static function upgradeOrderNumbers(): void
+    {
+        $pdo = self::pdo();
+        try { $pdo->query('SELECT number FROM service_orders LIMIT 1'); return; }
+        catch (PDOException $e) { /* ainda não tem a coluna */ }
+        $pdo->exec('ALTER TABLE service_orders ADD COLUMN number INT NOT NULL DEFAULT 0');
+        $n = [];
+        foreach (self::all('SELECT id, company_id FROM service_orders ORDER BY id') as $r) {
+            $c = (int)$r['company_id'];
+            $n[$c] = ($n[$c] ?? 0) + 1;
+            self::run('UPDATE service_orders SET number = ? WHERE id = ?', [$n[$c], (int)$r['id']]);
+        }
+        self::migrate(); // índice único (empresa, número)
+    }
+
+    /** Sobrou linha sem empresa (company_id = 0), por exemplo criada pelos ajustes de versões antigas? Uma consulta só. */
+    private static function hasUnassignedRows(): bool
+    {
+        $parts = array_map(fn($t) => "EXISTS (SELECT 1 FROM $t WHERE company_id = 0)", Tenant::TABLES);
+        try { return (bool)(int)self::val('SELECT ' . implode(' OR ', $parts)); }
+        catch (PDOException $e) { return false; }
+    }
+
+    /** Depois do upgradeLegacy: índices por empresa, a empresa #1 (nome e CNPJ das configurações antigas) e o vínculo dos dados antigos. */
+    private static function upgradeCompanyData(): void
+    {
+        self::migrate(); // tabelas novas e índices (por empresa e únicos por empresa)
+
+        // Os dados que já existiam viram a empresa #1 (nome e CNPJ vêm das configurações antigas)
+        if (!(int)self::val('SELECT COUNT(*) FROM companies') && (int)self::val('SELECT COUNT(*) FROM users')) {
+            $name = trim((string)self::val("SELECT value FROM settings WHERE name = 'company_name' AND company_id = 0")) ?: 'Empresa principal';
+            $doc = preg_replace('/\D/', '', (string)self::val("SELECT value FROM settings WHERE name = 'company_document' AND company_id = 0"));
+            $slug = trim((string)preg_replace('/[^a-z0-9]+/', '-', strtolower((string)iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $name))), '-') ?: 'empresa';
+            self::run('INSERT INTO companies (name, slug, document, active, created_at) VALUES (?, ?, ?, 1, ?)',
+                [$name, $slug, $doc !== '' ? $doc : null, now()]);
+        }
+        $first = (int)self::val('SELECT MIN(id) FROM companies');
+        if ($first) {
+            foreach (Tenant::TABLES as $t) self::run("UPDATE $t SET company_id = ? WHERE company_id = 0", [$first]);
+            self::run("UPDATE users SET company_id = ? WHERE company_id IS NULL AND role <> 'superadmin'", [$first]);
+        }
+    }
+
+    /** SQLite: recria a tabela com a definição atual de schema() (chaves únicas novas) e copia os dados. */
+    private static function rebuildSqlite(string $t): void
+    {
+        $pdo = self::pdo();
+        $create = null;
+        foreach (self::schema() as $sql) {
+            if (str_starts_with($sql, "CREATE TABLE IF NOT EXISTS $t (")) { $create = $sql; break; }
+        }
+        if ($create === null) throw new RuntimeException("Tabela $t não encontrada em schema()");
+        $old = array_column(self::all("PRAGMA table_info($t)"), 'name');
+        $new = str_replace("CREATE TABLE IF NOT EXISTS $t (", "CREATE TABLE {$t}__new (", $create);
+        $pdo->exec('PRAGMA foreign_keys = OFF');
+        try {
+            $pdo->beginTransaction();
+            $pdo->exec("DROP TABLE IF EXISTS {$t}__new");
+            $pdo->exec($new);
+            $newCols = array_column(self::all("PRAGMA table_info({$t}__new)"), 'name');
+            $cols = implode(',', array_intersect($old, $newCols));
+            $pdo->exec("INSERT INTO {$t}__new ($cols) SELECT $cols FROM $t");
+            $pdo->exec("DROP TABLE $t");
+            $pdo->exec("ALTER TABLE {$t}__new RENAME TO $t");
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        } finally {
+            $pdo->exec('PRAGMA foreign_keys = ON');
+        }
+    }
+
+    private static function upgradeLegacy(): void
     {
         // v1.1.0: ordens de serviço (equipamentos, modelos de checklist e OS)
         try {
@@ -695,7 +917,7 @@ class DB
         }
         // Perfis de exemplo novos (ex.: "Técnico") entram também em instalações que já têm as ordens de serviço
         try {
-            Auth::seedProfiles();
+            if (Tenant::id() !== null) Auth::seedProfiles();   // só no banco antigo (empresa 0)
         } catch (PDOException $e) { /* tabela ainda não existe */ }
         // v1.25.0: portal do cliente (acesso e pedidos de correção)
         try {
@@ -793,7 +1015,7 @@ class DB
             self::migrate();
         }
         // Tipos de tarefa ainda não criados (atualização ou instalação nova): cria os padrões e converte os checklists antigos
-        if (!(int)self::val('SELECT COUNT(*) FROM task_types')) TaskTypes::importLegacy();
+        if (Tenant::id() !== null && !(int)self::val('SELECT COUNT(*) FROM task_types WHERE company_id = ?', [Tenant::id()])) TaskTypes::importLegacy();
         // v2.0.0: OS não fatura (só o orçamento); "faturada" vira "concluída". Orçamento guarda a OS de onde nasceu.
         try {
             self::pdo()->query('SELECT service_order_id FROM quotes LIMIT 1');
@@ -875,9 +1097,9 @@ class DB
                 "ALTER TABLE quotes ADD COLUMN installment_plan TEXT NULL"] as $sql) {
                 try { self::pdo()->exec($sql); } catch (PDOException $e2) { /* já existe */ }
             }
-            PaymentMethods::applyDefaultInstallments();
+            if (Tenant::id() !== null) PaymentMethods::applyDefaultInstallments();
         }
-        PaymentMethods::seed();
+        if (Tenant::id() !== null) PaymentMethods::seed();   // só na migração de um banco antigo (empresa 0); empresa nova já nasce com os cadastros
         // v1.8.7: condições de pagamento cadastráveis; venda guarda a condição
         try {
             self::pdo()->query('SELECT id FROM payment_terms LIMIT 1');
@@ -905,14 +1127,14 @@ class DB
                 }
             }
         }
-        PaymentTerms::seed();
+        if (Tenant::id() !== null) PaymentTerms::seed();
         // v1.9.1: status de orçamento cadastráveis (nome e cor)
         try {
             self::pdo()->query('SELECT id FROM quote_statuses LIMIT 1');
         } catch (PDOException $e) {
             self::migrate();
         }
-        QuoteStatuses::seed();
+        if (Tenant::id() !== null) QuoteStatuses::seed();
         // v1.17.0: descrição do produto
         try {
             self::pdo()->query('SELECT description FROM products LIMIT 1');
@@ -1000,7 +1222,7 @@ class DB
                 self::pdo()->exec($sql);
             } catch (PDOException $e) {
                 // Índice já existente: ignorar
-                if (stripos($sql, 'CREATE INDEX') === 0) continue;
+                if (preg_match('/^CREATE (UNIQUE )?INDEX/i', $sql)) continue;
                 throw $e;
             }
         }

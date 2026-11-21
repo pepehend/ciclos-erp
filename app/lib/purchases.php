@@ -30,7 +30,7 @@ class PurchaseOrders
         $o = DB::one('SELECT o.*, u.name user_name, s.name supplier_name, s.trade_name supplier_trade_name,
                 s.document supplier_document, s.phone supplier_phone, s.email supplier_email
             FROM purchase_orders o LEFT JOIN users u ON u.id = o.user_id LEFT JOIN suppliers s ON s.id = o.supplier_id
-            WHERE o.id = ?', [$id]);
+            WHERE o.id = ? AND o.company_id = ?', [$id, Tenant::need()]);
         if (!$o) throw new AppError('Ordem de compra não encontrada', 404);
         $o['items'] = DB::all('SELECT i.*, p.sku, p.barcode, p.stock, p.min_stock, p.avg_cost, p.type product_type, p.active product_active, p.deleted_at product_deleted
             FROM purchase_order_items i JOIN products p ON p.id = i.product_id
@@ -39,7 +39,7 @@ class PurchaseOrders
         $doc = preg_replace('/\D/', '', (string)$o['supplier_document']);
         $codes = [];
         if ($doc !== '') {
-            foreach (DB::all('SELECT product_id, supplier_code FROM supplier_map WHERE supplier_cnpj = ? ORDER BY id DESC', [$doc]) as $m) {
+            foreach (DB::all('SELECT product_id, supplier_code FROM supplier_map WHERE company_id = ? AND supplier_cnpj = ? ORDER BY id DESC', [Tenant::need(), $doc]) as $m) {
                 $codes[(int)$m['product_id']] ??= $m['supplier_code'];
             }
         }
@@ -52,14 +52,16 @@ class PurchaseOrders
     public static function byToken(string $token): array
     {
         if (!preg_match('/^[a-f0-9]{32}$/', $token)) throw new AppError('Pedido não encontrado', 404);
-        $id = DB::val('SELECT id FROM purchase_orders WHERE public_token = ?', [$token]);
-        if (!$id) throw new AppError('Pedido não encontrado', 404);
-        return self::get((int)$id);
+        $row = DB::one('SELECT id, company_id FROM purchase_orders WHERE public_token = ?', [$token]);
+        if (!$row) throw new AppError('Pedido não encontrado', 404);
+        // O link público não tem login: a empresa vem do próprio pedido
+        Tenant::set((int)$row['company_id']);
+        return self::get((int)$row['id']);
     }
 
     public static function list(array $f): array
     {
-        $where = ['1 = 1']; $p = [];
+        $where = ['o.company_id = ?']; $p = [Tenant::need()];
         if (isset(self::STATUSES[$f['status'] ?? ''])) { $where[] = 'o.status = ?'; $p[] = $f['status']; }
         elseif (($f['status'] ?? '') === 'abertas') $where[] = "o.status IN ('rascunho','enviada','confirmada')";
         if (!empty($f['supplier_id'])) { $where[] = 'o.supplier_id = ?'; $p[] = (int)$f['supplier_id']; }
@@ -78,7 +80,7 @@ class PurchaseOrders
             $join WHERE $w ORDER BY o.id DESC LIMIT $per OFFSET " . (($page - 1) * $per), $p);
         foreach ($rows as &$r) $r['status_label'] = self::label($r['status']);
         $counts = [];
-        foreach (DB::all('SELECT status, COUNT(*) n, COALESCE(SUM(total), 0) v FROM purchase_orders GROUP BY status') as $c) {
+        foreach (DB::all('SELECT status, COUNT(*) n, COALESCE(SUM(total), 0) v FROM purchase_orders WHERE company_id = ? GROUP BY status', [Tenant::need()]) as $c) {
             $counts[$c['status']] = ['n' => (int)$c['n'], 'total' => round((float)$c['v'], 2)];
         }
         return ['rows' => $rows, 'total' => $n, 'page' => $page, 'per_page' => $per, 'counts' => $counts];
@@ -110,7 +112,7 @@ class PurchaseOrders
         $method = (string)PaymentMethods::check($method, $old['payment_method'] ?? null);
 
         $items = []; $itemsTotal = 0.0; $seen = [];
-        $kept = $id ? array_map('intval', array_column(DB::all('SELECT product_id FROM purchase_order_items WHERE purchase_order_id = ?', [$id]), 'product_id')) : [];
+        $kept = $id ? array_map('intval', array_column(DB::all('SELECT product_id FROM purchase_order_items WHERE purchase_order_id = ? AND company_id = ?', [$id, Tenant::need()]), 'product_id')) : [];
         foreach (array_values($in['items'] ?? []) as $n => $it) {
             $p = Inventory::product((int)($it['product_id'] ?? 0));
             if ($p['type'] === 'servico') throw new AppError('"' . $p['name'] . '" é serviço e não entra em ordem de compra');
@@ -156,7 +158,7 @@ class PurchaseOrders
         return DB::tx(function () use ($id, $data, $items, $userId) {
             if ($id) {
                 DB::update('purchase_orders', $id, $data);
-                DB::run('DELETE FROM purchase_order_items WHERE purchase_order_id = ?', [$id]);
+                DB::run('DELETE FROM purchase_order_items WHERE purchase_order_id = ? AND company_id = ?', [$id, Tenant::need()]);
             } else {
                 $id = DB::insert('purchase_orders', $data + [
                     'user_id' => $userId, 'public_token' => bin2hex(random_bytes(16)), 'created_at' => now(),
@@ -202,7 +204,7 @@ class PurchaseOrders
         $ok = 0; $errors = [];
         foreach ($ids as $id) {
             try {
-                $cur = DB::val('SELECT status FROM purchase_orders WHERE id = ?', [$id]);
+                $cur = DB::val('SELECT status FROM purchase_orders WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);
                 if (!$cur) throw new AppError('Ordem não encontrada');
                 if ($action === 'delete') self::delete($id);
                 else {
@@ -253,8 +255,8 @@ class PurchaseOrders
     {
         $o = self::get($id);
         if (!in_array($o['status'], ['rascunho', 'cancelada'], true)) throw new AppError('Só é possível excluir ordens em rascunho ou canceladas');
-        DB::run('DELETE FROM purchase_order_items WHERE purchase_order_id = ?', [$id]);
-        DB::run('DELETE FROM purchase_orders WHERE id = ?', [$id]);
+        DB::run('DELETE FROM purchase_order_items WHERE purchase_order_id = ? AND company_id = ?', [$id, Tenant::need()]);
+        DB::run('DELETE FROM purchase_orders WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);
     }
 
     /** Produtos abaixo do estoque mínimo, com a quantidade que falta e o que já está pedido. */
@@ -262,10 +264,10 @@ class PurchaseOrders
     {
         $rows = DB::all("SELECT p.id, p.name, p.sku, p.unit, p.type, p.stock, p.min_stock, p.avg_cost,
                 COALESCE((SELECT SUM(i.quantity) FROM purchase_order_items i JOIN purchase_orders o ON o.id = i.purchase_order_id
-                    WHERE i.product_id = p.id AND o.status IN ('rascunho','enviada','confirmada')), 0) on_order
+                    WHERE i.product_id = p.id AND o.company_id = p.company_id AND o.status IN ('rascunho','enviada','confirmada')), 0) on_order
             FROM products p
-            WHERE p.active = 1 AND p.deleted_at IS NULL AND p.type <> 'servico' AND p.min_stock > 0 AND p.stock < p.min_stock
-            ORDER BY p.name");
+            WHERE p.company_id = ? AND p.active = 1 AND p.deleted_at IS NULL AND p.type <> 'servico' AND p.min_stock > 0 AND p.stock < p.min_stock
+            ORDER BY p.name", [Tenant::need()]);
         foreach ($rows as &$r) {
             $r['missing'] = round(max(0, (float)$r['min_stock'] - (float)$r['stock'] - (float)$r['on_order']), 4);
         }

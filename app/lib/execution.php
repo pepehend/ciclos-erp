@@ -263,10 +263,10 @@ class OrderExec
 
     public static function deletePhoto(int $photoId): void
     {
-        $p = DB::one('SELECT id, order_id FROM so_photos WHERE id = ?', [$photoId]);
+        $p = DB::one('SELECT id, order_id FROM so_photos WHERE id = ? AND company_id = ?', [$photoId, Tenant::need()]);
         if (!$p) throw new AppError('Foto não encontrada', 404);
         self::editable(ServiceOrders::get((int)$p['order_id']));
-        DB::run('DELETE FROM so_photos WHERE id = ?', [$photoId]);
+        DB::run('DELETE FROM so_photos WHERE id = ? AND company_id = ?', [$photoId, Tenant::need()]);
     }
 
     // ---------------- Itens (valores) ----------------
@@ -282,7 +282,7 @@ class OrderExec
         // Peça ou serviço não cadastrado: entra na OS aguardando a revisão de quem cuida dos cadastros
         if ($kind !== 'custo' && !(int)($in['product_id'] ?? 0) && empty($in['new_item'])) throw new AppError($kind === 'servico' ? 'Escolha o serviço do cadastro (ou marque que não está cadastrado)' : 'Escolha a peça do cadastro (ou marque que não está cadastrada)');
         if ($kind !== 'custo' && (int)($in['product_id'] ?? 0)) {
-            $p = DB::one('SELECT id, name, type, deleted_at FROM products WHERE id = ?', [(int)$in['product_id']]);
+            $p = DB::one('SELECT id, name, type, deleted_at FROM products WHERE id = ? AND company_id = ?', [(int)$in['product_id'], Tenant::need()]);
             if (!$p || $p['deleted_at']) throw new AppError('Item do cadastro não encontrado');
             if (($p['type'] === 'servico') !== ($kind === 'servico')) throw new AppError($kind === 'servico' ? 'Escolha um serviço' : 'Escolha um produto');
             $pid = (int)$p['id'];
@@ -299,10 +299,10 @@ class OrderExec
 
     public static function deleteItem(int $itemId): void
     {
-        $i = DB::one('SELECT id, order_id FROM so_items WHERE id = ?', [$itemId]);
+        $i = DB::one('SELECT id, order_id FROM so_items WHERE id = ? AND company_id = ?', [$itemId, Tenant::need()]);
         if (!$i) throw new AppError('Item não encontrado', 404);
         self::editable(ServiceOrders::get((int)$i['order_id']));
-        DB::run('DELETE FROM so_items WHERE id = ?', [$itemId]);
+        DB::run('DELETE FROM so_items WHERE id = ? AND company_id = ?', [$itemId, Tenant::need()]);
     }
 
     public static function items(int $orderId): array
@@ -332,13 +332,13 @@ class OrderExec
      */
     public static function reviewItem(int $itemId, string $action, array $in, ?int $userId = null): void
     {
-        $i = DB::one('SELECT * FROM so_items WHERE id = ?', [$itemId]);
+        $i = DB::one('SELECT * FROM so_items WHERE id = ? AND company_id = ?', [$itemId, Tenant::need()]);
         if (!$i) throw new AppError('Item não encontrado', 404);
         if ($i['kind'] === 'custo' || $i['product_id']) throw new AppError('Este item já está no cadastro');
         $type = $i['kind'] === 'servico' ? 'servico' : 'produto';
-        if ($action === 'recusar') { DB::run('DELETE FROM so_items WHERE id = ?', [$itemId]); return; }
+        if ($action === 'recusar') { DB::run('DELETE FROM so_items WHERE id = ? AND company_id = ?', [$itemId, Tenant::need()]); return; }
         if ($action === 'vincular') {
-            $p = DB::one('SELECT id, name, type, deleted_at FROM products WHERE id = ?', [(int)($in['product_id'] ?? 0)]);
+            $p = DB::one('SELECT id, name, type, deleted_at FROM products WHERE id = ? AND company_id = ?', [(int)($in['product_id'] ?? 0), Tenant::need()]);
             if (!$p || $p['deleted_at']) throw new AppError('Escolha o item do cadastro');
             if ($p['type'] !== $type) throw new AppError($type === 'servico' ? 'Escolha um serviço' : 'Escolha uma peça (produto)');
             DB::update('so_items', $itemId, ['product_id' => (int)$p['id'], 'description' => mb_substr($p['name'], 0, 200)]);
@@ -356,9 +356,9 @@ class OrderExec
     {
         if (!$kinds) return [];
         $in = implode(',', array_fill(0, count($kinds), '?'));
-        return DB::all("SELECT i.*, o.status order_status, c.name customer_name, c.trade_name customer_trade_name, u.name user_name
+        return DB::all("SELECT i.*, o.number order_number, o.status order_status, c.name customer_name, c.trade_name customer_trade_name, u.name user_name
             FROM so_items i JOIN service_orders o ON o.id = i.order_id JOIN customers c ON c.id = o.customer_id LEFT JOIN users u ON u.id = i.user_id
-            WHERE i.product_id IS NULL AND i.kind IN ($in) ORDER BY i.id", $kinds);
+            WHERE i.company_id = ? AND i.product_id IS NULL AND i.kind IN ($in) ORDER BY i.id", [Tenant::need(), ...$kinds]);
     }
 
     // ---------------- Histórico de status / controle de horas ----------------
@@ -631,7 +631,7 @@ class OrderExec
 
     public static function token(int $id): string
     {
-        $t = (string)DB::val('SELECT public_token FROM service_orders WHERE id = ?', [$id]);
+        $t = (string)DB::val('SELECT public_token FROM service_orders WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);
         if ($t === '') {
             $t = bin2hex(random_bytes(16));
             DB::update('service_orders', $id, ['public_token' => $t]);
@@ -647,9 +647,11 @@ class OrderExec
     public static function byToken(string $token): array
     {
         if (!preg_match('/^[a-f0-9]{32}$/', $token)) throw new AppError('Ordem não encontrada', 404);
-        $id = DB::val('SELECT id FROM service_orders WHERE public_token = ?', [$token]);
-        if (!$id) throw new AppError('Ordem não encontrada', 404);
-        return self::detail((int)$id);
+        $row = DB::one('SELECT id, company_id FROM service_orders WHERE public_token = ?', [$token]);
+        if (!$row) throw new AppError('Ordem não encontrada', 404);
+        // O link público não tem login: a empresa vem da própria OS
+        Tenant::set((int)$row['company_id']);
+        return self::detail((int)$row['id']);
     }
 
     /** Envia a OS digital ou a pesquisa. Em envio automático ($quiet) a falha é registrada e não interrompe. */
@@ -667,10 +669,10 @@ class OrderExec
         $cust = $o['customer_trade_name'] ?: $o['customer_name'];
         $url = self::publicUrl($id, $kind === 'pesquisa');
         $e = fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
-        $subject = $kind === 'os' ? "Ordem de serviço #{$o['id']} - $company" : "Como foi o atendimento? OS #{$o['id']} - $company";
+        $subject = $kind === 'os' ? "Ordem de serviço #{$o['number']} - $company" : "Como foi o atendimento? OS #{$o['number']} - $company";
         $text = $kind === 'os'
-            ? "Segue a ordem de serviço #{$o['id']}" . ($o['status'] === 'concluida' ? ', concluída' : '') . '. Você pode ver, imprimir ou salvar em PDF pelo link abaixo.'
-            : "Concluímos a ordem de serviço #{$o['id']}. Conte para nós como foi o atendimento: leva menos de um minuto.";
+            ? "Segue a ordem de serviço #{$o['number']}" . ($o['status'] === 'concluida' ? ', concluída' : '') . '. Você pode ver, imprimir ou salvar em PDF pelo link abaixo.'
+            : "Concluímos a ordem de serviço #{$o['number']}. Conte para nós como foi o atendimento: leva menos de um minuto.";
         $btn = $kind === 'os' ? 'Ver a ordem de serviço' : 'Avaliar o atendimento';
         $html = '<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#212529">'
             . '<h2 style="color:#b02a37;margin:0 0 12px">' . $e($company) . '</h2>'
@@ -714,7 +716,7 @@ class OrderExec
     /** Orçamentos ligados à OS: o de origem e os abertos a partir dela. */
     public static function quotes(array $o): array
     {
-        $rows = DB::all('SELECT id, status, total, created_at, service_order_id FROM quotes WHERE id = ? OR service_order_id = ? ORDER BY id', [(int)$o['quote_id'], (int)$o['id']]);
+        $rows = DB::all('SELECT id, status, total, created_at, service_order_id FROM quotes WHERE company_id = ? AND (id = ? OR service_order_id = ?) ORDER BY id', [Tenant::need(), (int)$o['quote_id'], (int)$o['id']]);
         foreach ($rows as &$r) {
             $r['status_label'] = QuoteStatuses::label($r['status']);
             $r['relation'] = (int)$r['service_order_id'] === (int)$o['id'] ? 'associado a esta OS' : 'origem da OS';
@@ -739,7 +741,7 @@ class OrderExec
             'sends' => DB::all('SELECT s.*, u.name user_name FROM so_sends s LEFT JOIN users u ON u.id = s.user_id WHERE s.order_id = ? ORDER BY s.id DESC', [$id]),
             'pending' => self::pending($o),
             'quotes' => self::quotes($o),
-            'equipments' => DB::all('SELECT id, name, serial FROM equipments WHERE customer_id = ? AND (deleted_at IS NULL OR id IN (SELECT equipment_id FROM so_answers WHERE order_id = ?)) ORDER BY name', [$o['customer_id'], $o['id']]),
+            'equipments' => DB::all('SELECT id, name, serial FROM equipments WHERE company_id = ? AND customer_id = ? AND (deleted_at IS NULL OR id IN (SELECT equipment_id FROM so_answers WHERE order_id = ?)) ORDER BY name', [Tenant::need(), $o['customer_id'], $o['id']]),
             'kinds' => self::KINDS,
             'types' => Questionnaires::TYPES,
         ];

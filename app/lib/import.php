@@ -171,7 +171,7 @@ class ProductImport
      */
     public static function preview(array $raw): array
     {
-        $existing = array_flip(array_map('mb_strtolower', array_column(DB::all("SELECT sku FROM products WHERE sku IS NOT NULL AND sku <> '' AND deleted_at IS NULL"), 'sku')));
+        $existing = array_flip(array_map('mb_strtolower', array_column(DB::all("SELECT sku FROM products WHERE company_id = ? AND sku IS NOT NULL AND sku <> '' AND deleted_at IS NULL", [Tenant::need()]), 'sku')));
         $seen = []; $ok = []; $skipped = []; $errors = []; $total = 0;
         foreach ($raw as $line => $r) {
             $cells = [];
@@ -224,7 +224,7 @@ class ProductImport
             $sku = mb_substr(trim((string)($r['sku'] ?? '')), 0, 60);
             try {
                 DB::tx(function () use ($r, $sku, $userId, $today, &$created, &$skipped) {
-                    if ($sku !== '' && DB::val('SELECT id FROM products WHERE LOWER(sku) = ? AND deleted_at IS NULL', [mb_strtolower($sku)])) {
+                    if ($sku !== '' && DB::val('SELECT id FROM products WHERE company_id = ? AND LOWER(sku) = ? AND deleted_at IS NULL', [Tenant::need(), mb_strtolower($sku)])) {
                         $skipped[] = ['line' => $r['line'] ?? null, 'sku' => $sku, 'name' => $r['name'] ?? '', 'reason' => 'SKU já cadastrado'];
                         return;
                     }
@@ -266,7 +266,7 @@ class ProductImport
     {
         $ph = implode(',', array_fill(0, count(self::NOTES), '?'));
         $p = self::NOTES;
-        $w = "p.deleted_at IS NULL AND EXISTS (SELECT 1 FROM movements m WHERE m.product_id = p.id AND m.note IN ($ph))";
+        $w = "p.company_id = " . Tenant::need() . " AND p.deleted_at IS NULL AND EXISTS (SELECT 1 FROM movements m WHERE m.product_id = p.id AND m.note IN ($ph))";
         if ($day) { $w .= ' AND p.created_at BETWEEN ? AND ?'; array_push($p, "$day 00:00:00", "$day 23:59:59"); }
         // Usado depois da importação = qualquer movimento que não seja da importação, ou item de venda/orçamento/nota/ordem
         $used = "(SELECT COUNT(*) FROM movements m2 WHERE m2.product_id = p.id AND (m2.note IS NULL OR m2.note NOT IN ($ph)))

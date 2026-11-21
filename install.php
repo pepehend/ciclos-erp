@@ -31,23 +31,28 @@ if (installed()) {
             : ['driver' => 'mysql', 'host' => $f('db_host') ?: 'localhost', 'port' => (int)($f('db_port') ?: 3306),
                'name' => $f('db_name'), 'user' => $f('db_user'), 'pass' => (string)($_POST['db_pass'] ?? '')];
         if ($driver === 'mysql' && ($db['name'] === '' || $db['user'] === '')) $errors[] = 'Preencha o nome do banco e o usuário do banco.';
+        if ($f('company_name') === '') $errors[] = 'Informe o nome da empresa.';
         if ($f('admin_name') === '') $errors[] = 'Informe o seu nome.';
         if (!filter_var($f('admin_email'), FILTER_VALIDATE_EMAIL)) $errors[] = 'Informe um e-mail válido.';
         if (mb_strlen((string)($_POST['admin_password'] ?? '')) < 8) $errors[] = 'A senha precisa ter pelo menos 8 caracteres.';
         if (($_POST['admin_password'] ?? '') !== ($_POST['admin_password2'] ?? '')) $errors[] = 'As senhas não conferem.';
+        $super = $f('super_email') !== '' || (string)($_POST['super_password'] ?? '') !== '';
+        if ($super && !filter_var($f('super_email'), FILTER_VALIDATE_EMAIL)) $errors[] = 'Superadmin: informe um e-mail válido.';
+        if ($super && mb_strlen((string)($_POST['super_password'] ?? '')) < 8) $errors[] = 'Superadmin: a senha precisa ter pelo menos 8 caracteres.';
 
         if (!$errors) {
             try {
                 DB::connect($db);
                 DB::migrate();
-                Customers::ensureDefault();
-                Auth::seedProfiles();
-                PaymentMethods::seed();
-                PaymentTerms::seed();
-                QuoteStatuses::seed();
-                DB::tx(function () use ($f) {
-                    Auth::createUser(['name' => $f('admin_name'), 'email' => $f('admin_email'),
-                        'password' => (string)$_POST['admin_password'], 'role' => 'admin']);
+                // A primeira empresa nasce com os cadastros padrão e o administrador dela
+                DB::tx(function () use ($f, $super) {
+                    Companies::create(['name' => $f('company_name'), 'admin' => [
+                        'name' => $f('admin_name'), 'email' => $f('admin_email'), 'password' => (string)$_POST['admin_password']]]);
+                    // Superadmin (opcional): cria e administra as outras empresas
+                    if ($super) {
+                        Auth::createUser(['name' => 'Superadmin', 'email' => $f('super_email'),
+                            'password' => (string)$_POST['super_password'], 'role' => 'admin', '_superadmin' => true]);
+                    }
                 });
                 $config = "<?php\n// Gerado pelo instalador em " . date('d/m/Y H:i') . "\nreturn " . var_export([
                     'db' => $db,
@@ -113,11 +118,21 @@ $v = fn($k, $d = '') => htmlspecialchars((string)($_POST[$k] ?? $d), ENT_QUOTES)
         </div>
       </fieldset>
       <fieldset>
-        <legend>Seu usuário (administrador)</legend>
+        <legend>Sua empresa</legend>
+        <label>Nome da empresa <input name="company_name" value="<?= $v('company_name') ?>" required></label>
+      </fieldset>
+      <fieldset>
+        <legend>Seu usuário (administrador da empresa)</legend>
         <label>Nome <input name="admin_name" value="<?= $v('admin_name') ?>" required></label>
         <label>E-mail <input name="admin_email" type="email" value="<?= $v('admin_email') ?>" required></label>
         <label>Senha (mín. 8 caracteres) <input name="admin_password" type="password" minlength="8" required autocomplete="new-password"></label>
         <label>Repita a senha <input name="admin_password2" type="password" minlength="8" required autocomplete="new-password"></label>
+      </fieldset>
+      <fieldset>
+        <legend>Superadmin (opcional)</legend>
+        <p class="muted">Para atender várias empresas neste sistema, crie um superadmin: ele cadastra e ativa as empresas, mas não vê os dados de nenhuma. Deixe em branco se for usar só uma empresa.</p>
+        <label>E-mail do superadmin <input name="super_email" type="email" value="<?= $v('super_email') ?>"></label>
+        <label>Senha do superadmin (mín. 8 caracteres) <input name="super_password" type="password" minlength="8" autocomplete="new-password"></label>
       </fieldset>
       <button class="btn primary" type="submit">Instalar</button>
     </form>

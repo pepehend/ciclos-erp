@@ -5,13 +5,14 @@
 
 declare(strict_types=1);
 
-const APP_VERSION = '3.5.0';
+const APP_VERSION = '3.7.0';
 define('APP_ROOT', dirname(__DIR__));
 define('CONFIG_FILE', __DIR__ . '/config.php');
 
 date_default_timezone_set('America/Sao_Paulo');
 mb_internal_encoding('UTF-8');
 
+require __DIR__ . '/lib/tenant.php';
 require __DIR__ . '/lib/db.php';
 require __DIR__ . '/lib/inventory.php';
 require __DIR__ . '/lib/fiscal.php';
@@ -36,6 +37,7 @@ require __DIR__ . '/lib/backup.php';
 require __DIR__ . '/lib/gdrive.php';
 require __DIR__ . '/lib/portal.php';
 require __DIR__ . '/lib/deletion.php';
+require __DIR__ . '/lib/companies.php';
 
 // Autoload da biblioteca de leitura de PDF (smalot/pdfparser, licença LGPL)
 spl_autoload_register(function (string $class) {

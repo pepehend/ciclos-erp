@@ -36,21 +36,21 @@ class Questionnaires
 
     public static function get(int $id): array
     {
-        $q = DB::one('SELECT * FROM questionnaires WHERE id = ?', [$id]);
+        $q = DB::one('SELECT * FROM questionnaires WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);
         if (!$q) throw new AppError('Questionário não encontrado', 404);
         return self::decode($q);
     }
 
     public static function list(bool $all = false): array
     {
-        $rows = DB::all('SELECT * FROM questionnaires WHERE deleted_at IS NULL' . ($all ? '' : ' AND active = 1') . ' ORDER BY name');
+        $rows = DB::all('SELECT * FROM questionnaires WHERE company_id = ? AND deleted_at IS NULL' . ($all ? '' : ' AND active = 1') . ' ORDER BY name', [Tenant::need()]);
         return array_map([self::class, 'decode'], $rows);
     }
 
     /** Questionários ativos com id e nome (para escolher nos tipos de tarefa). */
     public static function options(): array
     {
-        return array_map(fn($q) => ['id' => (int)$q['id'], 'name' => $q['name']], DB::all('SELECT id, name FROM questionnaires WHERE active = 1 ORDER BY name'));
+        return array_map(fn($q) => ['id' => (int)$q['id'], 'name' => $q['name']], DB::all('SELECT id, name FROM questionnaires WHERE company_id = ? AND active = 1 ORDER BY name', [Tenant::need()]));
     }
 
     private static function decode(array $q): array
@@ -271,7 +271,7 @@ class TaskTypes
 
     public static function get(int $id): array
     {
-        $t = DB::one('SELECT * FROM task_types WHERE id = ?', [$id]);
+        $t = DB::one('SELECT * FROM task_types WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);
         if (!$t) throw new AppError('Tipo de tarefa não encontrado', 404);
         return self::decode($t);
     }
@@ -280,13 +280,13 @@ class TaskTypes
     public static function names(): array
     {
         $out = [];
-        foreach (DB::all('SELECT id, name FROM task_types') as $t) $out[(int)$t['id']] = $t['name'];
+        foreach (DB::all('SELECT id, name FROM task_types WHERE company_id = ?', [Tenant::need()]) as $t) $out[(int)$t['id']] = $t['name'];
         return $out;
     }
 
     public static function list(bool $all = false): array
     {
-        $rows = DB::all('SELECT * FROM task_types WHERE deleted_at IS NULL' . ($all ? '' : ' AND active = 1') . ' ORDER BY name');
+        $rows = DB::all('SELECT * FROM task_types WHERE company_id = ? AND deleted_at IS NULL' . ($all ? '' : ' AND active = 1') . ' ORDER BY name', [Tenant::need()]);
         return array_map([self::class, 'decode'], $rows);
     }
 
@@ -330,7 +330,7 @@ class TaskTypes
         foreach ((array)($in['questionnaire_ids'] ?? []) as $qid) {
             $qid = (int)$qid;
             if (!$qid) continue;
-            if (!DB::val('SELECT id FROM questionnaires WHERE id = ? AND active = 1', [$qid])) throw new AppError('Questionário inválido ou inativo');
+            if (!DB::val('SELECT id FROM questionnaires WHERE id = ? AND active = 1 AND company_id = ?', [$qid, Tenant::need()])) throw new AppError('Questionário inválido ou inativo');
             $qids[$qid] = $qid;
         }
         if (isset($reqs['questionario']) && !$qids) throw new AppError('Escolha pelo menos um questionário para exigir a resposta');
@@ -365,8 +365,9 @@ class TaskTypes
      */
     public static function importLegacy(): void
     {
+        $cid = Tenant::id() ?? 0;   // empresa atual (0 = banco antigo, ainda sem empresa)
         $qByCode = [];
-        foreach (DB::all('SELECT * FROM checklist_models ORDER BY id') as $m) {
+        foreach (DB::all('SELECT * FROM checklist_models WHERE company_id = ? ORDER BY id', [$cid]) as $m) {
             $items = json_decode((string)$m['items'], true) ?: [];
             $questions = [];
             foreach ($items as $i => $it) {
@@ -391,7 +392,7 @@ class TaskTypes
             ]);
         }
         foreach ($ttByCode as $code => $tid) {
-            DB::run('UPDATE service_orders SET task_type_id = ? WHERE service_type = ? AND task_type_id IS NULL', [$tid, $code]);
+            DB::run('UPDATE service_orders SET task_type_id = ? WHERE service_type = ? AND task_type_id IS NULL AND company_id = ?', [$tid, $code, $cid]);
         }
     }
 }

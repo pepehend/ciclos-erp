@@ -15,15 +15,15 @@ class Quotes
                 c.street customer_street, c.number customer_number, c.complement customer_complement,
                 c.district customer_district, c.city customer_city, c.state customer_state, c.cep customer_cep
             FROM quotes q LEFT JOIN users u ON u.id = q.user_id LEFT JOIN customers c ON c.id = q.customer_id
-            WHERE q.id = ?', [$id]);
+            WHERE q.id = ? AND q.company_id = ?', [$id, Tenant::need()]);
         if (!$q) throw new AppError('Orçamento não encontrado', 404);
         $q['items'] = DB::all('SELECT i.*, p.stock, p.unit product_unit, p.type product_type, p.active product_active, p.deleted_at product_deleted
             FROM quote_items i JOIN products p ON p.id = i.product_id WHERE i.quote_id = ? ORDER BY i.sort, i.id', [$id]);
         $q['extras'] = DB::all('SELECT * FROM quote_extras WHERE quote_id = ? ORDER BY id', [$id]);
         $q['status_label'] = QuoteStatuses::label($q['status']);
         // Ordens de serviço ligadas: geradas a partir deste orçamento e a OS de onde ele nasceu
-        $q['service_orders'] = DB::all('SELECT o.id, o.status, o.created_at, o.quote_id, tt.name task_type_name FROM service_orders o
-            LEFT JOIN task_types tt ON tt.id = o.task_type_id WHERE o.quote_id = ? OR o.id = ? ORDER BY o.id', [$id, (int)$q['service_order_id']]);
+        $q['service_orders'] = DB::all('SELECT o.id, o.number, o.status, o.created_at, o.quote_id, tt.name task_type_name FROM service_orders o
+            LEFT JOIN task_types tt ON tt.id = o.task_type_id WHERE o.company_id = ? AND (o.quote_id = ? OR o.id = ?) ORDER BY o.id', [Tenant::need(), $id, (int)$q['service_order_id']]);
         foreach ($q['service_orders'] as &$so) $so['status_label'] = ServiceOrders::label($so['status']);
         unset($so);
         return $q;
@@ -32,16 +32,18 @@ class Quotes
     public static function byToken(string $token): array
     {
         if (!preg_match('/^[a-f0-9]{32}$/', $token)) throw new AppError('Orçamento não encontrado', 404);
-        $id = DB::val('SELECT id FROM quotes WHERE public_token = ?', [$token]);
-        if (!$id) throw new AppError('Orçamento não encontrado', 404);
-        return self::get((int)$id);
+        $row = DB::one('SELECT id, company_id FROM quotes WHERE public_token = ?', [$token]);
+        if (!$row) throw new AppError('Orçamento não encontrado', 404);
+        // O link público não tem login: a empresa vem do próprio orçamento
+        Tenant::set((int)$row['company_id']);
+        return self::get((int)$row['id']);
     }
 
     /** Cria ou atualiza o orçamento inteiro (itens e custos são regravados). */
     public static function save(array $in, int $userId, ?int $id = null): int
     {
         $status = $in['status'] ?? 'rascunho';
-        QuoteStatuses::check($status, $id ? DB::val('SELECT status FROM quotes WHERE id = ?', [$id]) : null);
+        QuoteStatuses::check($status, $id ? DB::val('SELECT status FROM quotes WHERE id = ? AND company_id = ?', [$id, Tenant::need()]) : null);
 
         // Para quem: cliente cadastrado ou lead (contato ainda sem cadastro)
         $customerId = null; $lead = [null, null, null];
@@ -55,7 +57,7 @@ class Quotes
             $customerId = (int)($in['customer_id'] ?? 0);
             if (!$customerId) throw new AppError('Selecione o cliente do orçamento (ou informe o lead)');
             Customers::get($customerId);
-            Removals::check('customers', $customerId, $id ? (int)DB::val('SELECT customer_id FROM quotes WHERE id = ?', [$id]) : null);
+            Removals::check('customers', $customerId, $id ? (int)DB::val('SELECT customer_id FROM quotes WHERE id = ? AND company_id = ?', [$id, Tenant::need()]) : null);
         }
         // Aprovar só para cliente cadastrado (lead precisa ser cadastrado antes)
         if ($status === 'aprovado' && !$customerId) {
@@ -66,10 +68,10 @@ class Quotes
         $exp = self::date($in['expires_at'] ?? null);
         if ($exp && $exp < $req) throw new AppError('A data de expiração é anterior à data de solicitação');
         $resp = (int)($in['user_id'] ?? 0) ?: $userId;
-        if (!DB::val('SELECT id FROM users WHERE id = ? AND active = 1', [$resp])) throw new AppError('Escolha o colaborador responsável');
+        if (!DB::val('SELECT id FROM users WHERE id = ? AND active = 1 AND company_id = ?', [$resp, Tenant::need()])) throw new AppError('Escolha o colaborador responsável');
 
         // Itens excluídos do cadastro só continuam se já estavam neste orçamento
-        $kept = $id ? array_map('intval', array_column(DB::all('SELECT product_id FROM quote_items WHERE quote_id = ?', [$id]), 'product_id')) : [];
+        $kept = $id ? array_map('intval', array_column(DB::all('SELECT product_id FROM quote_items WHERE quote_id = ? AND company_id = ?', [$id, Tenant::need()]), 'product_id')) : [];
         // Itens
         $items = [];
         $prodTotal = $servTotal = 0.0;
@@ -116,7 +118,7 @@ class Quotes
         if ($dTotal > $base + 0.001) throw new AppError('O desconto é maior que o valor do orçamento');
 
         // Formas ativas, mais as que o orçamento já tinha (mesmo que tenham sido desativadas depois)
-        $oldMethods = $id ? array_filter(explode(',', (string)DB::val('SELECT payment_methods FROM quotes WHERE id = ?', [$id]))) : [];
+        $oldMethods = $id ? array_filter(explode(',', (string)DB::val('SELECT payment_methods FROM quotes WHERE id = ? AND company_id = ?', [$id, Tenant::need()]))) : [];
         $methods = [];
         foreach ((array)($in['payment_methods'] ?? []) as $m) {
             $m = (string)$m;
@@ -159,14 +161,14 @@ class Quotes
             $soId = self::checkOs((int)$in['service_order_id'], $customerId);
             // "Abrir orçamento" a partir da OS (from_os): todos os itens da OS precisam estar cadastrados
             if (!$id && !empty($in['from_os'])) {
-                $rev = (int)DB::val("SELECT COUNT(*) FROM so_items WHERE order_id = ? AND kind <> 'custo' AND product_id IS NULL", [$soId]);
-                if ($rev) throw new AppError("A ordem de serviço #$soId tem $rev item(ns) aguardando revisão do cadastro. Revise antes de abrir o orçamento.");
+                $rev = (int)DB::val("SELECT COUNT(*) FROM so_items WHERE order_id = ? AND company_id = ? AND kind <> 'custo' AND product_id IS NULL", [$soId, Tenant::need()]);
+                if ($rev) throw new AppError("A ordem de serviço #" . self::osNumber($soId) . " tem $rev item(ns) aguardando revisão do cadastro. Revise antes de abrir o orçamento.");
             }
         }
 
         return DB::tx(function () use ($data, $items, $extras, $id, $userId, $soId, $linkKey) {
             if ($id) {
-                $old = DB::one('SELECT * FROM quotes WHERE id = ?' . DB::lockSuffix(), [$id]);
+                $old = DB::one('SELECT * FROM quotes WHERE id = ? AND company_id = ?' . DB::lockSuffix(), [$id, Tenant::need()]);
                 if (!$old) throw new AppError('Orçamento não encontrado', 404);
                 if ($old['status'] === 'vendido') throw new AppError('Este orçamento já virou venda e não pode mais ser alterado');
                 self::stamp($data, $old['status']);
@@ -188,18 +190,24 @@ class Quotes
         });
     }
 
+    /** Número (por empresa) mostrado ao usuário para o id da OS. */
+    private static function osNumber(int $osId): int
+    {
+        return (int)DB::val('SELECT number FROM service_orders WHERE id = ? AND company_id = ?', [$osId, Tenant::need()]) ?: $osId;
+    }
+
     /** A OS precisa existir e ser do mesmo cliente do orçamento. */
     private static function checkOs(int $osId, ?int $customerId): int
     {
         $so = ServiceOrders::get($osId);
-        if (!$customerId || (int)$so['customer_id'] !== (int)$customerId) throw new AppError('A ordem de serviço #' . $so['id'] . ' é de outro cliente');
+        if (!$customerId || (int)$so['customer_id'] !== (int)$customerId) throw new AppError('A ordem de serviço #' . $so['number'] . ' é de outro cliente');
         return (int)$so['id'];
     }
 
     /** Associa o orçamento a uma OS do mesmo cliente (ou tira a associação com $osId = null). */
     public static function linkOs(int $id, ?int $osId): void
     {
-        $q = DB::one('SELECT id, status, customer_id FROM quotes WHERE id = ?', [$id]);
+        $q = DB::one('SELECT id, status, customer_id FROM quotes WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);
         if (!$q) throw new AppError('Orçamento não encontrado', 404);
         if ($q['status'] === 'vendido') throw new AppError('Este orçamento já virou venda e não pode mais ser alterado');
         $so = $osId ? self::checkOs($osId, $q['customer_id'] ? (int)$q['customer_id'] : null) : null;
@@ -211,14 +219,14 @@ class Quotes
     {
         QuoteStatuses::check($status);
         DB::tx(function () use ($id, $status, $response) {
-            $q = DB::one('SELECT * FROM quotes WHERE id = ?' . DB::lockSuffix(), [$id]);
+            $q = DB::one('SELECT * FROM quotes WHERE id = ? AND company_id = ?' . DB::lockSuffix(), [$id, Tenant::need()]);
             if (!$q) throw new AppError('Orçamento não encontrado', 404);
             if ($q['status'] === 'vendido') throw new AppError('Este orçamento já virou venda');
             if ($q['status'] === $status) return;
             if ($status === 'aprovado' && !$q['customer_id']) {
                 throw new AppError('Só é possível aprovar orçamento de cliente cadastrado. Cadastre o lead como cliente e selecione-o no orçamento.');
             }
-            if (!in_array($status, ['rascunho', 'em_elaboracao'], true) && !DB::val('SELECT COUNT(*) FROM quote_items WHERE quote_id = ?', [$id])) {
+            if (!in_array($status, ['rascunho', 'em_elaboracao'], true) && !DB::val('SELECT COUNT(*) FROM quote_items WHERE quote_id = ? AND company_id = ?', [$id, Tenant::need()])) {
                 throw new AppError('Inclua pelo menos um produto ou serviço antes de mudar o status');
             }
             $data = ['status' => $status, 'updated_at' => now()];
@@ -303,7 +311,7 @@ class Quotes
         if (!$key) throw new AppError('Ação inválida');
         $status = Settings::get($key) ?: $action;
         if (!in_array($status, QuoteStatuses::selectable(), true)) $status = $action;
-        if ($action === 'aprovado' && !DB::val('SELECT customer_id FROM quotes WHERE id = ?', [$id])) {
+        if ($action === 'aprovado' && !DB::val('SELECT customer_id FROM quotes WHERE id = ? AND company_id = ?', [$id, Tenant::need()])) {
             throw new AppError('Só é possível aprovar orçamento de cliente cadastrado. Cadastre o lead como cliente e selecione-o no orçamento.');
         }
         self::setStatus($id, $status);
@@ -327,7 +335,7 @@ class Quotes
         $ok = 0; $errors = [];
         foreach ($ids as $id) {
             try {
-                if (!DB::val('SELECT id FROM quotes WHERE id = ?', [$id])) throw new AppError('Orçamento não encontrado');
+                if (!DB::val('SELECT id FROM quotes WHERE id = ? AND company_id = ?', [$id, Tenant::need()])) throw new AppError('Orçamento não encontrado');
                 if ($action === 'delete') self::delete($id);
                 elseif ($action === 'status') self::setStatus($id, (string)$status);
                 else self::mark($id, $action);
@@ -343,12 +351,12 @@ class Quotes
     public static function delete(int $id): void
     {
         DB::tx(function () use ($id) {
-            $q = DB::one('SELECT * FROM quotes WHERE id = ?' . DB::lockSuffix(), [$id]);
+            $q = DB::one('SELECT * FROM quotes WHERE id = ? AND company_id = ?' . DB::lockSuffix(), [$id, Tenant::need()]);
             if (!$q) throw new AppError('Orçamento não encontrado', 404);
             if ($q['status'] === 'vendido' || $q['sale_id']) throw new AppError('Este orçamento virou a venda #' . $q['sale_id'] . ' e não pode ser excluído');
             DB::run('DELETE FROM quote_items WHERE quote_id = ?', [$id]);
             DB::run('DELETE FROM quote_extras WHERE quote_id = ?', [$id]);
-            DB::run('DELETE FROM quotes WHERE id = ?', [$id]);
+            DB::run('DELETE FROM quotes WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);
         });
     }
 
@@ -377,7 +385,7 @@ class Quotes
     {
         [$d1, $d2] = self::monthRange();
         $a = $d1 . ' 00:00:00'; $b = $d2 . ' 23:59:59';
-        $count = fn(string $where, array $p = []) => (int)DB::val("SELECT COUNT(*) FROM quotes WHERE $where", $p);
+        $count = fn(string $where, array $p = []) => (int)DB::val("SELECT COUNT(*) FROM quotes WHERE company_id = ? AND $where", [Tenant::need(), ...$p]);
         return [
             'pendentes_envio' => $count("status IN ('rascunho','em_elaboracao','aguardando_envio')"),
             'aguardando_aprovacao' => $count("status = 'enviado'"),

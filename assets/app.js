@@ -229,7 +229,7 @@ function pickAvatar() {
 
 async function loadMe() {
   const d = await api('me');
-  state.me = d.user; state.csrf = d.csrf; state.version = d.version; if (d.brand) state.brand = d.brand;
+  state.me = d.user; state.company = d.company || null; state.csrf = d.csrf; state.version = d.version; if (d.brand) state.brand = d.brand;
   applyAccent(state.me?.accent_color);
   return d;
 }
@@ -607,6 +607,8 @@ function installmentBox(el, { codes = [], total = 0, n = 1, days = 30, plan = nu
 const instText = (n, days, entry) => (+n > 1 || +entry) ? `${+entry ? 'entrada + ' : ''}${n}x ${+days === 30 ? 'de 30 em 30 dias' : `a cada ${days} dias`}` : '';
 const pmOptions = (selected, blank = true) => (blank ? '<option value="">—</option>' : '') + pmEntries(selected).map(([k, l]) => `<option value="${esc(k)}" ${k === selected ? 'selected' : ''}>${esc(l)}</option>`).join('');
 const isAdmin = () => state.me && state.me.role === 'admin';
+/** Superadmin: cria e administra as empresas; não pertence a nenhuma e não vê os dados delas. */
+const isSuper = () => state.me && state.me.role === 'superadmin';
 
 // ============ Máscara de telefone (vale para todo campo de telefone, enquanto digita) ============
 const PHONE_SEL = 'input[type=tel], input[name$="phone"], input[id$="phone"], input[data-mask=phone]';
@@ -894,7 +896,8 @@ document.addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $$('.dd-menu').forEach((m) => (m.hidden = true)); });
 // Menu: links diretos e grupos recolhíveis. O 4º item é a permissão exigida ('admin' = só administrador).
 const NAV = [
-  ['painel', 'Painel', 'home'],
+  ['empresas', 'Empresas', 'users', 'super'],
+  ['painel', 'Painel', 'home', 'empresa'],
   { g: 'novo', label: 'Novo', icon: 'plus', cls: 'nav-new', items: NEW_ITEMS },
   ['notas/importar', 'Importar nota', 'upload', 'notas.import'],
   { g: 'operacao', label: 'Operação', icon: 'swap', items: [
@@ -920,7 +923,8 @@ const NAV = [
 ];
 const can = (perm) => !perm || (perm === 'pagamento' ? can('formas_pagamento') || isAdmin()
   : perm === 'revisao' ? can('produtos.review') || can('servicos.review')
-  : perm === 'admin' ? isAdmin() : isAdmin() || (state.me?.permissions || []).includes(perm));
+  : perm === 'admin' ? isAdmin() : perm === 'super' ? isSuper() : perm === 'empresa' ? !isSuper()
+  : isAdmin() || (state.me?.permissions || []).includes(perm));
 
 /** Qual item do menu fica destacado para cada endereço. */
 function navSection(path) {
@@ -1010,7 +1014,8 @@ function renderShell() {
 }
 
 const ROUTES = [
-  [/^painel$/, viewDashboard],
+  [/^empresas$/, viewCompanies, 'super'],
+  [/^painel$/, viewDashboard, 'empresa'],
   [/^produtos$/, viewProducts, 'produtos'],
   [/^produto\/(\d+)$/, viewProduct],
   [/^estoque$/, viewMovements, 'movimentacoes'],
@@ -1068,8 +1073,9 @@ async function route() {
   if (tkOn()) return tkHost(mpath);
   if (!$('.shell')) renderShell();
   $('.shell').classList.remove('menu-open');
-  const path = (location.hash.replace(/^#\/?/, '') || 'painel').split('?')[0];
-  const [re, fn, perm] = ROUTES.find(([r]) => r.test(path)) || [/^/, viewDashboard];
+  const path = (location.hash.replace(/^#\/?/, '') || (isSuper() ? 'empresas' : 'painel')).split('?')[0];
+  if (isSuper() && !/^(empresas|conta|aparencia)$/.test(path)) return go('empresas');
+  const [re, fn, perm] = ROUTES.find(([r]) => r.test(path)) || [/^/, isSuper() ? viewCompanies : viewDashboard];
   const args = path.match(re).slice(1);
   const section = navSection(path);
   $$('.nav a').forEach((a) => a.classList.toggle('active', a.dataset.r === section));
@@ -1081,7 +1087,7 @@ async function route() {
   const token = ++routeToken;
   view.innerHTML = '<p class="muted">Carregando…</p>';
   try {
-    if (!state.meta) { state.meta = await api('meta'); paintBrand(); }
+    if (!state.meta && !isSuper()) { state.meta = await api('meta'); paintBrand(); }
     syncQStatus(); syncPoStatus();
     if (token !== routeToken) return;
     if (!can(perm)) { view.innerHTML = `<div class="empty">${icon('lock')}<h2>Sem acesso</h2><p>Você não tem permissão para esta área. Peça a um administrador para liberar em <strong>Configurações → Sistema → Permissões</strong>.</p><a class="btn" href="#/painel">Voltar ao painel</a></div>`; return; }
@@ -1137,7 +1143,7 @@ function renderLogin() {
     await busy(btn, async () => {
       try {
         const d = await api('login', { body: formData(f) });
-        state.me = d.user; state.csrf = d.csrf; state.meta = null; invalidateProducts(); applyAccent(state.me?.accent_color);
+        state.me = d.user; state.company = d.user?.company || null; state.csrf = d.csrf; state.meta = null; invalidateProducts(); applyAccent(state.me?.accent_color);
         if (tkOn()) { $('#app').innerHTML = ''; if (location.hash === '#/m') route(); else location.hash = '#/m'; return; }
         renderShell(); route();
       } catch (err) { $('#login-err').innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
@@ -1152,7 +1158,7 @@ function dashOrdersHtml(d) {
   if (!o && !q) return '';
   const st = o ? o.statuses : {};
   const row = (r, when) => `<tr class="click" data-go="ordem/${r.id}"><td class="nowrap">${when(r)}</td>
-    <td><div><strong>${soCustomer(r)}</strong></div><div class="small muted">#${r.id}${r.task_type_name ? ' · ' + esc(r.task_type_name) : ''}${r.technician_name ? ' · ' + esc(r.technician_name) : ''}</div></td>
+    <td><div><strong>${soCustomer(r)}</strong></div><div class="small muted">#${r.number ?? r.id}${r.task_type_name ? ' · ' + esc(r.task_type_name) : ''}${r.technician_name ? ' · ' + esc(r.technician_name) : ''}</div></td>
     <td>${soStatusHtml(r.status, st)}</td></tr>`;
   const hour = (r) => esc(String(r.scheduled_at).slice(11, 16));
   const late = (r) => `<span class="stock-low">${r.due_date && r.due_date < new Date().toISOString().slice(0, 10) ? 'prazo ' + dOnly(r.due_date) : 'agendada ' + dOnly(r.scheduled_at)}</span>`;
@@ -2409,7 +2415,7 @@ const soDate = (s) => (s ? String(s).split('-').reverse().join('/') : '—');
 /** Tabela de ordens (ficha do cliente e histórico do equipamento). */
 function soTableHtml(rows, statuses, types, { withEquipment = true } = {}) {
   return `<div class="table-wrap"><table><thead><tr><th>Ordem</th><th>Status</th><th>Tipo</th>${withEquipment ? '<th>Equipamento</th>' : ''}<th>Agenda</th><th>Técnico</th></tr></thead><tbody>
-    ${rows.map((o) => `<tr class="click" data-so="${o.id}"><td><strong>#${o.id}</strong><div class="small muted">${esc(o.description || '')}</div></td>
+    ${rows.map((o) => `<tr class="click" data-so="${o.id}"><td><strong>#${o.number ?? o.id}</strong><div class="small muted">${esc(o.description || '')}</div></td>
       <td>${soStatusHtml(o.status, statuses)}</td><td>${esc(types[o.task_type_id] || '—')}</td>
       ${withEquipment ? `<td>${esc(o.equipment_name || '—')}</td>` : ''}
       <td class="nowrap">${o.scheduled_at ? dt(o.scheduled_at) : '—'}</td><td>${esc(o.technician_name || '—')}</td></tr>`).join('')}</tbody></table></div>`;
@@ -2583,7 +2589,7 @@ async function viewServiceOrders(v) {
     const d = await api('service_orders', { params: { status: f.status, q: f.q } });
     labels = d.statuses;
     $('#list', v).innerHTML = d.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Nº</th><th>Cliente</th><th>Equipamento</th><th>Tipo</th><th>Técnico</th><th>Agendada</th><th>Status</th></tr></thead><tbody>
-      ${d.rows.map((r) => `<tr class="click" data-id="${r.id}"><td class="nowrap">#${r.id}</td><td><strong>${soCustomer(r)}</strong></td><td>${esc(r.equipment_name || '—')}</td>
+      ${d.rows.map((r) => `<tr class="click" data-id="${r.id}"><td class="nowrap">#${r.number ?? r.id}</td><td><strong>${soCustomer(r)}</strong></td><td>${esc(r.equipment_name || '—')}</td>
         <td>${esc(r.task_type_name || '—')}</td><td>${esc(r.technician_name || '—')}</td><td class="nowrap">${r.scheduled_at ? dt(r.scheduled_at) : '—'}</td>
         <td>${soStatusHtml(r.status, labels)}</td></tr>`).join('')}</tbody></table></div>`
       : '<div class="empty">Nenhuma ordem de serviço aqui. Clique em <strong>Nova ordem</strong>.</div>';
@@ -2747,7 +2753,7 @@ function reviewItemModal(r, kinds, all, onDone) {
   const units = (state.meta && state.meta.units) || ['un'];
   const m = modal({
     title: `Revisar ${svc ? 'serviço' : 'peça'} novo`,
-    body: `<p class="small muted">Lançado ${r.user_name ? `por ${esc(r.user_name)} ` : ''}na OS #${r.order_id}${r.customer_name ? ` · ${esc(r.customer_trade_name || r.customer_name)}` : ''}: <strong>${esc(r.description)}</strong> · ${qty(r.quantity)} × ${money(r.unit_price)}</p>
+    body: `<p class="small muted">Lançado ${r.user_name ? `por ${esc(r.user_name)} ` : ''}na OS #${r.order_number ?? r.order_id}${r.customer_name ? ` · ${esc(r.customer_trade_name || r.customer_name)}` : ''}: <strong>${esc(r.description)}</strong> · ${qty(r.quantity)} × ${money(r.unit_price)}</p>
       <div class="seg" id="rvtabs"><button type="button" data-rv="cadastrar" class="on">Cadastrar</button><button type="button" data-rv="vincular">Já está cadastrado</button><button type="button" data-rv="recusar">Recusar</button></div>
       <form class="form" id="rvf">
         <div data-rvp="cadastrar"><label>Nome no cadastro <input name="name" maxlength="200" value="${esc(r.description)}"></label>
@@ -2861,7 +2867,7 @@ async function viewServiceOrderForm(v, id) {
     return `<button class="${cls}" data-to="${s}">${icon(s === 'pausada' ? 'minusc' : s === 'a_caminho' ? 'truck' : 'check')}${esc(label)}</button>`;
   }).join('');
 
-  v.innerHTML = `<div class="page-head" id="sohead"><div><p class="small"><a href="#/ordens">← Ordens de serviço</a></p><h1>Ordem de serviço #${o.id}</h1>
+  v.innerHTML = `<div class="page-head" id="sohead"><div><p class="small"><a href="#/ordens">← Ordens de serviço</a></p><h1>Ordem de serviço #${o.number ?? o.id}</h1>
       <p class="muted">${soStatusHtml(o.status, form.statuses)} · ${esc(cust)}${o.task_type_name ? ` · ${esc(o.task_type_name)}` : ''}${o.scheduled_at ? ` · ${dt(o.scheduled_at)}` : ''}</p></div>
     <div class="actions">
       <span class="inline js-view-only">${transitions}
@@ -3281,10 +3287,10 @@ async function viewServiceOrderForm(v, id) {
     });
     const extras = it.rows.filter((r) => r.kind === 'custo').map((r) => ({ description: r.description, amount: +r.total }));
     sessionStorage.setItem('quoteFromOs', JSON.stringify({
-      service_order_id: o.id,
+      service_order_id: o.id, service_order_number: o.number ?? o.id,
       customer: { id: o.customer_id, name: o.customer_name, trade_name: o.customer_trade_name, document: o.customer_document, phone: o.customer_phone, email: o.customer_email },
       items, extras,
-      notes: `Referente à ordem de serviço #${o.id}${o.task_type_name ? ` (${o.task_type_name})` : ''}.${o.report ? `\n${o.report}` : o.description ? `\n${o.description}` : ''}`,
+      notes: `Referente à ordem de serviço #${o.number ?? o.id}${o.task_type_name ? ` (${o.task_type_name})` : ''}.${o.report ? `\n${o.report}` : o.description ? `\n${o.description}` : ''}`,
     }));
     toast(items.length || extras.length ? 'Orçamento preenchido com os itens da OS: confira e salve.' : 'Orçamento com o cliente da OS: inclua os itens e salve.');
     go('orcamento/novo');
@@ -3296,10 +3302,10 @@ async function viewServiceOrderForm(v, id) {
     if (a.dataset.act === 'email') sendModal('os');
     if (a.dataset.act === 'survey') sendModal('pesquisa');
     if (a.dataset.act === 'quote') openQuote();
-    if (a.dataset.act === 'qlink') pickQuoteModal(o.customer_id, o.id, async (qid) => { await api('quote_link_os', { body: { id: qid, service_order_id: o.id } }); toast(`Orçamento #${qid} associado à OS`); route(); });
+    if (a.dataset.act === 'qlink') pickQuoteModal(o.customer_id, o.id, async (qid) => { await api('quote_link_os', { body: { id: qid, service_order_id: o.id } }); toast(`Orçamento #${qid} associado à OS`); route(); }, o.number ?? o.id);
     if (a.dataset.act === 'whats') {
       const phone = String(o.customer_phone || '').replace(/\D/g, '');
-      const msg = `Olá${cust ? ', ' + cust.split(' ')[0] : ''}! Segue a ordem de serviço #${o.id}: ${done ? o.survey_url : o.public_url}`;
+      const msg = `Olá${cust ? ', ' + cust.split(' ')[0] : ''}! Segue a ordem de serviço #${o.number ?? o.id}: ${done ? o.survey_url : o.public_url}`;
       window.open(`https://wa.me/${phone.length >= 10 ? '55' + phone : ''}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener');
     }
   });
@@ -3549,7 +3555,7 @@ async function viewAgenda(v) {
     const s = agParse(st.date).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
     return s.charAt(0).toUpperCase() + s.slice(1);
   };
-  const tip = (o) => `OS #${o.id}\nStatus: ${o.status_label}\nTipo: ${o.task_type_name || '—'}\nCliente: ${agCust(o)}\nTécnico: ${o.technician_name || '—'}\nDuração: ${agDur(o)} min`;
+  const tip = (o) => `OS #${o.number ?? o.id}\nStatus: ${o.status_label}\nTipo: ${o.task_type_name || '—'}\nCliente: ${agCust(o)}\nTécnico: ${o.technician_name || '—'}\nDuração: ${agDur(o)} min`;
   const chip = (o, showTech = true) => `<div class="ag-chip ${o.status}" ${AG_OPEN.includes(o.status) && can('ordens.reschedule') ? 'draggable="true"' : ''} data-id="${o.id}" data-tech="${o.technician_id || ''}" data-hm="${agHm(o.scheduled_at)}" title="${esc(tip(o))}">${o.scheduled_at ? `<b>${agHm(o.scheduled_at)}</b> ` : ''}${esc(agCust(o))}${showTech && o.technician_name ? ` – ${esc(o.technician_name)}` : ''}</div>`;
 
   // ---- Reagendar (arrastar ou escolher data)
@@ -3596,14 +3602,14 @@ async function viewAgenda(v) {
     unbox.innerHTML = `<div class="card-head"><h2>OS sem agendamento <span class="badge">${list.length}</span></h2>
         <button class="btn sm" id="ag-untog">${st.unOpen ? 'Recolher' : 'Mostrar'}</button></div>` + (!st.unOpen ? '' : list.length
       ? `<div class="ag-un">${list.map((o) => `<div class="ag-un-item" draggable="true" data-un="${o.id}" data-tech="${o.technician_id || ''}" data-hm="">
-          <div><strong>#${o.id} · ${esc(agCust(o))}</strong><div class="small muted">${esc(o.task_type_name || 'Sem tipo de tarefa')} · ${esc(String(o.description).slice(0, 90))}</div></div>
+          <div><strong>#${o.number ?? o.id} · ${esc(agCust(o))}</strong><div class="small muted">${esc(o.task_type_name || 'Sem tipo de tarefa')} · ${esc(String(o.description).slice(0, 90))}</div></div>
           <button class="btn sm" data-sched="${o.id}">Agendar</button></div>`).join('')}</div>`
       : '<p class="muted small">Nenhuma OS aguardando agendamento. Ordens novas sem data aparecem aqui.</p>');
   };
   const paintLista = () => {
     const rows = data.rows;
     body.innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Nº</th><th>Data/hora</th><th>Cliente</th><th>Equipamento</th><th>Tipo de tarefa</th><th>Técnico</th><th>Status</th></tr></thead><tbody>
-      ${rows.map((o) => `<tr class="click" data-go="${o.id}"><td class="nowrap">#${o.id}</td><td class="nowrap">${o.scheduled_at ? dt(o.scheduled_at) : '—'}</td>
+      ${rows.map((o) => `<tr class="click" data-go="${o.id}"><td class="nowrap">#${o.number ?? o.id}</td><td class="nowrap">${o.scheduled_at ? dt(o.scheduled_at) : '—'}</td>
         <td><strong>${esc(agCust(o))}</strong></td><td>${esc(o.equipment_name || '—')}</td><td>${esc(o.task_type_name || '—')}</td>
         <td>${esc(o.technician_name || '—')}</td><td>${soStatusHtml(o.status, data.statuses)}</td></tr>`).join('')}</tbody></table></div>`
       : `<div class="empty">${st.late ? 'Nenhuma OS atrasada.' : 'Nenhuma OS agendada neste período.'}</div>`;
@@ -3737,7 +3743,7 @@ async function viewAgenda(v) {
   const scheduleModal = (o) => {
     if (!o) return;
     const m = modal({
-      title: `Agendar OS #${o.id}`,
+      title: `Agendar OS #${o.number ?? o.id}`,
       body: `<form class="form" id="agf">
         <p class="small muted">${esc(agCust(o))} · ${esc(o.task_type_name || 'Sem tipo de tarefa')}</p>
         <div class="grid two"><label>Data <input type="date" name="day" required value="${o.scheduled_at ? o.scheduled_at.slice(0, 10) : st.date}"></label>
@@ -3763,7 +3769,7 @@ async function viewItemsReview(v) {
   const all = await products(true).catch(() => []);
   v.innerHTML = `<div class="page-head"><div><h1>Itens para revisar</h1><p class="muted">Peças e serviços que os técnicos lançaram nas ordens de serviço e ainda não estão no cadastro. Cadastre, ligue a um item que já existe ou recuse.</p></div></div>
     <div class="card">${d.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Item</th><th>Tipo</th><th>Ordem de serviço</th><th class="num">Qtd.</th><th class="num">Valor unit.</th><th>Lançado por</th><th></th></tr></thead><tbody>
-      ${d.rows.map((r) => `<tr><td><strong>${esc(r.description)}</strong></td><td>${esc(d.kinds[r.kind])}</td><td><a href="#/ordem/${r.order_id}">#${r.order_id}</a> · ${soCustomer(r)}</td>
+      ${d.rows.map((r) => `<tr><td><strong>${esc(r.description)}</strong></td><td>${esc(d.kinds[r.kind])}</td><td><a href="#/ordem/${r.order_id}">#${r.order_number ?? r.order_id}</a> · ${soCustomer(r)}</td>
         <td class="num">${qty(r.quantity)}</td><td class="num">${money(r.unit_price)}</td><td class="small">${esc(r.user_name || '—')}<div class="muted">${dt(r.created_at)}</div></td>
         <td class="num"><button class="btn sm primary" data-rv="${r.id}">${icon('check')}Revisar</button></td></tr>`).join('')}</tbody></table></div>`
       : '<div class="empty">Nenhum item aguardando revisão.</div>'}</div>`;
@@ -4515,24 +4521,24 @@ async function pickOsModal(customerId, currentId, onPick) {
   const m = modal({ title: 'Associar ordem de serviço', wide: true,
     body: rows.length ? `<p class="small muted">Ordens de serviço deste cliente. Escolha a que será associada ao orçamento.</p>
       <div class="table-wrap"><table><thead><tr><th>OS</th><th>Tipo</th><th>Situação</th><th>Descrição</th><th>Criada em</th></tr></thead><tbody>
-      ${rows.map((o) => `<tr class="click" data-pick="${o.id}"><td><strong>#${o.id}</strong></td><td>${esc(o.task_type_name || '—')}</td><td>${esc((d.statuses[o.status] || {}).label || d.statuses[o.status] || o.status)}</td>
+      ${rows.map((o) => `<tr class="click" data-pick="${o.id}"><td><strong>#${o.number ?? o.id}</strong></td><td>${esc(o.task_type_name || '—')}</td><td>${esc((d.statuses[o.status] || {}).label || d.statuses[o.status] || o.status)}</td>
         <td>${esc(String(o.description || '').slice(0, 80))}</td><td>${dOnly(o.created_at)}</td></tr>`).join('')}</tbody></table></div>`
       : '<p class="muted">Este cliente não tem outra ordem de serviço para associar.</p>',
     foot: '<button class="btn" data-close>Fechar</button>' });
   m.el.addEventListener('click', async (e) => {
     const r = e.target.closest('[data-pick]'); if (!r) return;
-    try { await onPick(+r.dataset.pick); m.close(); } catch (err) { fail(err); }
+    try { await onPick(+r.dataset.pick, (rows.find((o) => +o.id === +r.dataset.pick) || {}).number); m.close(); } catch (err) { fail(err); }
   });
 }
 
 // Escolher um orçamento já criado do cliente para associar à OS
-async function pickQuoteModal(customerId, osId, onPick) {
+async function pickQuoteModal(customerId, osId, onPick, osNo) {
   const d = await api('quotes', { params: { customer_id: customerId, limit: 200 } });
   const rows = d.rows.filter((q) => q.status !== 'vendido' && +q.service_order_id !== +osId);
   const m = modal({ title: 'Associar orçamento', wide: true,
-    body: rows.length ? `<p class="small muted">Orçamentos deste cliente ainda não vendidos. Escolha o que será associado à OS #${osId}.${rows.some((q) => q.service_order_id) ? ' Os que já têm outra OS passam a apontar para esta.' : ''}</p>
+    body: rows.length ? `<p class="small muted">Orçamentos deste cliente ainda não vendidos. Escolha o que será associado à OS #${osNo ?? osId}.${rows.some((q) => q.service_order_id) ? ' Os que já têm outra OS passam a apontar para esta.' : ''}</p>
       <div class="table-wrap"><table><thead><tr><th>Orçamento</th><th>Status</th><th class="num">Total</th><th>Criado em</th><th>OS atual</th></tr></thead><tbody>
-      ${rows.map((q) => `<tr class="click" data-pick="${q.id}"><td><strong>#${q.id}</strong></td><td>${qBadge(q.status)}</td><td class="num">${money(q.total)}</td><td>${dOnly(q.request_date)}</td><td>${q.service_order_id ? '#' + q.service_order_id : '—'}</td></tr>`).join('')}</tbody></table></div>`
+      ${rows.map((q) => `<tr class="click" data-pick="${q.id}"><td><strong>#${q.id}</strong></td><td>${qBadge(q.status)}</td><td class="num">${money(q.total)}</td><td>${dOnly(q.request_date)}</td><td>${q.service_order_id ? '#' + (q.service_order_number ?? q.service_order_id) : '—'}</td></tr>`).join('')}</tbody></table></div>`
       : '<p class="muted">Este cliente não tem orçamento disponível para associar.</p>',
     foot: '<button class="btn" data-close>Fechar</button>' });
   m.el.addEventListener('click', async (e) => {
@@ -4621,8 +4627,8 @@ async function viewQuoteForm(v, id) {
             ${can('orcamentos.add') ? `<button type="button" role="menuitem" data-act="dup">${icon('copy')}Duplicar</button>` : ''}
             ${sold || !can('orcamentos.delete') ? '' : `<button type="button" role="menuitem" data-act="del" class="danger">${icon('trash')}Excluir</button>`}
           </div></div>`}</div></div>
-    ${!isNew && (q.service_orders || []).length ? `<div class="alert info q-os">${icon('tool')}<span>${q.service_orders.map((so) => `${+so.id === +q.service_order_id ? 'Associado à' : 'Gerou a'} <a href="#/ordem/${so.id}"><strong>OS #${so.id}</strong></a> (${esc(so.status_label)})${!editing && !sold && can('orcamentos.edit') && +so.id === +q.service_order_id ? ` <button type="button" class="btn sm" data-act="sodel">${icon('x')}Desassociar</button>` : ''}`).join(' · ')}</span></div>` : ''}
-    ${isNew && fromOs ? `<div class="alert info q-os">${icon('tool')}<span>Orçamento da <a href="#/ordem/${fromOs.service_order_id}"><strong>OS #${fromOs.service_order_id}</strong></a>: confira os itens e salve.</span></div>` : ''}
+    ${!isNew && (q.service_orders || []).length ? `<div class="alert info q-os">${icon('tool')}<span>${q.service_orders.map((so) => `${+so.id === +q.service_order_id ? 'Associado à' : 'Gerou a'} <a href="#/ordem/${so.id}"><strong>OS #${so.number ?? so.id}</strong></a> (${esc(so.status_label)})${!editing && !sold && can('orcamentos.edit') && +so.id === +q.service_order_id ? ` <button type="button" class="btn sm" data-act="sodel">${icon('x')}Desassociar</button>` : ''}`).join(' · ')}</span></div>` : ''}
+    ${isNew && fromOs ? `<div class="alert info q-os">${icon('tool')}<span>Orçamento da <a href="#/ordem/${fromOs.service_order_id}"><strong>OS #${fromOs.service_order_number ?? fromOs.service_order_id}</strong></a>: confira os itens e salve.</span></div>` : ''}
     ${sold ? `<div class="alert ok">Este orçamento virou a <a href="#/venda/${q.sale_id}"><strong>venda #${q.sale_id}</strong></a> e não pode mais ser alterado. Use <strong>Duplicar</strong> para fazer um parecido.</div>` : ''}
     ${editing && q.client_response ? `<div class="alert ${q.status === 'recusado' ? 'err' : 'ok'}">Resposta do cliente: “${esc(q.client_response)}”</div>` : ''}
     ${editing && !isNew && ['aprovado', 'recusado'].includes(q.status) && q.status_changed_at ? `<p class="muted small" style="margin-top:-8px">${Q_STATUS[q.status].label} em ${dt(q.status_changed_at)}</p>` : ''}
@@ -4691,7 +4697,7 @@ async function viewQuoteForm(v, id) {
   const paintOs = () => {
     const box = $('#soassoc', v); if (!box) return;
     const c = st.customer;
-    if (st.so) box.innerHTML = `<div class="inline" style="gap:6px"><a href="#/ordem/${st.so.id}"><strong>OS #${st.so.id}</strong></a>
+    if (st.so) box.innerHTML = `<div class="inline" style="gap:6px"><a href="#/ordem/${st.so.id}"><strong>OS #${st.so.number ?? st.so.id}</strong></a>
       <button type="button" class="btn sm" data-so="pick">Trocar</button><button type="button" class="btn sm" data-so="del">${icon('x')}Remover</button></div>`;
     else box.innerHTML = `<button type="button" class="btn sm" data-so="pick" ${st.target === 'cliente' && c ? '' : 'disabled'}>${icon('tool')}Associar OS</button>
       ${st.target === 'cliente' && c ? '' : '<p class="help" style="margin:2px 0 0">Escolha o cliente primeiro.</p>'}`;
@@ -4699,7 +4705,7 @@ async function viewQuoteForm(v, id) {
   if ($('#soassoc', v)) $('#soassoc', v).onclick = (e) => {
     const b = e.target.closest('[data-so]'); if (!b) return;
     if (b.dataset.so === 'del') { st.so = null; return paintOs(); }
-    pickOsModal(st.customer.id, st.so && st.so.id, async (osId) => { st.so = { id: osId, cust: st.customer.id }; paintOs(); });
+    pickOsModal(st.customer.id, st.so && st.so.id, async (osId, osNo) => { st.so = { id: osId, number: osNo, cust: st.customer.id }; paintOs(); });
   };
   $$('input[name=target]', v).forEach((r) => (r.onchange = () => { st.target = r.value; paintTarget(); }));
   $('#pickc', v).onclick = () => customerBrowser({ selected: st.customer, onSelect: (c) => { st.customer = c; paintTarget(); } });
@@ -4876,7 +4882,7 @@ async function viewQuoteForm(v, id) {
           toast(`Status: ${(Q_STATUS[r.status] || {}).label || r.status}`); route(); break;
         }
         case 'soassoc':
-          await pickOsModal(q.customer_id, q.service_order_id, async (osId) => { await api('quote_link_os', { body: { id: q.id, service_order_id: osId } }); toast(`OS #${osId} associada ao orçamento`); route(); });
+          await pickOsModal(q.customer_id, q.service_order_id, async (osId, osNo) => { await api('quote_link_os', { body: { id: q.id, service_order_id: osId } }); toast(`OS #${osNo ?? osId} associada ao orçamento`); route(); });
           break;
         case 'os': {
           // Nova OS (não salva) ligada a este orçamento, com o cliente e o que foi orçado
@@ -6238,6 +6244,51 @@ async function viewReports(v) {
 }
 
 // ============ Usuários e conta ============
+/** Superadmin → Empresas: cria, edita, ativa e desativa as empresas do sistema (cada uma com seus dados, usuários e configurações). */
+async function viewCompanies(v) {
+  if (!isSuper()) { v.innerHTML = '<div class="alert err">Apenas o superadmin.</div>'; return; }
+  const rows = await api('companies');
+  v.innerHTML = `<div class="page-head"><div><h1>Empresas</h1><p class="muted">Cada empresa tem os próprios clientes, produtos, vendas, ordens de serviço, usuários e configurações. Você administra as empresas, mas não enxerga os dados delas.</p></div>
+    <div class="actions"><a class="btn" href="api.php?r=backup_all">${icon('download')}Backup de todas (.sql)</a><button class="btn primary" id="new">${icon('plus')}Nova empresa</button></div></div>
+    <div class="card"><div class="table-wrap"><table><thead><tr><th>Empresa</th><th>Código</th><th>CNPJ/CPF</th><th>Usuários</th><th>Situação</th><th></th></tr></thead><tbody>
+      ${rows.map((c) => `<tr><td><strong>${esc(c.name)}</strong></td><td><code>${esc(c.slug)}</code></td><td>${esc(c.document ? docMask(c.document) : '—')}</td><td class="num">${c.users}</td>
+        <td>${+c.active ? '<span class="badge ok">ativa</span>' : '<span class="badge">desativada</span>'}</td>
+        <td class="num"><button class="btn sm" data-edit="${c.id}">Editar</button> <button class="btn sm ${+c.active ? 'ghost danger' : ''}" data-toggle="${c.id}">${+c.active ? 'Desativar' : 'Ativar'}</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Nenhuma empresa.</td></tr>'}
+    </tbody></table></div></div>`;
+  const form = (c) => {
+    const m = modal({
+      title: c ? 'Editar empresa' : 'Nova empresa',
+      body: `<form class="form" id="cf">
+        <label>Nome da empresa <input name="name" required maxlength="160" value="${esc(c?.name)}"></label>
+        <label>CNPJ/CPF <input name="document" data-mask="doc" inputmode="numeric" value="${esc(c?.document ? docMask(c.document) : '')}"></label>
+        <label>Código (usado no nome dos backups) <input name="slug" maxlength="60" value="${esc(c?.slug)}" placeholder="gerado a partir do nome"></label>
+        ${c ? '' : `<h3 style="margin:8px 0 0">Administrador da empresa</h3>
+        <label>Nome <input name="admin_name" required></label>
+        <label>E-mail (login) <input name="admin_email" type="email" required autocomplete="off"></label>
+        <label>Senha inicial <input name="admin_password" type="text" minlength="8" required autocomplete="off" placeholder="mínimo 8 caracteres"></label>`}
+      </form>`,
+      foot: '<button class="btn" data-close>Cancelar</button><button class="btn primary" id="save">Salvar</button>',
+    });
+    $('#save', m.el).onclick = (e) => busy(e.target, async () => {
+      const f = $('#cf', m.el);
+      if (!f.reportValidity()) return;
+      const d = formData(f);
+      const body = { id: c?.id, name: d.name, document: d.document, slug: d.slug };
+      if (!c) body.admin = { name: d.admin_name, email: d.admin_email, password: d.admin_password };
+      await api('company_save', { body }); m.close(); toast(c ? 'Empresa salva' : 'Empresa criada'); route();
+    });
+  };
+  ($('#new', v) || {}).onclick = () => form(null);
+  v.addEventListener('click', async (e) => {
+    const ed = e.target.closest('[data-edit]'); if (ed) return form(rows.find((c) => c.id == ed.dataset.edit));
+    const tg = e.target.closest('[data-toggle]'); if (!tg) return;
+    const c = rows.find((x) => x.id == tg.dataset.toggle);
+    const off = +c.active === 1;
+    if (!(await confirmBox(off ? `Desativar "${c.name}"? Os usuários dela não conseguem mais entrar (web e aplicativo) até você ativar de novo. Os dados são mantidos.` : `Ativar "${c.name}" de novo?`, { ok: off ? 'Desativar' : 'Ativar', danger: off }))) return;
+    busy(tg, async () => { await api('company_toggle', { body: { id: c.id, active: off ? 0 : 1 } }); toast(off ? 'Empresa desativada' : 'Empresa ativada'); route(); });
+  });
+}
+
 async function viewUsers(v) {
   if (!isAdmin()) { v.innerHTML = '<div class="alert err">Apenas administradores.</div>'; return; }
   const [rows, { profiles }] = await Promise.all([api('users'), api('profiles')]);
@@ -6404,7 +6455,7 @@ async function viewAppearance(v) {
 }
 
 async function viewAccount(v) {
-  v.innerHTML = `<div class="page-head"><div><h1>Minha conta</h1><p class="muted">${esc(state.me.name)} · ${esc(state.me.email)}</p></div></div>
+  v.innerHTML = `<div class="page-head"><div><h1>Minha conta</h1><p class="muted">${esc(state.me.name)} · ${esc(state.me.email)}${state.company ? ` · Empresa: <strong>${esc(state.company.name)}</strong>` : isSuper() ? ' · Superadmin' : ''}</p></div></div>
     <div class="card" style="max-width:560px"><h2>Foto de perfil</h2><div class="avatar-row" id="myav">${avatarHtml(state.me, 'lg')}
       <div class="form" style="gap:8px"><div class="inline"><button type="button" class="btn" data-av="up">${icon('upload')}Enviar foto</button><button type="button" class="btn ghost danger" data-av="del" ${state.me.avatar ? '' : 'hidden'}>Remover</button></div>
       <span class="help">Aparece no menu e na lista de usuários. A imagem é recortada em quadrado e reduzida no seu aparelho.</span></div></div></div>
@@ -6669,7 +6720,7 @@ async function tkOrder(v, id, page, sub) {
     return `<button class="tk-act ${s === 'concluida' || s === 'em_execucao' ? 'p' : ''}" data-to="${s}">${icon(ic)}${l}</button>`;
   }).join('');
   v.innerHTML = `<div class="tk-top">${tkBackBtn(back)}${tkMenuBtn()}</div>
-    <div class="tk-ohead"><div><h1>${esc(cust)}</h1><span class="tk-sub">Tarefa #${o.id}</span>
+    <div class="tk-ohead"><div><h1>${esc(cust)}</h1><span class="tk-sub">Tarefa #${o.number ?? o.id}</span>
       <div class="tk-tags"><span class="tk-st ${tkStatusCls(o.status)}">${esc(o.status_label.toLowerCase())}</span>${pend.length && o.status !== 'concluida' ? `<span class="tk-tag warn">${pend.length} pendência${pend.length > 1 ? 's' : ''}</span>` : ''}</div></div>
       <div class="tk-oacts">${phone ? `<a class="tk-ib b" href="tel:${phone}" aria-label="Ligar">${icon('phone')}</a>` : ''}${can('app.switch') && o.status !== 'concluida' ? `<a class="tk-ib b" href="#/ordem/${o.id}" id="tkedit" aria-label="Editar na versão completa">${icon('pencil')}</a>` : ''}<button class="tk-ib b" id="tkshare" aria-label="Compartilhar">${icon('share')}</button></div></div>
     ${o.status === 'concluida' ? `<div class="tk-lock">${icon('lock')}<span>Check-out feito: a ordem está concluída. Pelo celular dá só para consultar; para alterar, use o computador.</span></div>` : ''}
@@ -6710,7 +6761,7 @@ async function tkOrder(v, id, page, sub) {
   });
   if ($('#tkedit', v)) $('#tkedit', v).onclick = () => tkMode('off');
   $('#tkshare', v).onclick = async () => {
-    try { if (navigator.share) await navigator.share({ title: `OS #${o.id}`, url: o.public_url }); else await copyLink(o.public_url, 'Link da OS digital copiado'); } catch (_) {}
+    try { if (navigator.share) await navigator.share({ title: `OS #${o.number ?? o.id}`, url: o.public_url }); else await copyLink(o.public_url, 'Link da OS digital copiado'); } catch (_) {}
   };
   $$('[data-to]', v).forEach((b) => (b.onclick = () => busy(b, async () => {
     const to = b.dataset.to;
@@ -6783,7 +6834,7 @@ async function tkOrderPage(v, D, page, sub) {
         <label class="tk-field">CPF/CNPJ de quem assinou<input id="tksd" data-mask="doc" inputmode="numeric" ${ro ? 'disabled' : ''} value="${esc(o.signer_doc ? docFmt(o.signer_doc) : '')}"></label></div>
       <div class="tk-card"><label class="tk-field">Enviar a OS digital para o e-mail<input id="tkmail" type="email" value="${esc(o.customer_email || '')}" placeholder="email@cliente.com"></label>
         <button class="tk-btn" id="tksend">${icon('mail')}Enviar por e-mail</button>
-        <a class="tk-btn" target="_blank" rel="noopener" href="https://wa.me/${String(o.customer_phone || '').replace(/\D/g, '').length >= 10 ? '55' + String(o.customer_phone).replace(/\D/g, '') : ''}?text=${encodeURIComponent(`Ordem de serviço #${o.id}: ${o.public_url}`)}">${icon('whats')}Enviar pelo WhatsApp</a></div>`;
+        <a class="tk-btn" target="_blank" rel="noopener" href="https://wa.me/${String(o.customer_phone || '').replace(/\D/g, '').length >= 10 ? '55' + String(o.customer_phone).replace(/\D/g, '') : ''}?text=${encodeURIComponent(`Ordem de serviço #${o.number ?? o.id}: ${o.public_url}`)}">${icon('whats')}Enviar pelo WhatsApp</a></div>`;
     paint();
     $('#tksig', v).onclick = async () => { if (ro) return; const s = await signaturePad('Assinatura do cliente'); if (s) { sig = s; v._dirty = true; paint(); } };
     const sd = $('#tksigdel', v); if (sd) sd.onclick = () => { sig = ''; v._dirty = true; paint(); sd.remove(); };

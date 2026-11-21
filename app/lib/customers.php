@@ -20,7 +20,7 @@ class Customers
     public static function get(int $id, string $table = 'customers'): array
     {
         $table = self::table($table);
-        $c = DB::one("SELECT * FROM $table WHERE id = ?", [$id]);
+        $c = DB::one("SELECT * FROM $table WHERE id = ? AND company_id = ?", [$id, Tenant::need()]);
         if (!$c) throw new AppError(($table === 'suppliers' ? 'Fornecedor' : 'Cliente') . ' não encontrado', 404);
         return $c;
     }
@@ -28,7 +28,7 @@ class Customers
     /** Cria o cliente "Consumidor final" para vendas de balcão sem identificação. */
     public static function ensureDefault(): int
     {
-        $id = DB::val('SELECT id FROM customers WHERE name = ? AND document IS NULL ORDER BY id LIMIT 1', [self::DEFAULT_NAME]);
+        $id = DB::val('SELECT id FROM customers WHERE name = ? AND document IS NULL AND company_id = ? ORDER BY id LIMIT 1', [self::DEFAULT_NAME, Tenant::need()]);
         if ($id) return (int)$id;
         return DB::insert('customers', [
             'type' => 'pf', 'name' => self::DEFAULT_NAME, 'active' => 1,
@@ -46,7 +46,7 @@ class Customers
         if ($doc !== '') {
             if ($type === 'pj' && !self::validCnpj($doc)) throw new AppError('CNPJ inválido. Confira os números.');
             if ($type === 'pf' && !self::validCpf($doc)) throw new AppError('CPF inválido. Confira os números.');
-            $dup = DB::one("SELECT id, name, deleted_at FROM $table WHERE document = ?" . ($id ? ' AND id <> ?' : ''), $id ? [$doc, $id] : [$doc]);
+            $dup = DB::one("SELECT id, name, deleted_at FROM $table WHERE company_id = ? AND document = ?" . ($id ? ' AND id <> ?' : ''), $id ? [Tenant::need(), $doc, $id] : [Tenant::need(), $doc]);
             // Cadastro novo com o documento de um excluído: o excluído volta, com os dados novos (mantém o histórico)
             if ($dup && $dup['deleted_at'] && !$id) $restore = (int)$dup['id'];
             elseif ($dup) throw new AppError("Já existe um $who " . ($dup['deleted_at'] ? 'excluído ' : '') . 'com este ' . ($type === 'pj' ? 'CNPJ' : 'CPF') . ': ' . $dup['name']);
@@ -88,7 +88,7 @@ class Customers
         $doc = preg_replace('/\D/', '', (string)$doc);
         $name = trim((string)$name);
         if ($doc !== '') {
-            $id = DB::val('SELECT id FROM suppliers WHERE document = ?', [$doc]);
+            $id = DB::val('SELECT id FROM suppliers WHERE document = ? AND company_id = ?', [$doc, Tenant::need()]);
             if ($id) { self::undelete((int)$id); return (int)$id; }
             $valid = strlen($doc) === 14 ? self::validCnpj($doc) : (strlen($doc) === 11 && self::validCpf($doc));
             if ($valid) {
@@ -97,7 +97,7 @@ class Customers
             }
         }
         if ($name === '') return null;
-        $id = DB::val('SELECT id FROM suppliers WHERE (LOWER(name) = LOWER(?) OR LOWER(trade_name) = LOWER(?)) AND deleted_at IS NULL ORDER BY id LIMIT 1', [$name, $name]);
+        $id = DB::val('SELECT id FROM suppliers WHERE (LOWER(name) = LOWER(?) OR LOWER(trade_name) = LOWER(?)) AND deleted_at IS NULL AND company_id = ? ORDER BY id LIMIT 1', [$name, $name, Tenant::need()]);
         if ($id) return (int)$id;
         return DB::insert('suppliers', ['type' => 'pj', 'name' => mb_substr($name, 0, 200), 'active' => 1, 'created_at' => now(), 'updated_at' => now()]);
     }
@@ -105,7 +105,7 @@ class Customers
     /** Fornecedor excluído que aparece de novo numa nota importada volta para o cadastro. */
     private static function undelete(int $id): void
     {
-        if (DB::val('SELECT deleted_at FROM suppliers WHERE id = ?', [$id])) DB::update('suppliers', $id, ['deleted_at' => null, 'active' => 1, 'updated_at' => now()]);
+        if (DB::val('SELECT deleted_at FROM suppliers WHERE id = ? AND company_id = ?', [$id, Tenant::need()])) DB::update('suppliers', $id, ['deleted_at' => null, 'active' => 1, 'updated_at' => now()]);
     }
 
     // ---------- Validação ----------

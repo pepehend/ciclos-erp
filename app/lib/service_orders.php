@@ -10,7 +10,7 @@ class Equipments
     public static function get(int $id): array
     {
         $e = DB::one('SELECT e.*, c.name customer_name, c.trade_name customer_trade_name FROM equipments e
-            JOIN customers c ON c.id = e.customer_id WHERE e.id = ?', [$id]);
+            JOIN customers c ON c.id = e.customer_id WHERE e.id = ? AND e.company_id = ?', [$id, Tenant::need()]);
         if (!$e) throw new AppError('Equipamento não encontrado', 404);
         $e['specs'] = self::specsList($e);
         return $e;
@@ -18,7 +18,7 @@ class Equipments
 
     public static function list(array $f): array
     {
-        $w = ['1=1']; $p = [];
+        $w = ['e.company_id = ?']; $p = [Tenant::need()];
         $w[] = 'e.deleted_at IS NULL';
         if (empty($f['all'])) { $w[] = 'e.active = 1'; }
         if (!empty($f['customer_id'])) { $w[] = 'e.customer_id = ?'; $p[] = (int)$f['customer_id']; }
@@ -41,7 +41,7 @@ class Equipments
         $customerId = (int)($in['customer_id'] ?? 0);
         if (!$customerId) throw new AppError('Selecione o cliente do equipamento');
         Customers::get($customerId);
-        Removals::check('customers', $customerId, $id ? (int)DB::val('SELECT customer_id FROM equipments WHERE id = ?', [$id]) : null);
+        Removals::check('customers', $customerId, $id ? (int)DB::val('SELECT customer_id FROM equipments WHERE id = ? AND company_id = ?', [$id, Tenant::need()]) : null);
         $data = [
             'customer_id' => $customerId,
             'name' => mb_substr($name, 0, 120),
@@ -128,7 +128,11 @@ class ServiceOrders
     /** Filtro SQL do técnico (vazio quando vê todas). */
     private static function techSql(string $col = 'technician_id'): array
     {
-        return self::$onlyTech ? [" AND $col = ?", [self::$onlyTech]] : ['', []];
+        // Sempre filtra pela empresa (as consultas do painel e da agenda acrescentam este trecho ao WHERE)
+        $cc = str_contains($col, '.') ? explode('.', $col)[0] . '.company_id' : 'company_id';
+        $sql = " AND $cc = ?"; $p = [Tenant::need()];
+        if (self::$onlyTech) { $sql .= " AND $col = ?"; $p[] = self::$onlyTech; }
+        return [$sql, $p];
     }
 
     /** Bloqueia alteração de OS concluída sem a permissão "Editar OS depois do check-out". */
@@ -156,7 +160,7 @@ class ServiceOrders
         $lateSql = "status IN ($in) AND ((due_date IS NOT NULL AND due_date < ?) OR (status IN ('aberta','agendada') AND scheduled_at IS NOT NULL AND scheduled_at < ?))";
         $lateP = array_merge(self::OPEN, [$today, $d0], $tp);
         $lateSql .= $ts;
-        $cols = 'o.id, o.status, o.scheduled_at, o.due_date, o.description, c.name customer_name, c.trade_name customer_trade_name,
+        $cols = 'o.id, o.number, o.status, o.scheduled_at, o.due_date, o.description, c.name customer_name, c.trade_name customer_trade_name,
             t.name technician_name, tt.name task_type_name, o.technician_id';
         $from = 'FROM service_orders o JOIN customers c ON c.id = o.customer_id LEFT JOIN users t ON t.id = o.technician_id LEFT JOIN task_types tt ON tt.id = o.task_type_id';
         $survey = DB::one("SELECT COUNT(*) n, AVG(survey_rating) avg FROM service_orders WHERE survey_rating IS NOT NULL AND survey_at >= ?$ts", array_merge([$month], $tp));
@@ -165,9 +169,9 @@ class ServiceOrders
             'by_status' => $byStatus,
             'unscheduled' => (int)DB::val("SELECT COUNT(*) FROM service_orders WHERE status IN ($in) AND scheduled_at IS NULL$ts", array_merge(self::OPEN, $tp)),
             'late_count' => (int)DB::val("SELECT COUNT(*) FROM service_orders WHERE $lateSql", $lateP),
-            'late' => DB::all("SELECT $cols $from WHERE " . str_replace(['status', 'due_date', 'scheduled_at', 'technician_id'], ['o.status', 'o.due_date', 'o.scheduled_at', 'o.technician_id'], $lateSql) . ' ORDER BY COALESCE(o.due_date, o.scheduled_at) LIMIT 5', $lateP),
+            'late' => DB::all("SELECT $cols $from WHERE " . str_replace(['status', 'due_date', 'scheduled_at', 'technician_id', 'company_id'], ['o.status', 'o.due_date', 'o.scheduled_at', 'o.technician_id', 'o.company_id'], $lateSql) . ' ORDER BY COALESCE(o.due_date, o.scheduled_at) LIMIT 5', $lateP),
             'today' => DB::all("SELECT $cols $from WHERE o.scheduled_at BETWEEN ? AND ?$tso ORDER BY o.scheduled_at, o.id LIMIT 20", array_merge([$d0, $d1], $tpo)),
-            'mine_today' => $userId ? (int)DB::val('SELECT COUNT(*) FROM service_orders WHERE technician_id = ? AND scheduled_at BETWEEN ? AND ?', [$userId, $d0, $d1]) : 0,
+            'mine_today' => $userId ? (int)DB::val('SELECT COUNT(*) FROM service_orders WHERE company_id = ? AND technician_id = ? AND scheduled_at BETWEEN ? AND ?', [Tenant::need(), $userId, $d0, $d1]) : 0,
             'done_month' => (int)DB::val("SELECT COUNT(*) FROM service_orders WHERE status = 'concluida' AND finished_at >= ?$ts", array_merge([$month], $tp)),
             'done_today' => (int)DB::val("SELECT COUNT(*) FROM service_orders WHERE status = 'concluida' AND finished_at BETWEEN ? AND ?$ts", array_merge([$d0, $d1], $tp)),
             'survey' => ['count' => (int)$survey['n'], 'avg' => $survey['avg'] !== null ? round((float)$survey['avg'], 1) : null],
@@ -188,10 +192,10 @@ class ServiceOrders
         $to = self::agendaDay($to, 'Período final');
         if ($to < $from || (strtotime($to) - strtotime($from)) > 62 * 86400) throw new AppError('Período inválido');
         $next = (new DateTime($to))->modify('+1 day')->format('Y-m-d');
-        $w = 'o.scheduled_at >= ? AND o.scheduled_at < ?'; $p = [$from . ' 00:00:00', $next . ' 00:00:00'];
+        $w = 'o.company_id = ? AND o.scheduled_at >= ? AND o.scheduled_at < ?'; $p = [Tenant::need(), $from . ' 00:00:00', $next . ' 00:00:00'];
         if (self::$onlyTech) $techId = self::$onlyTech;
         if ($techId) { $w .= ' AND o.technician_id = ?'; $p[] = $techId; }
-        $rows = DB::all("SELECT o.id, o.status, o.scheduled_at, o.due_date, o.description, o.technician_id,
+        $rows = DB::all("SELECT o.id, o.number, o.status, o.scheduled_at, o.due_date, o.description, o.technician_id,
                 c.name customer_name, c.trade_name customer_trade_name, t.name technician_name, tt.name task_type_name
             FROM service_orders o JOIN customers c ON c.id = o.customer_id LEFT JOIN users t ON t.id = o.technician_id
             LEFT JOIN task_types tt ON tt.id = o.task_type_id WHERE $w ORDER BY o.scheduled_at, o.id LIMIT 300", $p);
@@ -210,12 +214,12 @@ class ServiceOrders
         $tech = $mine || self::$onlyTech ? $userId : null;
         $rows = self::techTasks($today, $today, $tech);
         $in = implode(',', array_fill(0, count(self::OPEN), '?'));
-        $tw = $tech ? ' AND technician_id = ?' : '';
-        $tp = $tech ? [$tech] : [];
+        $tw = ' AND company_id = ?' . ($tech ? ' AND technician_id = ?' : '');
+        $tp = $tech ? [Tenant::need(), $tech] : [Tenant::need()];
         $late = (int)DB::val("SELECT COUNT(*) FROM service_orders WHERE status IN ($in) AND ((due_date IS NOT NULL AND due_date < ?)
             OR (status IN ('aberta','agendada') AND scheduled_at IS NOT NULL AND scheduled_at < ?))$tw", array_merge(self::OPEN, [$today, now()], $tp));
         $exec = (int)DB::val("SELECT COUNT(*) FROM service_orders WHERE status IN ('a_caminho','em_execucao')$tw", $tp);
-        $q = DB::one('SELECT COUNT(*) n, COALESCE(SUM(total),0) total FROM quotes WHERE created_at >= ? AND created_at <= ?' . ($tech ? ' AND user_id = ?' : ''),
+        $q = DB::one('SELECT COUNT(*) n, COALESCE(SUM(total),0) total FROM quotes WHERE created_at >= ? AND created_at <= ? AND company_id = ?' . ($tech ? ' AND user_id = ?' : ''),
             array_merge([$today . ' 00:00:00', $today . ' 23:59:59'], $tp));
         return [
             'today' => $rows,
@@ -248,7 +252,7 @@ class ServiceOrders
             LEFT JOIN users u ON u.id = o.user_id
             LEFT JOIN quotes q ON q.id = o.quote_id
             LEFT JOIN task_types tt ON tt.id = o.task_type_id
-            WHERE o.id = ?', [$id]);
+            WHERE o.id = ? AND o.company_id = ?', [$id, Tenant::need()]);
         if (!$o || (self::$onlyTech && (int)$o['technician_id'] !== self::$onlyTech)) throw new AppError('Ordem de serviço não encontrada', 404);
         $o['status_label'] = self::label($o['status']);
         $o['origin_label'] = self::ORIGINS[$o['origin']] ?? $o['origin'];
@@ -258,7 +262,7 @@ class ServiceOrders
 
     public static function list(array $f): array
     {
-        $w = ['1=1']; $p = [];
+        $w = ['o.company_id = ?']; $p = [Tenant::need()];
         $status = (string)($f['status'] ?? 'todas');
         if ($status === 'abertas') { $w[] = 'o.status IN (' . implode(',', array_fill(0, count(self::OPEN), '?')) . ')'; array_push($p, ...self::OPEN); }
         elseif ($status !== '' && $status !== 'todas') {
@@ -270,10 +274,10 @@ class ServiceOrders
         if (!empty($f['equipment_id'])) { $w[] = 'o.equipment_id = ?'; $p[] = (int)$f['equipment_id']; }
         if (($s = trim((string)($f['q'] ?? ''))) !== '') {
             $like = '%' . mb_strtolower($s) . '%';
-            $w[] = '(LOWER(c.name) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(o.description) LIKE ? OR o.id = ?)';
-            array_push($p, $like, $like, $like, (int)$s);
+            $w[] = '(LOWER(c.name) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(o.description) LIKE ? OR o.number = ?)';
+            array_push($p, $like, $like, $like, (int)ltrim($s, '#'));
         }
-        return DB::all("SELECT o.id, o.status, o.origin, o.task_type_id, o.scheduled_at, o.due_date, o.created_at, o.description, o.customer_id, o.equipment_id,
+        return DB::all("SELECT o.id, o.number, o.status, o.origin, o.task_type_id, o.scheduled_at, o.due_date, o.created_at, o.description, o.customer_id, o.equipment_id,
                 c.name customer_name, c.trade_name customer_trade_name, e.name equipment_name, t.name technician_name, tt.name task_type_name
             FROM service_orders o
             JOIN customers c ON c.id = o.customer_id
@@ -288,8 +292,8 @@ class ServiceOrders
     {
         return [
             'equipments' => $customerId ? Equipments::list(['customer_id' => $customerId]) : [],
-            'quotes' => $customerId ? DB::all('SELECT id, status, lead_name, created_at FROM quotes WHERE customer_id = ? ORDER BY id DESC LIMIT 100', [$customerId]) : [],
-            'technicians' => self::$onlyTech ? DB::all('SELECT id, name FROM users WHERE id = ?', [self::$onlyTech]) : DB::all("SELECT id, name FROM users WHERE active = 1 ORDER BY name"),
+            'quotes' => $customerId ? DB::all('SELECT id, status, lead_name, created_at FROM quotes WHERE customer_id = ? AND company_id = ? ORDER BY id DESC LIMIT 100', [$customerId, Tenant::need()]) : [],
+            'technicians' => self::$onlyTech ? DB::all('SELECT id, name FROM users WHERE id = ? AND company_id = ?', [self::$onlyTech, Tenant::need()]) : DB::all("SELECT id, name FROM users WHERE active = 1 AND company_id = ? ORDER BY name", [Tenant::need()]),
             'task_types' => TaskTypes::list(),
             'statuses' => self::STATUSES,
             'origins' => self::ORIGINS,
@@ -312,7 +316,7 @@ class ServiceOrders
         $quoteId = null;
         if ($origin === 'orcamento') {
             $quoteId = (int)($in['quote_id'] ?? 0);
-            if (!$quoteId || !DB::val('SELECT id FROM quotes WHERE id = ? AND customer_id = ?', [$quoteId, $customerId])) {
+            if (!$quoteId || !DB::val('SELECT id FROM quotes WHERE id = ? AND customer_id = ? AND company_id = ?', [$quoteId, $customerId, Tenant::need()])) {
                 throw new AppError('Selecione um orçamento deste cliente');
             }
         }
@@ -333,7 +337,7 @@ class ServiceOrders
 
         $technicianId = (int)($in['technician_id'] ?? 0) ?: null;
         if (self::$onlyTech) $technicianId = self::$onlyTech; // quem só vê as próprias OS não passa a OS para outro técnico
-        if ($technicianId && !DB::val('SELECT id FROM users WHERE id = ? AND active = 1', [$technicianId])) {
+        if ($technicianId && !DB::val('SELECT id FROM users WHERE id = ? AND active = 1 AND company_id = ?', [$technicianId, Tenant::need()])) {
             throw new AppError('Técnico não encontrado');
         }
 
@@ -363,7 +367,18 @@ class ServiceOrders
             return $id;
         }
         $data += ['status' => $scheduled ? 'agendada' : 'aberta', 'user_id' => $userId, 'public_token' => bin2hex(random_bytes(16)), 'created_at' => now()];
-        $newId = DB::insert('service_orders', $data);
+        // Número da OS: sequência própria de cada empresa (o id é global). A chave única (empresa, número) barra corrida.
+        for ($try = 0; ; $try++) {
+            try {
+                $newId = DB::tx(function () use ($data) {
+                    $next = (int)DB::val('SELECT COALESCE(MAX(number), 0) + 1 FROM service_orders WHERE company_id = ?', [Tenant::need()]);
+                    return DB::insert('service_orders', $data + ['number' => $next]);
+                });
+                break;
+            } catch (PDOException $e) {
+                if ($try >= 3) throw $e;
+            }
+        }
         OrderExec::logEvent($newId, null, $data['status'], $userId);
         return $newId;
     }
@@ -399,7 +414,7 @@ class ServiceOrders
         if ($to < $from) throw new AppError('O período final é anterior ao inicial');
         if ((strtotime($to) - strtotime($from)) > 62 * 86400) throw new AppError('Período longo demais (máximo de 2 meses)');
 
-        $filter = ['1=1']; $fp = [];
+        $filter = ['o.company_id = ?']; $fp = [Tenant::need()];
         if (self::$onlyTech) $f['tech'] = self::$onlyTech;
         if (!empty($f['tech'])) { $filter[] = 'o.technician_id = ?'; $fp[] = (int)$f['tech']; }
         if (!empty($f['task_type_id'])) { $filter[] = 'o.task_type_id = ?'; $fp[] = (int)$f['task_type_id']; }
@@ -410,11 +425,11 @@ class ServiceOrders
         }
         if (($s = trim((string)($f['q'] ?? ''))) !== '') {
             $like = '%' . mb_strtolower($s) . '%';
-            $filter[] = '(LOWER(c.name) LIKE ? OR LOWER(c.trade_name) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(o.description) LIKE ? OR o.id = ?)';
-            array_push($fp, $like, $like, $like, $like, (int)$s);
+            $filter[] = '(LOWER(c.name) LIKE ? OR LOWER(c.trade_name) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(o.description) LIKE ? OR o.number = ?)';
+            array_push($fp, $like, $like, $like, $like, (int)ltrim($s, '#'));
         }
         $where = implode(' AND ', $filter);
-        $select = "SELECT o.id, o.status, o.scheduled_at, o.due_date, o.description, o.customer_id, o.technician_id, o.task_type_id,
+        $select = "SELECT o.id, o.number, o.status, o.scheduled_at, o.due_date, o.description, o.customer_id, o.technician_id, o.task_type_id,
                 c.name customer_name, c.trade_name customer_trade_name, e.name equipment_name, t.name technician_name,
                 tt.name task_type_name, tt.duration_min
             FROM service_orders o
@@ -456,8 +471,8 @@ class ServiceOrders
             'unscheduled' => $unscheduled,
             'counts' => $counts,
             'statuses' => self::STATUSES,
-            'technicians' => self::$onlyTech ? DB::all('SELECT id, name FROM users WHERE id = ?', [self::$onlyTech]) : DB::all('SELECT id, name FROM users WHERE active = 1 ORDER BY name'),
-            'task_types' => DB::all('SELECT id, name FROM task_types WHERE active = 1 ORDER BY name'),
+            'technicians' => self::$onlyTech ? DB::all('SELECT id, name FROM users WHERE id = ? AND company_id = ?', [self::$onlyTech, Tenant::need()]) : DB::all('SELECT id, name FROM users WHERE active = 1 AND company_id = ? ORDER BY name', [Tenant::need()]),
+            'task_types' => DB::all('SELECT id, name FROM task_types WHERE active = 1 AND company_id = ? ORDER BY name', [Tenant::need()]),
             'scoped' => self::$onlyTech !== null,
         ];
     }
@@ -491,7 +506,7 @@ class ServiceOrders
         }
         $tech = (int)$technicianId ?: null;
         if (self::$onlyTech) $tech = self::$onlyTech;
-        if ($tech && !DB::val('SELECT id FROM users WHERE id = ? AND active = 1', [$tech])) throw new AppError('Técnico não encontrado');
+        if ($tech && !DB::val('SELECT id FROM users WHERE id = ? AND active = 1 AND company_id = ?', [$tech, Tenant::need()])) throw new AppError('Técnico não encontrado');
 
         $data = ['scheduled_at' => $sched, 'technician_id' => $tech, 'updated_at' => now()];
         if ($o['status'] === 'aberta' && $sched) $data['status'] = 'agendada';

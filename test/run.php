@@ -22,12 +22,14 @@ $db = tempnam(sys_get_temp_dir(), 'est');
 DB::connect(['driver' => 'sqlite', 'path' => $db]);
 DB::migrate();
 DB::migrate(); // rodar duas vezes não pode quebrar
-PaymentMethods::seed();
-PaymentTerms::seed();
-QuoteStatuses::seed();
+$companyA = DB::insert('companies', ['name' => 'Empresa A', 'slug' => 'empresa-a', 'active' => 1, 'created_at' => now()]);
+Tenant::set($companyA); // os testes abaixo rodam na empresa A
+Companies::seed();   // formas e condições de pagamento, status de orçamento, perfis, "Consumidor final" e tipos de tarefa padrão
 $cf = Customers::ensureDefault();
 $uid = Auth::createUser(['name' => 'Pedro', 'email' => 'pedro@example.com', 'password' => 'senha12345', 'role' => 'admin']);
 $fx = __DIR__ . '/fixtures';
+// Banco "antigo" tem usuários (e nenhuma empresa): é o que o upgrade reconhece como instalação de uma empresa só
+function legacyUser() { DB::pdo()->exec("INSERT INTO users (name, email, password_hash, role, active, created_at) VALUES ('Velho', 'velho@example.com', 'x', 'admin', 1, '2026-01-01 10:00:00')"); }
 
 echo "Produtos e custo médio\n";
 $farinha = Inventory::saveProduct(['name' => 'Farinha de trigo', 'type' => 'produto', 'unit' => 'kg', 'min_stock' => 5]);
@@ -385,6 +387,7 @@ echo "Atualização de banco antigo (v1.2 → v1.3)\n";
 $old = tempnam(sys_get_temp_dir(), 'old');
 DB::connect(['driver' => 'sqlite', 'path' => $old]);
 DB::migrate();
+legacyUser();
 DB::pdo()->exec('DROP INDEX idx_sales_customer');
 DB::pdo()->exec('ALTER TABLE sales DROP COLUMN customer_id');
 DB::pdo()->exec('DROP TABLE customers');
@@ -403,6 +406,7 @@ echo "Atualização de banco antigo (v1.3 → v1.4)\n";
 $old2 = tempnam(sys_get_temp_dir(), 'old');
 DB::connect(['driver' => 'sqlite', 'path' => $old2]);
 DB::migrate();
+legacyUser();
 foreach (['DROP TABLE quote_items', 'DROP TABLE quote_extras', 'DROP TABLE quotes', 'DROP TABLE settings',
     'ALTER TABLE sales DROP COLUMN quote_id', 'ALTER TABLE sales DROP COLUMN surcharge'] as $sql) DB::pdo()->exec($sql);
 DB::upgrade();
@@ -417,6 +421,7 @@ echo "Atualização de banco antigo (v1.4 → v1.5)\n";
 $old3 = tempnam(sys_get_temp_dir(), 'old');
 DB::connect(['driver' => 'sqlite', 'path' => $old3]);
 DB::migrate();
+legacyUser();
 foreach (['DROP INDEX idx_invoices_supplier', 'ALTER TABLE invoices DROP COLUMN supplier_id', 'DROP TABLE suppliers', 'ALTER TABLE users DROP COLUMN permissions', 'ALTER TABLE users DROP COLUMN profile_id', 'DROP TABLE permission_profiles',
     'ALTER TABLE quote_items DROP COLUMN discount_type', 'ALTER TABLE quote_items DROP COLUMN discount_value'] as $sql) DB::pdo()->exec($sql);
 DB::pdo()->exec("INSERT INTO users (name, email, password_hash, role, active, created_at) VALUES ('Membro', 'm@x.com', 'x', 'membro', 1, '2026-01-01 00:00:00')");
@@ -556,10 +561,11 @@ echo "Atualização para v1.8\n";
 $old4 = tempnam(sys_get_temp_dir(), 'old');
 DB::connect(['driver' => 'sqlite', 'path' => $old4]);
 DB::migrate();
-Auth::seedProfiles();
+legacyUser();
+Tenant::with(0, fn() => Auth::seedProfiles());   // no banco antigo, o que já existia ainda não tem empresa
 foreach (['DROP TABLE financial_entries', 'DROP TABLE purchase_order_items', 'DROP TABLE purchase_orders'] as $sql) DB::pdo()->exec($sql);
 DB::pdo()->exec("UPDATE permission_profiles SET permissions = 'vendas,produtos' WHERE name = 'Acesso total'");
-$c4 = Customers::ensureDefault();
+$c4 = Tenant::with(0, fn() => Customers::ensureDefault());
 DB::pdo()->exec("INSERT INTO sales (customer_id, customer, payment_method, subtotal, discount, surcharge, total, cost_total, status, user_id, created_at) VALUES ($c4, 'Consumidor', 'pix', 80, 0, 0, 80, 10, 'ok', NULL, '2026-01-05 10:00:00'), ($c4, 'Consumidor', 'dinheiro', 30, 0, 0, 30, 5, 'cancelada', NULL, '2026-01-06 10:00:00')");
 DB::upgrade();
 ok((int)DB::val("SELECT COUNT(*) FROM financial_entries WHERE status = 'pago'") === 1, 'vendas antigas entram no caixa');
@@ -1130,7 +1136,7 @@ ok(GDrive::isDue('2026-03-10 03:05:00'), 'diário às 3h: chegou a hora');
 ok(GDrive::nextAt('2026-03-10 02:00:00') === '2026-03-10 03:00:00', 'próximo backup às 3h');
 $msg = GDrive::cron('2026-03-10 03:05:00');
 $sql = gzdecode($driveFiles[0]['data']);
-ok(str_contains($msg, 'bkp-db-2026-03-10-030500.sql.gz') && str_contains($sql, 'INSERT INTO `products`'), 'agendador envia o .sql.gz com os dados');
+ok(str_contains($msg, 'bkp-db-empresa-a-2026-03-10-030500.sql.gz') && str_contains($sql, 'INSERT INTO `products`'), 'agendador envia o .sql.gz com os dados');
 ok(!str_contains($sql, $scriptKey) && !str_contains($sql, 'script.google.com') && str_contains($sql, "DELETE FROM `settings` WHERE SUBSTR(name, 1, 7) <> 'gdrive_'"), 'backup não leva a chave nem o endereço e não os apaga ao restaurar');
 ok(GDrive::cron('2026-03-10 03:10:00') === '' && GDrive::cron('2026-03-11 02:00:00') === '', 'não repete no mesmo dia');
 $driveFiles[] = ['id' => 'OUTRO', 'name' => 'planilha-do-pedro.xlsx', 'data' => ''];
@@ -1330,8 +1336,8 @@ throws(fn() => TaskTypes::save(['name' => 'Inativo', 'questionnaire_ids' => [$qF
 Questionnaires::setActive($qFull, true);
 ok(TaskTypes::names()[$ttFull] === 'Preventiva mensal', 'nomes dos tipos para as listas de OS');
 ok(count(TaskTypes::list(false)) >= 6, 'tipos padrão da atualização existem');
-DB::run("INSERT INTO checklist_models (name, service_type, items, active, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)",
-    ['Legado teste', 'visita', json_encode([['label' => 'Verificar ruído', 'required' => true]]), now(), now()]);
+DB::run("INSERT INTO checklist_models (company_id, name, service_type, items, active, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
+    [Tenant::need(), 'Legado teste', 'visita', json_encode([['label' => 'Verificar ruído', 'required' => true]]), now(), now()]);
 TaskTypes::importLegacy();
 $legacy = array_values(array_filter(Questionnaires::list(true), fn($q) => $q['name'] === 'Legado teste'));
 ok(count($legacy) === 1 && $legacy[0]['questions'][0]['type'] === 'check' && $legacy[0]['questions'][0]['required'] === true, 'checklist antigo vira questionário com perguntas de check');
@@ -1771,6 +1777,188 @@ Auth::$api = null;
 $_SESSION = [];
 $tDel = ApiTokens::issue($apiU, 'Antes de excluir');
 ok(Auth::deleteUser($apiU, $uid) === 'deleted' && !DB::val('SELECT COUNT(*) FROM api_tokens WHERE user_id = ?', [$apiU]), 'usuário excluído leva junto os tokens');
+
+
+echo "Multiempresa\n";
+Tenant::set($companyA);
+$vaA = (float)Reports::summary('2000-01-01', '2100-01-01')['revenue'];
+$osA = (int)DB::val('SELECT MIN(id) FROM service_orders WHERE company_id = ?', [$companyA]);
+$settingsA = Settings::get('company_name');
+$companyB = Companies::create(['name' => 'Empresa B', 'admin' => ['name' => 'Beto', 'email' => 'beto@example.com', 'password' => 'senha12345']]);
+ok($companyB > $companyA && (int)DB::val('SELECT COUNT(*) FROM payment_methods WHERE company_id = ?', [$companyB]) > 0, 'empresa nova nasce com formas de pagamento, perfis e status próprios');
+ok(Companies::bySlug('empresa-b')['id'] == $companyB && Settings::get('company_name') === $settingsA, 'criar a empresa não troca a empresa atual');
+throws(fn() => Companies::create(['name' => 'Empresa B']), 'Já existe uma empresa', 'código (slug) único');
+$betoId = (int)DB::val("SELECT id FROM users WHERE email = 'beto@example.com'");
+ok((int)DB::val('SELECT company_id FROM users WHERE id = ?', [$betoId]) === $companyB, 'administrador novo pertence à empresa nova');
+
+Tenant::set($companyB);
+ok(Settings::get('company_name') === 'Empresa B', 'a empresa nova começa com o nome dela nas configurações');
+throws(fn() => Inventory::product($farinha), 'não encontrado', 'produto de outra empresa não aparece');
+throws(fn() => Customers::get($cli), 'não encontrado', 'cliente de outra empresa não aparece');
+throws(fn() => Quotes::get($qid), 'não encontrado', 'orçamento de outra empresa não aparece');
+if ($osA) throws(fn() => ServiceOrders::get($osA), 'não encontrada', 'OS de outra empresa não aparece');
+throws(fn() => Inventory::saveProduct(['name' => 'Invasor', 'type' => 'produto'], $farinha), 'não encontrado', 'não edita produto de outra empresa');
+DB::update('products', $farinha, ['name' => 'HACK']);
+Tenant::set($companyA);
+ok(Inventory::product($farinha)['name'] === 'Farinha de trigo', 'update por id de outra empresa não altera nada');
+Tenant::set($companyB);
+near(Reports::summary('2000-01-01', '2100-01-01')['revenue'], 0, 'relatório da empresa B não soma as vendas da A');
+ok(Reports::summary('2000-01-01', '2100-01-01')['stock']['products'] === 0, 'estoque da empresa B é vazio');
+$cliB = Customers::save(['type' => 'pj', 'document' => '11.222.333/0001-81', 'name' => 'Mesmo CNPJ na B']);
+ok($cliB !== $cli, 'o mesmo CNPJ pode ser cliente em outra empresa');
+throws(fn() => Customers::save(['type' => 'pj', 'document' => '11222333000181', 'name' => 'Duplicado na B']), 'Já existe', 'dentro da empresa o CNPJ continua único');
+$prodB = Inventory::saveProduct(['name' => 'Farinha de trigo', 'type' => 'produto', 'sku' => 'F-1']);
+Tenant::set($companyA);
+ok((int)DB::val("SELECT COUNT(*) FROM products WHERE name = 'Farinha de trigo' AND company_id = ?", [$companyA]) === 1, 'produto de mesmo nome na B não aparece na A');
+ok(Customers::ensureDefault() !== Tenant::with($companyB, fn() => Customers::ensureDefault()), 'cada empresa tem o próprio "Consumidor final"');
+Tenant::set($companyB);
+Settings::save(['company_name' => 'Outro nome B']);
+Tenant::set($companyA);
+ok(Settings::get('company_name') === $settingsA, 'configurações de uma empresa não vazam para a outra');
+ok(count(Auth::profiles()) >= 1 && !in_array($betoId, array_column(DB::all('SELECT id FROM users WHERE company_id = ?', [$companyA]), 'id')), 'perfis e usuários separados por empresa');
+
+echo "Multiempresa: login, tokens e usuários\n";
+$_SESSION = [];
+$beto = Auth::user();
+Auth::login('beto@example.com', 'senha12345', '10.9.9.9');
+ok(Auth::user()['company_id'] === $companyB && Tenant::id() === $companyB, 'login do usuário define a empresa dele');
+ok(Auth::user()['company']['slug'] === 'empresa-b', 'usuário traz os dados da empresa');
+ok(Auth::createUser(['name' => 'Bia', 'email' => 'bia@example.com', 'password' => 'senha12345']) > 0 && (int)DB::val("SELECT company_id FROM users WHERE email = 'bia@example.com'") === $companyB, 'usuário novo entra na empresa de quem criou');
+throws(fn() => Auth::createUser(['name' => 'X', 'email' => 'bia@example.com', 'password' => 'senha12345']), 'Já existe', 'e-mail continua único no sistema todo');
+$tBeto = Auth::tokenLogin('beto@example.com', 'senha12345', '10.9.9.9', 'Celular do Beto')['token'];
+Auth::$api = null; $_SESSION = []; Tenant::set($companyA);
+$_SERVER['HTTP_AUTHORIZATION'] = 'Bearer ' . $tBeto;
+Auth::start();
+ok(Auth::user()['company_id'] === $companyB && Tenant::id() === $companyB, 'token do app leva à empresa do usuário');
+Auth::$api = null; $_SESSION = []; unset($_SERVER['HTTP_AUTHORIZATION']);
+Companies::setActive($companyB, false);
+ok(ApiTokens::resolve($tBeto) === null, 'empresa desativada derruba os tokens do app');
+throws(fn() => Auth::login('beto@example.com', 'senha12345', '10.9.9.9'), 'desativado', 'empresa desativada não entra');
+Companies::setActive($companyB, true);
+$_SESSION = []; Auth::$api = null;
+$sa = Auth::createUser(['name' => 'Super', 'email' => 'super@example.com', 'password' => 'senha12345', '_superadmin' => true]);
+ok(DB::val('SELECT company_id FROM users WHERE id = ?', [$sa]) === null && DB::val('SELECT role FROM users WHERE id = ?', [$sa]) === 'superadmin', 'superadmin não pertence a empresa');
+Auth::login('super@example.com', 'senha12345', '10.9.9.8');
+ok(Tenant::id() === null && Auth::user()['permissions'] === [], 'superadmin entra sem empresa e sem permissões de dados');
+throws(fn() => Inventory::product($farinha), 'selecionada', 'superadmin não alcança dados de nenhuma empresa');
+throws(fn() => Auth::requireAdmin(), 'administradores', 'superadmin não é administrador de empresa');
+ok(Auth::requireSuper()['role'] === 'superadmin', 'requireSuper aceita o superadmin');
+throws(fn() => Auth::tokenLogin('super@example.com', 'senha12345', '10.9.9.8', 'App'), 'superadmin', 'superadmin não usa o app');
+$_SESSION = []; Auth::$api = null; Tenant::set($companyA);
+throws(fn() => Auth::requireSuper(), 'Faça login', 'sem login não é superadmin');
+ok(Companies::list() && count(Companies::list()) === 2, 'lista de empresas');
+
+echo "Multiempresa: links públicos\n";
+Tenant::set($companyA);
+$qTok = DB::val('SELECT public_token FROM quotes WHERE id = ?', [$qid]);
+Tenant::clear();
+ok((int)Quotes::byToken($qTok)['id'] === $qid && Tenant::id() === $companyA, 'link público do orçamento define a empresa pelo próprio orçamento');
+Tenant::set($companyB);
+$qB = Quotes::save(['target' => 'lead', 'lead_name' => 'Lead da B', 'items' => [], 'request_date' => date('Y-m-d')], $betoId);
+$qBTok = DB::val('SELECT public_token FROM quotes WHERE id = ?', [$qB]);
+Tenant::set($companyA);
+ok((int)Quotes::byToken($qBTok)['id'] === $qB && Tenant::id() === $companyB, 'link público de outra empresa abre a empresa dele, não a atual');
+Tenant::set($companyA);
+
+echo "Multiempresa: portal do cliente\n";
+Tenant::set($companyA);
+$cpA = Customers::save(['type' => 'pf', 'document' => '111.444.777-35', 'name' => 'Cliente nas duas']);
+$tkA = Portal::invite($cpA)['token'];
+Tenant::set($companyB);
+$cpB = Customers::save(['type' => 'pf', 'document' => '111.444.777-35', 'name' => 'Cliente nas duas']);
+$tkB = Portal::invite($cpB)['token'];
+$_SESSION = [];
+$me = Portal::acceptInvite($tkA, 'segredo-123', 'segredo-123');
+ok((int)$me['id'] === $cpA && Tenant::id() === $companyA, 'convite entra direto na empresa do convite');
+$_SESSION = [];
+Portal::acceptInvite($tkB, 'segredo-123', 'segredo-123');
+ok(Tenant::id() === $companyB, 'convite da outra empresa entra na outra empresa');
+$_SESSION = []; Tenant::clear();
+ok(Portal::login('111.444.777-35', 'segredo-123') === null && count(Portal::choices()) === 2, 'mesmo CPF e senha em duas empresas: pede para escolher');
+throws(fn() => Portal::pickCompany($cpA + 9999), 'Escolha uma', 'só escolhe entre as opções do login');
+$pick = Portal::pickCompany($cpB);
+ok((int)$pick['id'] === $cpB && Tenant::id() === $companyB && !isset($_SESSION['pick']), 'escolher a empresa abre a sessão dela');
+ok(Portal::customer()['company_id'] == $companyB, 'sessão do portal guarda a empresa');
+$_SESSION = []; Tenant::clear();
+$_SESSION['cid'] = $cpA;
+ok(Portal::customer() === null || Portal::customer()['company_id'] == $companyA, 'sessão do cliente só enxerga a empresa dele');
+$_SESSION = [];
+Companies::setActive($companyB, false);
+$_SESSION = []; Tenant::clear();
+$r = Portal::login('111.444.777-35', 'segredo-123');
+ok($r !== null && Tenant::id() === $companyA, 'empresa desativada some das opções do portal');
+Companies::setActive($companyB, true);
+$_SESSION = [];
+
+echo "Multiempresa: backup e agenda\n";
+Tenant::set($companyA);
+$bk = Backup::sql();
+ok(str_contains($bk, 'empresa #' . $companyA) && !str_contains($bk, 'Mesmo CNPJ na B') && !str_contains($bk, 'beto@example.com') && str_contains($bk, 'INSERT INTO `products`'), 'backup da empresa não leva dados de outra');
+$bkAll = Backup::sql(true);
+ok(str_contains($bkAll, 'Mesmo CNPJ na B') && str_contains($bkAll, 'INSERT INTO `companies`'), 'backup completo leva todas as empresas');
+ok(Tenant::activeIds() === [$companyA, $companyB], 'cron percorre as empresas ativas');
+
+echo "Número da OS por empresa
+";
+Tenant::set($companyA);
+$nA = (int)DB::val('SELECT MAX(number) FROM service_orders WHERE company_id = ?', [$companyA]);
+$osA2 = ServiceOrders::save(['customer_id' => $cf, 'description' => 'Nova OS da A'], $uid);
+ok(ServiceOrders::get($osA2)['number'] === $nA + 1, 'OS nova da A segue a sequência da A');
+Tenant::set($companyB);
+$osB1 = ServiceOrders::save(['customer_id' => $cliB, 'description' => 'Primeira OS da B'], $betoId);
+$osB2 = ServiceOrders::save(['customer_id' => $cliB, 'description' => 'Segunda OS da B'], $betoId);
+ok(ServiceOrders::get($osB1)['number'] === 1 && ServiceOrders::get($osB2)['number'] === 2, 'cada empresa começa a numerar as OS do 1');
+ok($osB1 > $osA2, 'o id continua global e crescente');
+$achadas = ServiceOrders::list(['q' => '2']);
+ok(count(array_filter($achadas, fn($r) => (int)$r['id'] === $osB2)) === 1 && isset($achadas[0]['number']), 'a busca "2" acha a OS número 2 da empresa e a lista traz o número');
+$dupNum = false;
+try { DB::insert('service_orders', ['number' => 2, 'customer_id' => $cliB, 'description' => 'duplicada', 'status' => 'aberta', 'origin' => 'chamado', 'created_at' => now(), 'updated_at' => now()]); }
+catch (PDOException $e) { $dupNum = true; }
+ok($dupNum, 'número repetido na mesma empresa é barrado pelo banco');
+Tenant::set($companyA);
+
+
+echo "Multiempresa: banco de uma empresa só passa a multiempresa\n";
+$leg = tempnam(sys_get_temp_dir(), 'leg');
+DB::connect(['driver' => 'sqlite', 'path' => $leg]);
+Tenant::clear();
+DB::migrate();
+// Simula o banco da versão anterior: sem companies, sem company_id e com as chaves únicas globais
+$pdoL = DB::pdo();
+foreach (DB::all("SELECT name FROM sqlite_master WHERE type = 'index' AND (name LIKE 'idx\\_%\\_company' ESCAPE '\\' OR name LIKE 'uq\\_%' ESCAPE '\\')") as $ix) $pdoL->exec('DROP INDEX ' . $ix['name']);
+$pdoL->exec('PRAGMA foreign_keys = OFF');
+$pdoL->exec('DROP TABLE supplier_map');   // tinha a chave única global inline: recria como era
+$pdoL->exec('CREATE TABLE supplier_map (id INTEGER PRIMARY KEY AUTOINCREMENT, supplier_cnpj VARCHAR(20) NOT NULL, supplier_code VARCHAR(60) NOT NULL, product_id INTEGER NOT NULL, factor DECIMAL(16,4) NOT NULL DEFAULT 1, UNIQUE (supplier_cnpj, supplier_code), FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE)');
+foreach (array_diff([...Tenant::TABLES, 'users'], ['supplier_map']) as $t) $pdoL->exec("ALTER TABLE $t DROP COLUMN company_id");
+$pdoL->exec('ALTER TABLE service_orders DROP COLUMN number');
+$pdoL->exec('DROP TABLE companies');
+$pdoL->exec('PRAGMA foreign_keys = ON');
+$pdoL->exec("INSERT INTO users (name, email, password_hash, role, active, created_at) VALUES ('Velho', 'velho@example.com', 'x', 'admin', 1, '2026-01-01 10:00:00')");
+$pdoL->exec("INSERT INTO settings (name, value) VALUES ('company_name', 'Loja Antiga Ltda'), ('company_document', '11.222.333/0001-81')");
+$pdoL->exec("INSERT INTO customers (type, name, document, active, created_at, updated_at) VALUES ('pj', 'Cliente Antigo', '11222333000181', 1, '2026-01-01 10:00:00', '2026-01-01 10:00:00')");
+$pdoL->exec("INSERT INTO products (name, type, unit, stock, avg_cost, sale_price, created_at, updated_at) VALUES ('Item antigo', 'produto', 'un', 3, 2, 5, '2026-01-01 10:00:00', '2026-01-01 10:00:00')");
+$pdoL->exec("INSERT INTO payment_methods (code, name, active, max_installments, interval_mode, sort, created_at, updated_at) VALUES ('pix', 'PIX', 1, 1, 'fixo', 1, '2026-01-01 10:00:00', '2026-01-01 10:00:00')");
+$pdoL->exec("INSERT INTO service_orders (status, origin, customer_id, description, created_at, updated_at) VALUES ('aberta', 'chamado', (SELECT id FROM customers LIMIT 1), 'OS antiga 1', '2026-01-01 10:00:00', '2026-01-01 10:00:00'), ('aberta', 'chamado', (SELECT id FROM customers LIMIT 1), 'OS antiga 2', '2026-01-02 10:00:00', '2026-01-02 10:00:00')");
+DB::upgrade();
+$c1 = Companies::bySlug('loja-antiga-ltda');
+ok($c1 && $c1['name'] === 'Loja Antiga Ltda' && $c1['document'] === '11222333000181', 'cria a empresa #1 com o nome e o CNPJ das configurações antigas');
+$c1id = (int)$c1['id'];
+ok((int)DB::val('SELECT company_id FROM users') === $c1id, 'usuários antigos vão para a empresa #1');
+ok((int)DB::val("SELECT company_id FROM customers WHERE name = 'Cliente Antigo'") === $c1id && (int)DB::val("SELECT company_id FROM products WHERE name = 'Item antigo'") === $c1id, 'clientes e produtos antigos vão para a empresa #1');
+ok((int)DB::val("SELECT COUNT(*) FROM settings WHERE company_id = $c1id") === 2 && (int)DB::val('SELECT COUNT(*) FROM payment_methods WHERE company_id = ?', [$c1id]) === 1, 'configurações e formas de pagamento antigas ficam na empresa #1');
+Tenant::set($c1id);
+ok(Settings::get('company_name') === 'Loja Antiga Ltda', 'as configurações antigas valem na empresa #1');
+DB::upgrade();
+ok((int)DB::val('SELECT COUNT(*) FROM companies') === 1 && (int)DB::val('SELECT COUNT(*) FROM customers') === 1, 'rodar de novo não duplica');
+$c2id = Companies::create(['name' => 'Segunda Loja']);
+Tenant::set($c2id);
+ok(Customers::save(['type' => 'pj', 'document' => '11.222.333/0001-81', 'name' => 'Mesmo CNPJ']) > 0, 'chave única do CNPJ passou a valer por empresa (SQLite recriado)');
+Tenant::set($c1id);
+throws(fn() => Customers::save(['type' => 'pj', 'document' => '11222333000181', 'name' => 'Duplicado']), 'Já existe', 'dentro da empresa #1 o CNPJ segue único');
+ok(count(DB::all("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'uq_customers_doc'")) === 1, 'índice único por empresa criado');
+ok(DB::all('SELECT number FROM service_orders ORDER BY id') === [['number' => 1], ['number' => 2]], 'OS antigas ganham número 1, 2… na ordem de criação');
+ok(count(DB::all("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'uq_so_number'")) === 1, 'índice único (empresa, número) da OS criado');
+@unlink($leg);
 
 @unlink($db);
 echo "\n$passes passaram, $fails falharam\n";

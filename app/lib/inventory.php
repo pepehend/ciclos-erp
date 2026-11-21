@@ -38,7 +38,7 @@ class Inventory
 
     public static function product(int $id, bool $lock = false): array
     {
-        $p = DB::one('SELECT * FROM products WHERE id = ?' . ($lock ? DB::lockSuffix() : ''), [$id]);
+        $p = DB::one('SELECT * FROM products WHERE id = ? AND company_id = ?' . ($lock ? DB::lockSuffix() : ''), [$id, Tenant::need()]);
         if (!$p) throw new AppError('Produto não encontrado', 404);
         return $p;
     }
@@ -63,10 +63,10 @@ class Inventory
             foreach (['sale_items', 'quote_items', 'invoice_items', 'purchase_order_items', 'movements'] as $t) {
                 $refs += (int)DB::val("SELECT COUNT(*) FROM $t WHERE product_id = ?", [$id]);
             }
-            DB::run('DELETE FROM supplier_map WHERE product_id = ?', [$id]);
+            DB::run('DELETE FROM supplier_map WHERE product_id = ? AND company_id = ?', [$id, Tenant::need()]);
             if (!$refs) {
-                DB::run('DELETE FROM recipe_items WHERE product_id = ? OR ingredient_id = ?', [$id, $id]); // fichas antigas
-                DB::run('DELETE FROM products WHERE id = ?', [$id]);
+                DB::run('DELETE FROM recipe_items WHERE company_id = ? AND (product_id = ? OR ingredient_id = ?)', [Tenant::need(), $id, $id]); // fichas antigas
+                DB::run('DELETE FROM products WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);
                 return 'apagado';
             }
             // Já usado: guarda para o histórico, fora das listas. Libera código de barras e SKU para outro cadastro.
@@ -109,7 +109,7 @@ class Inventory
         // Tributação: só produtos; sem o campo na requisição, mantém o que já existe
         if ($type === 'servico') $data['fiscal'] = null;
         elseif (array_key_exists('fiscal', $in)) $data['fiscal'] = Fiscal::encode(Fiscal::normalize($in['fiscal']));
-        if ($id && DB::val('SELECT deleted_at FROM products WHERE id = ?', [$id])) throw new AppError('Este item foi excluído e não pode mais ser alterado');
+        if ($id && DB::val('SELECT deleted_at FROM products WHERE id = ? AND company_id = ?', [$id, Tenant::need()])) throw new AppError('Este item foi excluído e não pode mais ser alterado');
 
         return DB::tx(function () use ($data, $id, $in, $refs, $userId) {
             if ($id) {
@@ -202,13 +202,13 @@ class Inventory
 
     private static function saveRefs(int $id, array $refs): void
     {
-        DB::run('DELETE FROM product_refs WHERE product_id = ?', [$id]);
+        DB::run('DELETE FROM product_refs WHERE product_id = ? AND company_id = ?', [$id, Tenant::need()]);
         foreach ($refs as $r) DB::insert('product_refs', ['product_id' => $id] + $r);
     }
 
     public static function refs(int $id): array
     {
-        return DB::all('SELECT manufacturer, code FROM product_refs WHERE product_id = ? ORDER BY id', [$id]);
+        return DB::all('SELECT manufacturer, code FROM product_refs WHERE product_id = ? AND company_id = ? ORDER BY id', [$id, Tenant::need()]);
     }
 
     /**
@@ -246,7 +246,7 @@ class Inventory
     /** Recalcula o preço do produto quando ele tem markup. */
     public static function repriceFrom(int $productId): void
     {
-        $p = DB::one('SELECT * FROM products WHERE id = ?', [$productId]);
+        $p = DB::one('SELECT * FROM products WHERE id = ? AND company_id = ?', [$productId, Tenant::need()]);
         if (!$p) return;
         if ($p['markup'] !== null) {
             $cost = self::currentUnitCost($p);
@@ -477,12 +477,12 @@ class Inventory
     public static function cancelSale(int $saleId, int $userId): void
     {
         DB::tx(function () use ($saleId, $userId) {
-            $s = DB::one('SELECT * FROM sales WHERE id = ?' . DB::lockSuffix(), [$saleId]);
+            $s = DB::one('SELECT * FROM sales WHERE id = ? AND company_id = ?' . DB::lockSuffix(), [$saleId, Tenant::need()]);
             if (!$s) throw new AppError('Venda não encontrada', 404);
             if ($s['status'] === 'cancelada') throw new AppError('Esta venda já foi cancelada');
             self::checkCancelRules($s, $userId);
             // 'consumo_venda' = vendas antigas de produto feito na hora (recurso removido)
-            $movs = DB::all("SELECT * FROM movements WHERE sale_id = ? AND type IN ('venda','consumo_venda')", [$saleId]);
+            $movs = DB::all("SELECT * FROM movements WHERE sale_id = ? AND company_id = ? AND type IN ('venda','consumo_venda')", [$saleId, Tenant::need()]);
             foreach ($movs as $m) {
                 self::move((int)$m['product_id'], 'estorno_venda', -(float)$m['quantity'], (float)$m['unit_cost'], [
                     'user_id' => $userId, 'sale_id' => $saleId, 'note' => 'Cancelamento da venda #' . $saleId,
