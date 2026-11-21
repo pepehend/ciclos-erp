@@ -1575,11 +1575,21 @@ ok(count($qq['service_orders']) === 1 && (int)$qq['service_orders'][0]['id'] ===
 $q2 = Quotes::save(['target' => 'cliente', 'customer_id' => $oqCli, 'service_order_id' => $oqOs, 'items' => [['product_id' => $oqSvc, 'quantity' => 2]]], $uid);
 ok((int)Quotes::get($q2)['service_order_id'] === $oqOs && (int)Quotes::get($q2)['service_orders'][0]['id'] === $oqOs, 'orçamento aberto pela OS guarda e mostra a OS de origem');
 $oqd = OrderExec::detail($oqOs)['quotes'];
-ok(array_column($oqd, 'relation') === ['origem da OS', 'aberto pela OS'] && (int)$oqd[1]['id'] === $q2, 'OS mostra o orçamento de origem e o aberto por ela');
+ok(array_column($oqd, 'relation') === ['origem da OS', 'associado a esta OS'] && (int)$oqd[1]['id'] === $q2, 'OS mostra o orçamento de origem e o aberto por ela');
 throws(fn() => Quotes::save(['target' => 'cliente', 'customer_id' => $oqOutro, 'service_order_id' => $oqOs, 'items' => [['product_id' => $oqSvc, 'quantity' => 1]]], $uid), 'outro cliente', 'orçamento para outro cliente não liga na OS');
 throws(fn() => Quotes::save(['target' => 'lead', 'lead_name' => 'Lead', 'service_order_id' => $oqOs, 'items' => [['product_id' => $oqSvc, 'quantity' => 1]]], $uid), 'outro cliente', 'lead não liga na OS');
-Quotes::save(['target' => 'cliente', 'customer_id' => $oqCli, 'service_order_id' => 999999, 'items' => [['product_id' => $oqSvc, 'quantity' => 3]]], $uid, $q2);
-ok((int)Quotes::get($q2)['service_order_id'] === $oqOs, 'editar o orçamento não troca a OS de origem');
+Quotes::save(['target' => 'cliente', 'customer_id' => $oqCli, 'items' => [['product_id' => $oqSvc, 'quantity' => 3]]], $uid, $q2);
+ok((int)Quotes::get($q2)['service_order_id'] === $oqOs, 'editar sem a chave service_order_id não troca a OS');
+throws(fn() => Quotes::save(['target' => 'cliente', 'customer_id' => $oqCli, 'service_order_id' => 999999, 'items' => [['product_id' => $oqSvc, 'quantity' => 3]]], $uid, $q2), 'não encontrada', 'OS inexistente não associa');
+Quotes::save(['target' => 'cliente', 'customer_id' => $oqCli, 'service_order_id' => '', 'items' => [['product_id' => $oqSvc, 'quantity' => 3]]], $uid, $q2);
+ok(Quotes::get($q2)['service_order_id'] === null, 'editar com service_order_id vazio desassocia a OS');
+Quotes::linkOs($q2, $oqOs);
+ok((int)Quotes::get($q2)['service_order_id'] === $oqOs, 'linkOs associa orçamento já criado à OS');
+ok(count(OrderExec::quotes(ServiceOrders::get($oqOs))) >= 1 && in_array('associado a esta OS', array_column(OrderExec::quotes(ServiceOrders::get($oqOs)), 'relation'), true), 'a OS lista o orçamento associado');
+throws(fn() => Quotes::linkOs($q2, $oqOs + 99999), 'não encontrad', 'linkOs com OS inexistente');
+Quotes::linkOs($q2, null);
+ok(Quotes::get($q2)['service_order_id'] === null, 'linkOs(null) desassocia');
+Quotes::linkOs($q2, $oqOs);
 
 echo "\nExclusão de cadastros\n";
 $rxNovo = Customers::save(['type' => 'pf', 'name' => 'Nunca usado']);
@@ -1663,7 +1673,7 @@ $psNova = OrderExec::saveItem($psOs, ['kind' => 'produto', 'new_item' => 1, 'des
 $psSvc = OrderExec::saveItem($psOs, ['kind' => 'servico', 'new_item' => 1, 'description' => 'Alinhamento a laser', 'quantity' => 1, 'unit_price' => '300'], $uid);
 ok(OrderExec::items($psOs)['review'] === 2, 'OS indica os itens aguardando revisão');
 ok(count(OrderExec::reviewList(['produto'])) >= 1 && !array_filter(OrderExec::reviewList(['produto']), fn($r) => $r['kind'] === 'servico'), 'lista de revisão só mostra a área de quem revisa');
-throws(fn() => Quotes::save(['target' => 'cliente', 'customer_id' => $psCli, 'service_order_id' => $psOs, 'items' => [['product_id' => $psPeca, 'quantity' => 1]]], $uid), 'aguardando revisão', 'orçamento da OS só com tudo cadastrado');
+throws(fn() => Quotes::save(['target' => 'cliente', 'customer_id' => $psCli, 'service_order_id' => $psOs, 'from_os' => 1, 'items' => [['product_id' => $psPeca, 'quantity' => 1]]], $uid), 'aguardando revisão', 'orçamento da OS só com tudo cadastrado');
 OrderExec::reviewItem($psNova, 'cadastrar', ['name' => 'Rolamento 6205 2RS', 'unit' => 'un'], $uid);
 $psI = DB::one('SELECT * FROM so_items WHERE id = ?', [$psNova]);
 $psP = DB::one('SELECT * FROM products WHERE id = ?', [$psI['product_id']]);
@@ -1675,7 +1685,7 @@ ok((int)DB::val('SELECT product_id FROM so_items WHERE id = ?', [$psSvc]) === $p
 $psRec = OrderExec::saveItem($psOs, ['kind' => 'produto', 'new_item' => 1, 'description' => 'Peça errada'], $uid);
 OrderExec::reviewItem($psRec, 'recusar', [], $uid);
 ok(!DB::val('SELECT id FROM so_items WHERE id = ?', [$psRec]), 'recusar tira o item da OS');
-ok(Quotes::save(['target' => 'cliente', 'customer_id' => $psCli, 'service_order_id' => $psOs, 'items' => [['product_id' => $psPeca, 'quantity' => 1]]], $uid) > 0, 'com tudo cadastrado, o orçamento abre a partir da OS');
+ok(Quotes::save(['target' => 'cliente', 'customer_id' => $psCli, 'service_order_id' => $psOs, 'from_os' => 1, 'items' => [['product_id' => $psPeca, 'quantity' => 1]]], $uid) > 0, 'com tudo cadastrado, o orçamento abre a partir da OS');
 $ttA = Questionnaires::save(['name' => 'Q A', 'questions' => [['id' => 'a', 'label' => 'A', 'type' => 'texto']]]);
 $ttB = Questionnaires::save(['name' => 'Q B', 'questions' => [['id' => 'a', 'label' => 'B', 'type' => 'texto']]]);
 $ttT = TaskTypes::save(['name' => 'Ordem manual', 'questionnaire_ids' => [$ttB, $ttA]]);

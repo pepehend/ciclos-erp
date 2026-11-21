@@ -152,22 +152,25 @@ class Quotes
             'updated_at' => now(),
         ];
 
-        // Orçamento aberto a partir de uma OS (só ao criar): a OS precisa ser do mesmo cliente
+        // OS associada: ao criar vale o que vier; ao editar só muda se a chave vier (vazio = tirar a associação)
+        $linkKey = !$id || array_key_exists('service_order_id', $in);
         $soId = null;
-        if (!$id && (int)($in['service_order_id'] ?? 0)) {
-            $so = ServiceOrders::get((int)$in['service_order_id']);
-            if (!$customerId || (int)$so['customer_id'] !== $customerId) throw new AppError('A ordem de serviço #' . $so['id'] . ' é de outro cliente');
-            $rev = (int)DB::val("SELECT COUNT(*) FROM so_items WHERE order_id = ? AND kind <> 'custo' AND product_id IS NULL", [$so['id']]);
-            if ($rev) throw new AppError("A ordem de serviço #{$so['id']} tem $rev item(ns) aguardando revisão do cadastro. Revise antes de abrir o orçamento.");
-            $soId = (int)$so['id'];
+        if ($linkKey && (int)($in['service_order_id'] ?? 0)) {
+            $soId = self::checkOs((int)$in['service_order_id'], $customerId);
+            // "Abrir orçamento" a partir da OS (from_os): todos os itens da OS precisam estar cadastrados
+            if (!$id && !empty($in['from_os'])) {
+                $rev = (int)DB::val("SELECT COUNT(*) FROM so_items WHERE order_id = ? AND kind <> 'custo' AND product_id IS NULL", [$soId]);
+                if ($rev) throw new AppError("A ordem de serviço #$soId tem $rev item(ns) aguardando revisão do cadastro. Revise antes de abrir o orçamento.");
+            }
         }
 
-        return DB::tx(function () use ($data, $items, $extras, $id, $userId, $soId) {
+        return DB::tx(function () use ($data, $items, $extras, $id, $userId, $soId, $linkKey) {
             if ($id) {
                 $old = DB::one('SELECT * FROM quotes WHERE id = ?' . DB::lockSuffix(), [$id]);
                 if (!$old) throw new AppError('Orçamento não encontrado', 404);
                 if ($old['status'] === 'vendido') throw new AppError('Este orçamento já virou venda e não pode mais ser alterado');
                 self::stamp($data, $old['status']);
+                if ($linkKey) $data['service_order_id'] = $soId;
                 DB::update('quotes', $id, $data);
                 DB::run('DELETE FROM quote_items WHERE quote_id = ?', [$id]);
                 DB::run('DELETE FROM quote_extras WHERE quote_id = ?', [$id]);
@@ -183,6 +186,24 @@ class Quotes
             foreach ($extras as $e) DB::insert('quote_extras', ['quote_id' => $id] + $e);
             return $id;
         });
+    }
+
+    /** A OS precisa existir e ser do mesmo cliente do orçamento. */
+    private static function checkOs(int $osId, ?int $customerId): int
+    {
+        $so = ServiceOrders::get($osId);
+        if (!$customerId || (int)$so['customer_id'] !== (int)$customerId) throw new AppError('A ordem de serviço #' . $so['id'] . ' é de outro cliente');
+        return (int)$so['id'];
+    }
+
+    /** Associa o orçamento a uma OS do mesmo cliente (ou tira a associação com $osId = null). */
+    public static function linkOs(int $id, ?int $osId): void
+    {
+        $q = DB::one('SELECT id, status, customer_id FROM quotes WHERE id = ?', [$id]);
+        if (!$q) throw new AppError('Orçamento não encontrado', 404);
+        if ($q['status'] === 'vendido') throw new AppError('Este orçamento já virou venda e não pode mais ser alterado');
+        $so = $osId ? self::checkOs($osId, $q['customer_id'] ? (int)$q['customer_id'] : null) : null;
+        DB::update('quotes', $id, ['service_order_id' => $so, 'updated_at' => now()]);
     }
 
     /** Muda só o status (arrastar no kanban, enviar, cliente aprovar/recusar). */

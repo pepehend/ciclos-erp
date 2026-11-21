@@ -3116,12 +3116,22 @@ async function viewServiceOrderForm(v, id) {
 
   // ---- Orçamentos ligados (o de origem e os abertos a partir desta OS)
   pane('orcamentos').innerHTML = `<div class="card"><div class="card-head"><h2>Orçamentos</h2>
-      ${can('orcamentos.add') ? `<button type="button" class="btn sm js-view-only" data-act="quote">${icon('plus')}Abrir orçamento</button>` : ''}</div>
+      <span class="inline js-view-only">${can('orcamentos.edit') ? `<button type="button" class="btn sm" data-act="qlink">${icon('link')}Associar orçamento</button>` : ''}
+        ${can('orcamentos.add') ? `<button type="button" class="btn sm" data-act="quote">${icon('plus')}Abrir orçamento</button>` : ''}</span></div>
     <p class="small muted">A OS não gera cobrança. Para cobrar o serviço executado, abra um orçamento: ele já vem com o cliente e com os produtos, serviços e custos lançados em Valores.</p>
-    ${D.quotes.length ? `<div class="table-wrap"><table><thead><tr><th>Orçamento</th><th>Ligação</th><th>Status</th><th class="num">Total</th><th>Criado em</th></tr></thead><tbody>
-      ${D.quotes.map((q) => `<tr class="click" data-goq="${q.id}"><td><strong>#${q.id}</strong></td><td>${esc(q.relation)}</td><td>${qBadge(q.status)}</td><td class="num">${money(q.total)}</td><td>${dOnly(q.created_at)}</td></tr>`).join('')}</tbody></table></div>`
+    ${D.quotes.length ? `<div class="table-wrap"><table><thead><tr><th>Orçamento</th><th>Ligação</th><th>Status</th><th class="num">Total</th><th>Criado em</th><th></th></tr></thead><tbody>
+      ${D.quotes.map((q) => `<tr class="click" data-goq="${q.id}"><td><strong>#${q.id}</strong></td><td>${esc(q.relation)}</td><td>${qBadge(q.status)}</td><td class="num">${money(q.total)}</td><td>${dOnly(q.created_at)}</td>
+        <td class="num">${+q.service_order_id === +o.id && q.status !== 'vendido' && can('orcamentos.edit') ? `<button type="button" class="btn sm js-view-only" data-qunlink="${q.id}" title="Desassociar">${icon('x')}</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
       : '<p class="muted">Nenhum orçamento ligado a esta ordem.</p>'}</div>`;
-  pane('orcamentos').addEventListener('click', (e) => { const r = e.target.closest('[data-goq]'); if (r) go('orcamento/' + r.dataset.goq); });
+  pane('orcamentos').addEventListener('click', async (e) => {
+    const u = e.target.closest('[data-qunlink]');
+    if (u) {
+      try { await api('quote_link_os', { body: { id: +u.dataset.qunlink, service_order_id: '' } }); toast('Orçamento desassociado'); route(); } catch (err) { fail(err); }
+      return;
+    }
+    if (e.target.closest('[data-act]')) return;
+    const r = e.target.closest('[data-goq]'); if (r) go('orcamento/' + r.dataset.goq);
+  });
 
   // ---- Pendências
   pane('pendencias').innerHTML = `<h2>Pendências para concluir</h2>
@@ -3286,6 +3296,7 @@ async function viewServiceOrderForm(v, id) {
     if (a.dataset.act === 'email') sendModal('os');
     if (a.dataset.act === 'survey') sendModal('pesquisa');
     if (a.dataset.act === 'quote') openQuote();
+    if (a.dataset.act === 'qlink') pickQuoteModal(o.customer_id, o.id, async (qid) => { await api('quote_link_os', { body: { id: qid, service_order_id: o.id } }); toast(`Orçamento #${qid} associado à OS`); route(); });
     if (a.dataset.act === 'whats') {
       const phone = String(o.customer_phone || '').replace(/\D/g, '');
       const msg = `Olá${cust ? ', ' + cust.split(' ')[0] : ''}! Segue a ordem de serviço #${o.id}: ${done ? o.survey_url : o.public_url}`;
@@ -4497,6 +4508,39 @@ async function viewQuotes(v) {
 }
 
 /** Lateral do orçamento só para leitura (fora do modo de edição). */
+// Escolher uma OS do cliente para associar ao orçamento
+async function pickOsModal(customerId, currentId, onPick) {
+  const d = await api('service_orders', { params: { customer_id: customerId, status: 'todas' } });
+  const rows = d.rows.filter((o) => +o.id !== +currentId);
+  const m = modal({ title: 'Associar ordem de serviço', wide: true,
+    body: rows.length ? `<p class="small muted">Ordens de serviço deste cliente. Escolha a que será associada ao orçamento.</p>
+      <div class="table-wrap"><table><thead><tr><th>OS</th><th>Tipo</th><th>Situação</th><th>Descrição</th><th>Criada em</th></tr></thead><tbody>
+      ${rows.map((o) => `<tr class="click" data-pick="${o.id}"><td><strong>#${o.id}</strong></td><td>${esc(o.task_type_name || '—')}</td><td>${esc((d.statuses[o.status] || {}).label || d.statuses[o.status] || o.status)}</td>
+        <td>${esc(String(o.description || '').slice(0, 80))}</td><td>${dOnly(o.created_at)}</td></tr>`).join('')}</tbody></table></div>`
+      : '<p class="muted">Este cliente não tem outra ordem de serviço para associar.</p>',
+    foot: '<button class="btn" data-close>Fechar</button>' });
+  m.el.addEventListener('click', async (e) => {
+    const r = e.target.closest('[data-pick]'); if (!r) return;
+    try { await onPick(+r.dataset.pick); m.close(); } catch (err) { fail(err); }
+  });
+}
+
+// Escolher um orçamento já criado do cliente para associar à OS
+async function pickQuoteModal(customerId, osId, onPick) {
+  const d = await api('quotes', { params: { customer_id: customerId, limit: 200 } });
+  const rows = d.rows.filter((q) => q.status !== 'vendido' && +q.service_order_id !== +osId);
+  const m = modal({ title: 'Associar orçamento', wide: true,
+    body: rows.length ? `<p class="small muted">Orçamentos deste cliente ainda não vendidos. Escolha o que será associado à OS #${osId}.${rows.some((q) => q.service_order_id) ? ' Os que já têm outra OS passam a apontar para esta.' : ''}</p>
+      <div class="table-wrap"><table><thead><tr><th>Orçamento</th><th>Status</th><th class="num">Total</th><th>Criado em</th><th>OS atual</th></tr></thead><tbody>
+      ${rows.map((q) => `<tr class="click" data-pick="${q.id}"><td><strong>#${q.id}</strong></td><td>${qBadge(q.status)}</td><td class="num">${money(q.total)}</td><td>${dOnly(q.request_date)}</td><td>${q.service_order_id ? '#' + q.service_order_id : '—'}</td></tr>`).join('')}</tbody></table></div>`
+      : '<p class="muted">Este cliente não tem orçamento disponível para associar.</p>',
+    foot: '<button class="btn" data-close>Fechar</button>' });
+  m.el.addEventListener('click', async (e) => {
+    const r = e.target.closest('[data-pick]'); if (!r) return;
+    try { await onPick(+r.dataset.pick); m.close(); } catch (err) { fail(err); }
+  });
+}
+
 function quoteReadSide(q, team) {
   const lead = !q.customer_id;
   const name = lead ? q.lead_name : (q.customer_trade_name || q.customer_name);
@@ -4550,6 +4594,8 @@ async function viewQuoteForm(v, id) {
   const st = { target: q.customer_id || isNew ? 'cliente' : (q.lead_name ? 'lead' : 'cliente'), customer: q.customer_id ? { id: q.customer_id, name: q.customer_name, trade_name: q.customer_trade_name, document: q.customer_document, phone: q.customer_phone, email: q.customer_email, city: q.customer_city, state: q.customer_state } : null };
   if (isNew) { const pre = JSON.parse(sessionStorage.getItem('quoteCustomer') || 'null'); sessionStorage.removeItem('quoteCustomer'); if (pre) st.customer = pre; }
   if (fromOs && fromOs.customer) { st.customer = fromOs.customer; st.target = 'cliente'; }
+  st.so = q.service_order_id ? { id: +q.service_order_id, cust: q.customer_id } : null;
+  if (fromOs) st.so = { id: +fromOs.service_order_id, cust: fromOs.customer ? fromOs.customer.id : null };
   const lines = q.items.map((i) => ({ p: { id: +i.product_id, name: i.description, unit: i.unit, stock: i.stock, type: i.product_type, deleted: !!i.product_deleted }, kind: i.kind, q: +i.quantity, price: +i.unit_price, dval: +(i.discount_value ?? i.discount), dtype: i.discount_type || 'valor' }));
   const extras = q.extras.map((e) => ({ d: e.description, v: +e.amount }));
   const methods = new Set(String(q.payment_methods || '').split(',').filter(Boolean));
@@ -4570,11 +4616,12 @@ async function viewQuoteForm(v, id) {
             ${sold || !can('orcamentos.status') ? '' : `<button type="button" role="menuitem" data-act="sent">${icon('send')}Marcar como enviado</button>
             <button type="button" role="menuitem" data-act="approved">${icon('check')}Marcar como aprovado</button>
             <button type="button" role="menuitem" data-act="refused">${icon('x')}Marcar como recusado</button>`}
+            ${!sold && q.customer_id && can('orcamentos.edit') && can('ordens') ? `<button type="button" role="menuitem" data-act="soassoc">${icon('link')}${q.service_order_id ? 'Trocar OS associada' : 'Associar ordem de serviço'}</button>` : ''}
             ${can('ordens.add') && q.customer_id ? `<button type="button" role="menuitem" data-act="os">${icon('tool')}Gerar ordem de serviço</button>` : ''}
             ${can('orcamentos.add') ? `<button type="button" role="menuitem" data-act="dup">${icon('copy')}Duplicar</button>` : ''}
             ${sold || !can('orcamentos.delete') ? '' : `<button type="button" role="menuitem" data-act="del" class="danger">${icon('trash')}Excluir</button>`}
           </div></div>`}</div></div>
-    ${!isNew && (q.service_orders || []).length ? `<div class="alert info q-os">${icon('tool')}<span>${q.service_orders.map((so) => `${+so.id === +q.service_order_id ? 'Aberto a partir da' : 'Gerou a'} <a href="#/ordem/${so.id}"><strong>OS #${so.id}</strong></a> (${esc(so.status_label)})`).join(' · ')}</span></div>` : ''}
+    ${!isNew && (q.service_orders || []).length ? `<div class="alert info q-os">${icon('tool')}<span>${q.service_orders.map((so) => `${+so.id === +q.service_order_id ? 'Associado à' : 'Gerou a'} <a href="#/ordem/${so.id}"><strong>OS #${so.id}</strong></a> (${esc(so.status_label)})${!editing && !sold && can('orcamentos.edit') && +so.id === +q.service_order_id ? ` <button type="button" class="btn sm" data-act="sodel">${icon('x')}Desassociar</button>` : ''}`).join(' · ')}</span></div>` : ''}
     ${isNew && fromOs ? `<div class="alert info q-os">${icon('tool')}<span>Orçamento da <a href="#/ordem/${fromOs.service_order_id}"><strong>OS #${fromOs.service_order_id}</strong></a>: confira os itens e salve.</span></div>` : ''}
     ${sold ? `<div class="alert ok">Este orçamento virou a <a href="#/venda/${q.sale_id}"><strong>venda #${q.sale_id}</strong></a> e não pode mais ser alterado. Use <strong>Duplicar</strong> para fazer um parecido.</div>` : ''}
     ${editing && q.client_response ? `<div class="alert ${q.status === 'recusado' ? 'err' : 'ok'}">Resposta do cliente: “${esc(q.client_response)}”</div>` : ''}
@@ -4606,6 +4653,7 @@ async function viewQuoteForm(v, id) {
           <label>Data de expiração <input type="date" id="expires_at" value="${esc(q.expires_at || '')}"></label>
           <label>Colaborador responsável * <select id="user_id">${team.map((u) => `<option value="${u.id}" ${u.id == q.user_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>
           <label>Código externo <input id="external_code" value="${esc(q.external_code)}" maxlength="60" placeholder="opcional"></label>
+          ${can('ordens') ? '<div><div class="qlabel-f">Ordem de serviço</div><div id="soassoc"></div></div>' : ''}
           <label>Status * <select id="status" ${locked ? 'disabled' : ''}>${(locked ? Object.entries(Q_STATUS) : editableStatuses).map(([k, s]) => `<option value="${k}" ${k === q.status ? 'selected' : ''}>${esc(s.label)}</option>`).join('')}</select></label>
         </div>
       </aside></div>
@@ -4635,6 +4683,23 @@ async function viewQuoteForm(v, id) {
     const c = st.customer;
     $('#custsel', v).innerHTML = c ? `<div class="cust-card"><div><div class="cust-name">${esc(custName(c))}</div><div class="small muted">${[docFmt(c.document), [c.city, c.state].filter(Boolean).join('/'), c.phone].filter(Boolean).map(esc).join(' · ') || '—'}</div></div></div>`
       : '<div class="muted small">Nenhum cliente selecionado</div>';
+    // Trocou de cliente (ou virou lead): a OS de outro cliente deixa de valer
+    if (st.so && (st.target !== 'cliente' || !c || (st.so.cust && +st.so.cust !== +c.id))) st.so = null;
+    paintOs();
+  };
+  // ---- Ordem de serviço associada (só de cliente cadastrado, do mesmo cliente)
+  const paintOs = () => {
+    const box = $('#soassoc', v); if (!box) return;
+    const c = st.customer;
+    if (st.so) box.innerHTML = `<div class="inline" style="gap:6px"><a href="#/ordem/${st.so.id}"><strong>OS #${st.so.id}</strong></a>
+      <button type="button" class="btn sm" data-so="pick">Trocar</button><button type="button" class="btn sm" data-so="del">${icon('x')}Remover</button></div>`;
+    else box.innerHTML = `<button type="button" class="btn sm" data-so="pick" ${st.target === 'cliente' && c ? '' : 'disabled'}>${icon('tool')}Associar OS</button>
+      ${st.target === 'cliente' && c ? '' : '<p class="help" style="margin:2px 0 0">Escolha o cliente primeiro.</p>'}`;
+  };
+  if ($('#soassoc', v)) $('#soassoc', v).onclick = (e) => {
+    const b = e.target.closest('[data-so]'); if (!b) return;
+    if (b.dataset.so === 'del') { st.so = null; return paintOs(); }
+    pickOsModal(st.customer.id, st.so && st.so.id, async (osId) => { st.so = { id: osId, cust: st.customer.id }; paintOs(); });
   };
   $$('input[name=target]', v).forEach((r) => (r.onchange = () => { st.target = r.value; paintTarget(); }));
   $('#pickc', v).onclick = () => customerBrowser({ selected: st.customer, onSelect: (c) => { st.customer = c; paintTarget(); } });
@@ -4762,7 +4827,8 @@ async function viewQuoteForm(v, id) {
     discount_type: $('#dtype', v).value, discount_value: $('#dval', v).value, notes: $('#notes', v).value, internal_notes: $('#internal_notes', v).value,
     items: lines.map((l) => ({ product_id: l.p.id, description: l.p.name, quantity: l.q, unit_price: l.price, discount_type: l.dtype, discount_value: l.dval })),
     extras: extras.map((e) => ({ description: e.d, amount: e.v })),
-    service_order_id: isNew && q.service_order_id ? q.service_order_id : undefined,
+    service_order_id: st.so ? st.so.id : '',
+    from_os: isNew && fromOs && st.so && +st.so.id === +fromOs.service_order_id ? 1 : undefined,
   });
   const validate = () => {
     if (st.target === 'cliente' && !st.customer) throw new Error('Selecione o cliente do orçamento (ou marque "Lead" e informe o nome)');
@@ -4787,6 +4853,8 @@ async function viewQuoteForm(v, id) {
     const msg = `Olá${name ? ', ' + name.split(' ')[0] : ''}! Segue o orçamento #${q.id} no valor de ${money(q.total)}${q.expires_at ? `, válido até ${dOnly(q.expires_at)}` : ''}.\nVocê pode ver, imprimir e aprovar por aqui: ${q.public_url}`;
     return { name, phone, email, msg };
   };
+  const osAlert = $('.q-os [data-act=sodel]', v);
+  if (osAlert) osAlert.onclick = () => busy(osAlert, async () => { await api('quote_link_os', { body: { id: q.id, service_order_id: '' } }); toast('OS desassociada do orçamento'); route(); });
   const menu = $('.page-head .dd-menu', v);
   if (menu) menu.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-act]'); if (!b) return;
@@ -4807,6 +4875,9 @@ async function viewQuoteForm(v, id) {
           const r = await api('quote_mark', { body: { id: q.id, action: { sent: 'enviado', approved: 'aprovado', refused: 'recusado' }[b.dataset.act] } });
           toast(`Status: ${(Q_STATUS[r.status] || {}).label || r.status}`); route(); break;
         }
+        case 'soassoc':
+          await pickOsModal(q.customer_id, q.service_order_id, async (osId) => { await api('quote_link_os', { body: { id: q.id, service_order_id: osId } }); toast(`OS #${osId} associada ao orçamento`); route(); });
+          break;
         case 'os': {
           // Nova OS (não salva) ligada a este orçamento, com o cliente e o que foi orçado
           const lines2 = (q.items || []).map((i) => `- ${i.description} (${qty(i.quantity)} ${i.unit || ''})`.trim());
