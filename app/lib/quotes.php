@@ -10,7 +10,7 @@ class Quotes
 
     public static function get(int $id): array
     {
-        $q = DB::one('SELECT q.*, u.name user_name, u.phone user_phone, u.email user_email, c.name customer_name, c.trade_name customer_trade_name,
+        $q = DB::one('SELECT q.*, (SELECT sa.number FROM sales sa WHERE sa.id = q.sale_id) sale_number, u.name user_name, u.phone user_phone, u.email user_email, c.name customer_name, c.trade_name customer_trade_name,
                 c.document customer_document, c.phone customer_phone, c.email customer_email,
                 c.street customer_street, c.number customer_number, c.complement customer_complement,
                 c.district customer_district, c.city customer_city, c.state customer_state, c.cep customer_cep
@@ -182,7 +182,7 @@ class Quotes
                 $data['service_order_id'] = $soId;
                 $data['public_token'] = bin2hex(random_bytes(16));
                 $data['created_at'] = now();
-                $id = DB::insert('quotes', $data);
+                $id = DB::insertNumbered('quotes', $data);
             }
             foreach ($items as $it) DB::insert('quote_items', ['quote_id' => $id] + $it);
             foreach ($extras as $e) DB::insert('quote_extras', ['quote_id' => $id] + $e);
@@ -256,7 +256,7 @@ class Quotes
     {
         return DB::tx(function () use ($id, $paymentMethod, $userId, $installments, $installmentDays, $plan, $entry) {
             $q = self::get($id);
-            if ($q['status'] === 'vendido') throw new AppError('Este orçamento já virou a venda #' . $q['sale_id']);
+            if ($q['status'] === 'vendido') throw new AppError('Este orçamento já virou a venda #' . (DB::numberOf('sales', (int)$q['sale_id']) ?? $q['sale_id']));
             if ($q['status'] !== 'aprovado') throw new AppError('Só orçamentos aprovados podem virar venda. Mude o status para "Aprovado" primeiro.');
             if (!$q['customer_id']) throw new AppError('Este orçamento é para um lead. Cadastre o cliente antes de gerar a venda.');
             if (!$q['items']) throw new AppError('O orçamento não tem itens');
@@ -275,7 +275,7 @@ class Quotes
                 'surcharge' => (float)$q['extras_total'],
                 'extras' => array_map(fn($e) => ['description' => $e['description'], 'amount' => $e['amount']], $q['extras']),
                 'quote_id' => $id,
-                'note' => 'Orçamento #' . $id,
+                'note' => 'Orçamento #' . $q['number'],
                 'payment_terms' => $q['payment_terms'],
                 'items' => array_map(fn($i) => ['product_id' => $i['product_id'], 'quantity' => $i['quantity'], 'unit_price' => $i['unit_price']], $q['items']),
             ], $userId);
@@ -341,7 +341,7 @@ class Quotes
                 else self::mark($id, $action);
                 $ok++;
             } catch (AppError $e) {
-                $errors[] = ['id' => $id, 'error' => $e->getMessage()];
+                $errors[] = ['id' => $id, 'number' => DB::numberOf('quotes', $id) ?? $id, 'error' => $e->getMessage()];
             }
         }
         return ['ok' => $ok, 'errors' => $errors];
@@ -353,7 +353,7 @@ class Quotes
         DB::tx(function () use ($id) {
             $q = DB::one('SELECT * FROM quotes WHERE id = ? AND company_id = ?' . DB::lockSuffix(), [$id, Tenant::need()]);
             if (!$q) throw new AppError('Orçamento não encontrado', 404);
-            if ($q['status'] === 'vendido' || $q['sale_id']) throw new AppError('Este orçamento virou a venda #' . $q['sale_id'] . ' e não pode ser excluído');
+            if ($q['status'] === 'vendido' || $q['sale_id']) throw new AppError('Este orçamento virou a venda #' . (DB::numberOf('sales', (int)$q['sale_id']) ?? $q['sale_id']) . ' e não pode ser excluído');
             DB::run('DELETE FROM quote_items WHERE quote_id = ?', [$id]);
             DB::run('DELETE FROM quote_extras WHERE quote_id = ?', [$id]);
             DB::run('DELETE FROM quotes WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);

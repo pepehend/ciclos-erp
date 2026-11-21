@@ -1733,7 +1733,7 @@ async function viewNewSale(v) {
     if (!cart.length) throw new Error('Adicione pelo menos um item');
     if (!method) throw new Error('Escolha a forma de pagamento');
     const r = await api('sale_create', { body: { payment_method: method, ...inst.get(), payment_terms: $('#sterms', v).value, discount: $('#disc', v).value, customer_id: customer.id, note: $('#note', v).value, items: cart.map((c) => ({ product_id: c.p.id, quantity: c.q, unit_price: c.price })), extras: extras.map((x) => ({ description: x.d, amount: x.v })) } });
-    invalidateProducts(); toast(`Venda #${r.id} registrada`); go('venda/' + r.id);
+    invalidateProducts(); toast(`Venda #${r.number ?? r.id} registrada`); go('venda/' + r.id);
   });
   paint(); paintExtras();
 }
@@ -1838,7 +1838,7 @@ async function viewSales(v) {
     $('#totals', v).textContent = `${d.total} venda${d.total === 1 ? '' : 's'} · ${money(d.sum)}${f.status === 'cancelada' ? '' : ' em vendas concluídas'}`;
     const list = $('#list', v);
     list.innerHTML = d.rows.length ? `<div class="table-wrap"><table><thead><tr><th>#</th><th>Data</th><th>Cliente</th><th>Pagamento</th><th class="num">Itens</th><th class="num">Total</th><th class="num">Lucro</th><th>Vendedor</th></tr></thead><tbody>
-      ${d.rows.map((s) => `<tr class="click" data-id="${s.id}"><td>${s.id}</td><td class="nowrap">${dt(s.created_at)}</td><td>${esc(s.customer || '—')}</td><td>${esc(payLabel(s.payment_method))}</td><td class="num">${s.items}</td>
+      ${d.rows.map((s) => `<tr class="click" data-id="${s.id}"><td>${s.number ?? s.id}</td><td class="nowrap">${dt(s.created_at)}</td><td>${esc(s.customer || '—')}</td><td>${esc(payLabel(s.payment_method))}</td><td class="num">${s.items}</td>
       <td class="num">${s.status === 'cancelada' ? `<s class="muted">${money(s.total)}</s> <span class="badge err">cancelada</span>` : money(s.total)}</td><td class="num">${s.status === 'cancelada' ? '—' : money(s.total - s.cost_total)}</td><td class="small muted">${esc(s.user_name || '')}</td></tr>`).join('')}</tbody></table></div>`
       : `<div class="empty">Nenhuma venda encontrada${filterCount(f, def) ? ' com esses filtros' : ' no período'}.</div>`;
     if (d.total > 50) list.appendChild(pager(d.total, f.page, 50, (p) => { f.page = p; load(); }));
@@ -1851,7 +1851,7 @@ async function viewSales(v) {
 async function viewSale(v, id) {
   const s = await api('sale', { params: { id } });
   const profit = s.total - s.cost_total;
-  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/vendas">← Vendas</a></p><h1>Venda #${s.id} ${s.status === 'cancelada' ? '<span class="badge err">cancelada</span>' : ''}</h1>${s.quote_id ? `<p class="small" style="margin:0">Gerada a partir do <a href="#/orcamento/${s.quote_id}">orçamento #${s.quote_id}</a></p>` : ''}
+  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/vendas">← Vendas</a></p><h1>Venda #${s.number ?? s.id} ${s.status === 'cancelada' ? '<span class="badge err">cancelada</span>' : ''}</h1>${s.quote_id ? `<p class="small" style="margin:0">Gerada a partir do <a href="#/orcamento/${s.quote_id}">orçamento #${s.quote_id}</a></p>` : ''}
     <p class="muted">${dt(s.created_at)} · ${esc(payLabel(s.payment_method))}${+s.installments > 1 || +s.installment_entry ? ' · ' + esc(instText(s.installments, s.installment_days, s.installment_entry)) : ''}${s.payment_terms ? ' · ' + esc(s.payment_terms) : ''} · por ${esc(s.user_name || '—')}</p></div>
     <div class="actions">${can('vendas.add') ? '<a class="btn" href="#/vendas/nova">Nova venda</a>' : ''}${canCancelSale(s) ? '<button class="btn danger" id="cancel">Cancelar venda</button>' : ''}</div></div>
     ${s.status === 'cancelada' ? `<div class="alert err">Cancelada em ${dt(s.canceled_at)} por ${esc(s.canceled_by_name || '—')}. Os itens voltaram para o estoque.</div>` : ''}
@@ -2494,7 +2494,7 @@ async function viewCustomer(v, id) {
     </div>
     ${c.portal && !del ? portalCardHtml(c) : ''}
     <div class="card"><h2>Compras</h2>${c.sales.length ? `<div class="table-wrap"><table><thead><tr><th>#</th><th>Data</th><th>Pagamento</th><th class="num">Itens</th><th class="num">Total</th><th>Vendedor</th></tr></thead><tbody>
-      ${c.sales.map((s) => `<tr class="click" data-go="venda/${s.id}"><td>${s.id}</td><td class="nowrap">${dt(s.created_at)}</td><td>${esc(payLabel(s.payment_method))}</td><td class="num">${s.items}</td><td class="num">${s.status === 'cancelada' ? `<s class="muted">${money(s.total)}</s> <span class="badge err">cancelada</span>` : money(s.total)}</td><td class="small muted">${esc(s.user_name || '')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nenhuma compra ainda.</p>'}</div>
+      ${c.sales.map((s) => `<tr class="click" data-go="venda/${s.id}"><td>${s.number ?? s.id}</td><td class="nowrap">${dt(s.created_at)}</td><td>${esc(payLabel(s.payment_method))}</td><td class="num">${s.items}</td><td class="num">${s.status === 'cancelada' ? `<s class="muted">${money(s.total)}</s> <span class="badge err">cancelada</span>` : money(s.total)}</td><td class="small muted">${esc(s.user_name || '')}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nenhuma compra ainda.</p>'}</div>
     <div id="custhist"></div>`;
   v.addEventListener('click', (e) => { const r = e.target.closest('[data-go]'); if (r) go(r.dataset.go); });
   if ($('#edit', v)) $('#edit', v).onclick = () => customerForm(c, () => route(), { editing: true });
@@ -2795,7 +2795,7 @@ async function viewServiceOrderForm(v, id) {
   const fields = (f) => {
     const sel = (name, list, valueKey, labelFn, cur, empty) => `<select name="${name}">${empty ? `<option value="">${empty}</option>` : ''}${list.map((x) => `<option value="${esc(x[valueKey])}" ${String(cur ?? '') === String(x[valueKey]) ? 'selected' : ''}>${esc(labelFn(x))}</option>`).join('')}</select>`;
     $('#eqs', v).innerHTML = sel('equipment_id', f.equipments, 'id', (e) => `${e.name}${e.serial ? ' · ' + e.serial : ''}`, o.equipment_id, 'Nenhum equipamento');
-    $('#qts', v).innerHTML = sel('quote_id', f.quotes, 'id', (q) => `Orçamento #${q.id}${q.lead_name ? ' · ' + q.lead_name : ''} (${dOnly(q.created_at)})`, o.quote_id, 'Selecione um orçamento');
+    $('#qts', v).innerHTML = sel('quote_id', f.quotes, 'id', (q) => `Orçamento #${q.number ?? q.id}${q.lead_name ? ' · ' + q.lead_name : ''} (${dOnly(q.created_at)})`, o.quote_id, 'Selecione um orçamento');
   };
   const orig = o.origin || 'chamado';
   const taskOpts = (() => {
@@ -3126,7 +3126,7 @@ async function viewServiceOrderForm(v, id) {
         ${can('orcamentos.add') ? `<button type="button" class="btn sm" data-act="quote">${icon('plus')}Abrir orçamento</button>` : ''}</span></div>
     <p class="small muted">A OS não gera cobrança. Para cobrar o serviço executado, abra um orçamento: ele já vem com o cliente e com os produtos, serviços e custos lançados em Valores.</p>
     ${D.quotes.length ? `<div class="table-wrap"><table><thead><tr><th>Orçamento</th><th>Ligação</th><th>Status</th><th class="num">Total</th><th>Criado em</th><th></th></tr></thead><tbody>
-      ${D.quotes.map((q) => `<tr class="click" data-goq="${q.id}"><td><strong>#${q.id}</strong></td><td>${esc(q.relation)}</td><td>${qBadge(q.status)}</td><td class="num">${money(q.total)}</td><td>${dOnly(q.created_at)}</td>
+      ${D.quotes.map((q) => `<tr class="click" data-goq="${q.id}"><td><strong>#${q.number ?? q.id}</strong></td><td>${esc(q.relation)}</td><td>${qBadge(q.status)}</td><td class="num">${money(q.total)}</td><td>${dOnly(q.created_at)}</td>
         <td class="num">${+q.service_order_id === +o.id && q.status !== 'vendido' && can('orcamentos.edit') ? `<button type="button" class="btn sm js-view-only" data-qunlink="${q.id}" title="Desassociar">${icon('x')}</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
       : '<p class="muted">Nenhum orçamento ligado a esta ordem.</p>'}</div>`;
   pane('orcamentos').addEventListener('click', async (e) => {
@@ -4343,7 +4343,7 @@ const qSelectable = (current) => Object.entries(Q_STATUS).filter(([k, s]) => k !
 const qBadge = (st) => `<span class="qbadge" style="--c:${(Q_STATUS[st] || {}).color || '#666'}">${esc((Q_STATUS[st] || {}).label || st)}</span>`;
 const daysBetween = (a, b) => Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000);
 function qDeadline(q, todayIso) {
-  if (q.status === 'vendido') return `<div class="qstrip ok">Virou a venda #${esc(q.sale_id)}</div>`;
+  if (q.status === 'vendido') return `<div class="qstrip ok">Virou a venda #${esc(q.sale_number ?? q.sale_id)}</div>`;
   if (q.status === 'aprovado') return '<div class="qstrip ok">O orçamento foi aprovado</div>';
   if (q.status === 'recusado') return '<div class="qstrip err">O orçamento foi recusado</div>';
   if (!q.expires_at) return '';
@@ -4415,7 +4415,7 @@ async function viewQuotes(v) {
     paintSel();
   };
   const card = (q) => `<div class="qcard" draggable="${q.status !== 'vendido'}" data-id="${q.id}">
-      <div class="qcard-top"><label class="qsel" title="Selecionar"><input type="checkbox" data-sel="${q.id}" aria-label="Selecionar orçamento #${q.id}"></label><a href="#/orcamento/${q.id}">Orçamento #${q.id}</a>${qBadge(q.status)}</div>
+      <div class="qcard-top"><label class="qsel" title="Selecionar"><input type="checkbox" data-sel="${q.id}" aria-label="Selecionar orçamento #${q.number ?? q.id}"></label><a href="#/orcamento/${q.id}">Orçamento #${q.number ?? q.id}</a>${qBadge(q.status)}</div>
       <div class="qlabel">Cliente:</div><div class="qclient">${esc(qClient(q))}</div>
       <div class="qgrid"><div><div class="qlabel">Valor:</div>${money(q.total)}</div><div><div class="qlabel">Responsável:</div>${esc(q.user_name || '—')}</div><div><div class="qlabel">Solicitação:</div>${dOnly(q.request_date)}</div></div>
       ${qDeadline(q, data.today)}</div>`;
@@ -4442,7 +4442,7 @@ async function viewQuotes(v) {
       col.addEventListener('drop', async (e) => {
         e.preventDefault(); col.classList.remove('over');
         const q = data.rows.find((r) => r.id == dragId); if (!q || q.status === col.dataset.st) return;
-        try { await api('quote_status', { body: { id: q.id, status: col.dataset.st } }); toast(`Orçamento #${q.id}: ${Q_STATUS[col.dataset.st].label}`); load(); }
+        try { await api('quote_status', { body: { id: q.id, status: col.dataset.st } }); toast(`Orçamento #${q.number ?? q.id}: ${Q_STATUS[col.dataset.st].label}`); load(); }
         catch (err) { fail(err); }
       });
     });
@@ -4450,7 +4450,7 @@ async function viewQuotes(v) {
   const paintList = () => {
     $('#board', v).innerHTML = data.rows.length ? `<div class="table-wrap"><table><thead><tr><th class="selcol"><input type="checkbox" id="selall" aria-label="Selecionar todos"></th><th>#</th><th>Cliente</th><th>Status</th><th class="num">Valor</th><th>Responsável</th><th>Solicitação</th><th>Validade</th></tr></thead><tbody>
       ${data.rows.map((q) => { const d = q.expires_at && ['rascunho', 'em_elaboracao', 'aguardando_envio', 'enviado'].includes(q.status) ? daysBetween(data.today, q.expires_at) : null;
-        return `<tr class="click" data-id="${q.id}"><td class="selcol"><input type="checkbox" data-sel="${q.id}" aria-label="Selecionar orçamento #${q.id}"></td><td>${q.id}</td><td>${esc(qClient(q))}${q.external_code ? `<div class="small muted">Ref. ${esc(q.external_code)}</div>` : ''}</td><td>${qBadge(q.status)}</td><td class="num">${money(q.total)}</td><td>${esc(q.user_name || '')}</td><td class="nowrap">${dOnly(q.request_date)}</td>
+        return `<tr class="click" data-id="${q.id}"><td class="selcol"><input type="checkbox" data-sel="${q.id}" aria-label="Selecionar orçamento #${q.number ?? q.id}"></td><td>${q.number ?? q.id}</td><td>${esc(qClient(q))}${q.external_code ? `<div class="small muted">Ref. ${esc(q.external_code)}</div>` : ''}</td><td>${qBadge(q.status)}</td><td class="num">${money(q.total)}</td><td>${esc(q.user_name || '')}</td><td class="nowrap">${dOnly(q.request_date)}</td>
         <td class="nowrap ${d !== null && d < 0 ? 'stock-low' : ''}">${q.expires_at ? dOnly(q.expires_at) : '—'}${d !== null ? `<div class="small muted">${d < 0 ? 'vencido' : d === 0 ? 'vence hoje' : 'em ' + d + ' dia(s)'}</div>` : ''}</td></tr>`; }).join('')}</tbody></table></div>`
       : `<div class="empty">Nenhum orçamento encontrado. <a href="#/orcamento/novo">Criar o primeiro</a></div>`;
     $$('#board tr[data-id]', v).forEach((tr) => (tr.onclick = (e) => { if (!e.target.closest('.selcol')) go('orcamento/' + tr.dataset.id); }));
@@ -4464,7 +4464,7 @@ async function viewQuotes(v) {
   const bulkMenu = $('#bulk .dd-menu', v);
   const report = (r, verb) => {
     if (r.ok) toast(`${r.ok} orçamento(s) ${verb}`);
-    if (r.errors.length) modal({ title: r.errors.length === 1 ? '1 orçamento não pôde ser alterado' : `${r.errors.length} orçamentos não puderam ser alterados`, body: `<ul class="bulk-err">${r.errors.map((x) => `<li><a href="#/orcamento/${x.id}">Orçamento #${x.id}</a>: ${esc(x.error)}</li>`).join('')}</ul>`, foot: '<button class="btn primary" data-close>Entendi</button>' });
+    if (r.errors.length) modal({ title: r.errors.length === 1 ? '1 orçamento não pôde ser alterado' : `${r.errors.length} orçamentos não puderam ser alterados`, body: `<ul class="bulk-err">${r.errors.map((x) => `<li><a href="#/orcamento/${x.id}">Orçamento #${x.number ?? x.id}</a>: ${esc(x.error)}</li>`).join('')}</ul>`, foot: '<button class="btn primary" data-close>Entendi</button>' });
     sel.clear(); load();
   };
   const runBulk = async (body, verb) => { try { report(await api('quotes_bulk', { body: { ids: [...sel], ...body } }), verb); } catch (err) { fail(err); } };
@@ -4538,7 +4538,7 @@ async function pickQuoteModal(customerId, osId, onPick, osNo) {
   const m = modal({ title: 'Associar orçamento', wide: true,
     body: rows.length ? `<p class="small muted">Orçamentos deste cliente ainda não vendidos. Escolha o que será associado à OS #${osNo ?? osId}.${rows.some((q) => q.service_order_id) ? ' Os que já têm outra OS passam a apontar para esta.' : ''}</p>
       <div class="table-wrap"><table><thead><tr><th>Orçamento</th><th>Status</th><th class="num">Total</th><th>Criado em</th><th>OS atual</th></tr></thead><tbody>
-      ${rows.map((q) => `<tr class="click" data-pick="${q.id}"><td><strong>#${q.id}</strong></td><td>${qBadge(q.status)}</td><td class="num">${money(q.total)}</td><td>${dOnly(q.request_date)}</td><td>${q.service_order_id ? '#' + (q.service_order_number ?? q.service_order_id) : '—'}</td></tr>`).join('')}</tbody></table></div>`
+      ${rows.map((q) => `<tr class="click" data-pick="${q.id}"><td><strong>#${q.number ?? q.id}</strong></td><td>${qBadge(q.status)}</td><td class="num">${money(q.total)}</td><td>${dOnly(q.request_date)}</td><td>${q.service_order_id ? '#' + (q.service_order_number ?? q.service_order_id) : '—'}</td></tr>`).join('')}</tbody></table></div>`
       : '<p class="muted">Este cliente não tem orçamento disponível para associar.</p>',
     foot: '<button class="btn" data-close>Fechar</button>' });
   m.el.addEventListener('click', async (e) => {
@@ -4554,13 +4554,13 @@ function quoteReadSide(q, team) {
   const resp = (team.find((u) => +u.id === +q.user_id) || {}).name || q.user_name || '';
   const f = (label, val) => `<div class="ro-f"><div class="ro-l">${label}</div><div class="ro-v">${val || ''}</div></div>`;
   const when = q.status_changed_at ? ` em ${dt(q.status_changed_at)}` : '';
-  const approval = q.status === 'vendido' ? `Aprovado e convertido na <a href="#/venda/${q.sale_id}">venda #${q.sale_id}</a>.`
+  const approval = q.status === 'vendido' ? `Aprovado e convertido na <a href="#/venda/${q.sale_id}">venda #${q.sale_number ?? q.sale_id}</a>.`
     : q.status === 'aprovado' ? `Orçamento aprovado${when}.`
     : q.status === 'recusado' ? `Orçamento recusado${when}.`
     : 'Este orçamento ainda não foi aprovado pelo cliente.';
   return `<aside class="card qside-ro">
       <div class="qside-icon">${icon('quote')}</div>
-      <div class="qside-title" style="text-align:left">Orçamento #${q.id}</div>
+      <div class="qside-title" style="text-align:left">Orçamento #${q.number ?? q.id}</div>
       <div style="margin-bottom:12px">${qBadge(q.status)}</div>
       ${f(lead ? 'Lead' : 'Cliente', lead ? esc(name) : (can('clientes') ? `<a href="#/cliente/${q.customer_id}">${esc(name)}</a>` : esc(name)))}
       ${f('Contatos', contacts.map(esc).join('<br>'))}
@@ -4608,7 +4608,7 @@ async function viewQuoteForm(v, id) {
   let qinst = null;
   const editableStatuses = qSelectable(q.status);
 
-  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/orcamentos">← Orçamentos</a></p><h1>${isNew ? (copyOf ? `Novo orçamento <span class="muted small">(cópia do #${copyOf.id})</span>` : fromOs ? `Novo orçamento <span class="muted small">(da OS #${fromOs.service_order_id})</span>` : 'Novo orçamento') : 'Orçamento #' + q.id}</h1></div>
+  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/orcamentos">← Orçamentos</a></p><h1>${isNew ? (copyOf ? `Novo orçamento <span class="muted small">(cópia do #${copyOf.number ?? copyOf.id})</span>` : fromOs ? `Novo orçamento <span class="muted small">(da OS #${fromOs.service_order_id})</span>` : 'Novo orçamento') : 'Orçamento #' + (q.number ?? q.id)}</h1></div>
     <div class="actions">${!isNew ? `<a class="btn qbtn-view" href="${esc(q.public_url)}" target="_blank" rel="noopener">${icon('eye')}Visualizar orçamento</a>` : ''}
       ${!isNew && !editing && q.status === 'aprovado' && can('orcamentos.convert') ? `<button class="btn" id="conv" style="border-color:var(--ok);color:var(--ok)">${icon('cart')}Gerar venda</button>` : ''}
       ${editing ? `<button class="btn" id="cancel">${icon('x')}Cancelar</button><button class="btn primary" id="save">Salvar</button>`
@@ -4629,7 +4629,7 @@ async function viewQuoteForm(v, id) {
           </div></div>`}</div></div>
     ${!isNew && (q.service_orders || []).length ? `<div class="alert info q-os">${icon('tool')}<span>${q.service_orders.map((so) => `${+so.id === +q.service_order_id ? 'Associado à' : 'Gerou a'} <a href="#/ordem/${so.id}"><strong>OS #${so.number ?? so.id}</strong></a> (${esc(so.status_label)})${!editing && !sold && can('orcamentos.edit') && +so.id === +q.service_order_id ? ` <button type="button" class="btn sm" data-act="sodel">${icon('x')}Desassociar</button>` : ''}`).join(' · ')}</span></div>` : ''}
     ${isNew && fromOs ? `<div class="alert info q-os">${icon('tool')}<span>Orçamento da <a href="#/ordem/${fromOs.service_order_id}"><strong>OS #${fromOs.service_order_number ?? fromOs.service_order_id}</strong></a>: confira os itens e salve.</span></div>` : ''}
-    ${sold ? `<div class="alert ok">Este orçamento virou a <a href="#/venda/${q.sale_id}"><strong>venda #${q.sale_id}</strong></a> e não pode mais ser alterado. Use <strong>Duplicar</strong> para fazer um parecido.</div>` : ''}
+    ${sold ? `<div class="alert ok">Este orçamento virou a <a href="#/venda/${q.sale_id}"><strong>venda #${q.sale_number ?? q.sale_id}</strong></a> e não pode mais ser alterado. Use <strong>Duplicar</strong> para fazer um parecido.</div>` : ''}
     ${editing && q.client_response ? `<div class="alert ${q.status === 'recusado' ? 'err' : 'ok'}">Resposta do cliente: “${esc(q.client_response)}”</div>` : ''}
     ${editing && !isNew && ['aprovado', 'recusado'].includes(q.status) && q.status_changed_at ? `<p class="muted small" style="margin-top:-8px">${Q_STATUS[q.status].label} em ${dt(q.status_changed_at)}</p>` : ''}
     <div class="qsumbar">
@@ -4643,7 +4643,7 @@ async function viewQuoteForm(v, id) {
       ${locked ? quoteReadSide(q, team) : ''}
       <aside class="card" ${locked ? 'hidden' : ''}>
         <div class="qside-icon">${icon('quote')}</div>
-        <div class="qside-title">${isNew ? 'Novo orçamento' : 'Orçamento #' + q.id}</div>
+        <div class="qside-title">${isNew ? 'Novo orçamento' : 'Orçamento #' + (q.number ?? q.id)}</div>
         <div style="text-align:center;margin-bottom:12px" id="stbadge">${qBadge(q.status)}</div>
         <div class="form">
           <div><div class="qlabel-f">Para</div><div class="inline"><label class="check"><input type="radio" name="target" value="cliente" ${st.target === 'cliente' ? 'checked' : ''}> Cliente</label><label class="check"><input type="radio" name="target" value="lead" ${st.target === 'lead' ? 'checked' : ''}> Lead</label></div>
@@ -4856,7 +4856,7 @@ async function viewQuoteForm(v, id) {
     const name = q.customer_id ? (q.customer_trade_name || q.customer_name) : q.lead_name;
     const phone = String((q.customer_id ? q.customer_phone : q.lead_phone) || '').replace(/\D/g, '');
     const email = q.customer_id ? q.customer_email : q.lead_email;
-    const msg = `Olá${name ? ', ' + name.split(' ')[0] : ''}! Segue o orçamento #${q.id} no valor de ${money(q.total)}${q.expires_at ? `, válido até ${dOnly(q.expires_at)}` : ''}.\nVocê pode ver, imprimir e aprovar por aqui: ${q.public_url}`;
+    const msg = `Olá${name ? ', ' + name.split(' ')[0] : ''}! Segue o orçamento #${q.number ?? q.id} no valor de ${money(q.total)}${q.expires_at ? `, válido até ${dOnly(q.expires_at)}` : ''}.\nVocê pode ver, imprimir e aprovar por aqui: ${q.public_url}`;
     return { name, phone, email, msg };
   };
   const osAlert = $('.q-os [data-act=sodel]', v);
@@ -4874,7 +4874,7 @@ async function viewQuoteForm(v, id) {
         case 'pdf': await downloadFile('api.php?r=quote_pdf&id=' + q.id, `orcamento-${q.id}.pdf`); break;
         case 'email':
           if (!c.email) toast('O cliente não tem e-mail cadastrado: escolha o destinatário no seu e-mail');
-          location.href = `mailto:${encodeURIComponent(c.email || '')}?subject=${encodeURIComponent('Orçamento #' + q.id)}&body=${encodeURIComponent(c.msg)}`; break;
+          location.href = `mailto:${encodeURIComponent(c.email || '')}?subject=${encodeURIComponent('Orçamento #' + (q.number ?? q.id))}&body=${encodeURIComponent(c.msg)}`; break;
         case 'whats':
           window.open(c.phone ? `https://wa.me/${c.phone.length <= 11 ? '55' + c.phone : c.phone}?text=${encodeURIComponent(c.msg)}` : `https://wa.me/?text=${encodeURIComponent(c.msg)}`, '_blank', 'noopener'); break;
         case 'sent': case 'approved': case 'refused': {
@@ -4889,18 +4889,18 @@ async function viewQuoteForm(v, id) {
           const lines2 = (q.items || []).map((i) => `- ${i.description} (${qty(i.quantity)} ${i.unit || ''})`.trim());
           (q.extras || []).forEach((e) => lines2.push(`- ${e.description}`));
           sessionStorage.setItem('soFromQuote', JSON.stringify({ customer_id: q.customer_id, origin: 'orcamento', quote_id: q.id,
-            description: `Atender o orçamento #${q.id}.${lines2.length ? '\n' + lines2.join('\n') : ''}${q.notes ? '\n' + q.notes : ''}`.slice(0, 2000) }));
+            description: `Atender o orçamento #${q.number ?? q.id}.${lines2.length ? '\n' + lines2.join('\n') : ''}${q.notes ? '\n' + q.notes : ''}`.slice(0, 2000) }));
           toast('Confira a ordem de serviço e salve.');
           go('ordem/nova'); break;
         }
         case 'dup': {
           sessionStorage.setItem('quoteCopy', JSON.stringify(q));
-          toast(`Cópia do orçamento #${q.id}: escolha o cliente e salve.`);
+          toast(`Cópia do orçamento #${q.number ?? q.id}: escolha o cliente e salve.`);
           if (location.hash === '#/orcamento/novo') route(); else go('orcamento/novo'); break;
         }
         case 'del':
-          if (!(await confirmBox(`Excluir o orçamento #${q.id}? Não dá para desfazer.`, { ok: 'Excluir', danger: true }))) return;
-          await api('quote_delete', { body: { id: q.id } }); toast(`Orçamento #${q.id} excluído`); go('orcamentos'); break;
+          if (!(await confirmBox(`Excluir o orçamento #${q.number ?? q.id}? Não dá para desfazer.`, { ok: 'Excluir', danger: true }))) return;
+          await api('quote_delete', { body: { id: q.id } }); toast(`Orçamento #${q.number ?? q.id} excluído`); go('orcamentos'); break;
       }
     } catch (err) { fail(err); }
   });
@@ -4934,7 +4934,7 @@ async function convertQuote(q) {
   if (gone.length) { fail(new Error(`Este orçamento tem item excluído do cadastro: ${gone.map((i) => i.description).join(', ')}. Tire o item (ou troque por outro) e salve antes de gerar a venda.`)); return; }
   const short = q.items.filter((i) => i.kind === 'produto' && i.product_type !== 'servico' && +i.quantity > +i.stock);
   const m = modal({
-    title: `Gerar venda do orçamento #${q.id}`,
+    title: `Gerar venda do orçamento #${q.number ?? q.id}`,
     body: `<p>Será criada uma venda de <strong>${money(q.total)}</strong> para <strong>${esc(q.customer_trade_name || q.customer_name)}</strong>, com baixa no estoque dos produtos. Os custos adicionais entram como acréscimo e os descontos como desconto.</p>
       ${short.length ? `<div class="alert warn">Estoque insuficiente: ${short.map((i) => `${esc(i.description)} (tem ${qty(i.stock)}, precisa ${qty(i.quantity)})`).join(', ')}. ${BH().sale_negative_stock === '1' ? 'A venda pode ser gerada, mas o estoque desses itens vai ficar negativo.' : 'Dê entrada no estoque antes de gerar a venda.'}</div>` : ''}
       <div class="qlabel-f">Forma de pagamento da venda</div>
@@ -4951,7 +4951,7 @@ async function convertQuote(q) {
   $('#go', m.el).onclick = (e) => busy(e.currentTarget, async () => {
     if (!method) throw new Error('Escolha a forma de pagamento');
     const r = await api('quote_convert', { body: { id: q.id, payment_method: method, ...cinst.get() } });
-    invalidateProducts(); m.close(); toast(`Venda #${r.sale_id} criada a partir do orçamento #${q.id}`); go('venda/' + r.sale_id);
+    invalidateProducts(); m.close(); toast(`Venda #${r.sale_number ?? r.sale_id} criada a partir do orçamento #${q.number ?? q.id}`); go('venda/' + r.sale_id);
   });
 }
 
@@ -5495,7 +5495,7 @@ async function viewPurchases(v) {
     rows = d.rows;
     box.innerHTML = d.rows.length ? `<div class="table-wrap"><table><thead><tr><th class="selcol"><input type="checkbox" id="selall" aria-label="Selecionar todas"></th><th>#</th><th>Fornecedor</th><th>Status</th><th class="hide-m">Pedido</th><th>Entrega</th><th class="num hide-m">Itens</th><th class="num">Total</th></tr></thead><tbody>
       ${d.rows.map((o) => { const late = o.expected_date && ['enviada', 'confirmada'].includes(o.status) && o.expected_date < d.today;
-        return `<tr class="click" data-id="${o.id}"><td class="selcol"><input type="checkbox" data-sel="${o.id}" aria-label="Selecionar ordem #${o.id}"></td><td>${o.id}</td><td>${esc(supName(o))}<div class="small muted">${esc(o.user_name || '')}</div></td><td>${poBadge(o.status)}</td>
+        return `<tr class="click" data-id="${o.id}"><td class="selcol"><input type="checkbox" data-sel="${o.id}" aria-label="Selecionar ordem #${o.number ?? o.id}"></td><td>${o.number ?? o.id}</td><td>${esc(supName(o))}<div class="small muted">${esc(o.user_name || '')}</div></td><td>${poBadge(o.status)}</td>
         <td class="hide-m nowrap">${dOnly(o.order_date)}</td><td class="nowrap ${late ? 'stock-low' : ''}">${o.status === 'recebida' && o.received_at ? 'recebida ' + dOnly(o.received_at) : o.expected_date ? dOnly(o.expected_date) + (late ? '<div class="small">atrasada</div>' : '') : '—'}</td>
         <td class="num hide-m">${o.item_count}</td><td class="num">${money(o.total)}</td></tr>`; }).join('')}</tbody></table></div>`
       : `<div class="empty">${f.q || f.status ? 'Nenhuma ordem encontrada.' : 'Nenhuma ordem de compra ainda.'} <a href="#/compra/nova">Criar uma ordem de compra</a></div>`;
@@ -5512,7 +5512,7 @@ async function viewPurchases(v) {
   const bulkMenu = $('#bulk .dd-menu', v);
   const report = (r, verb) => {
     if (r.ok) toast(`${r.ok} ordem(ns) ${verb}`);
-    if (r.errors.length) modal({ title: r.errors.length === 1 ? '1 ordem não pôde ser alterada' : `${r.errors.length} ordens não puderam ser alteradas`, body: `<ul class="bulk-err">${r.errors.map((x) => `<li><a href="#/compra/${x.id}">Ordem #${x.id}</a>: ${esc(x.error)}</li>`).join('')}</ul>`, foot: '<button class="btn primary" data-close>Entendi</button>' });
+    if (r.errors.length) modal({ title: r.errors.length === 1 ? '1 ordem não pôde ser alterada' : `${r.errors.length} ordens não puderam ser alteradas`, body: `<ul class="bulk-err">${r.errors.map((x) => `<li><a href="#/compra/${x.id}">Ordem #${x.number ?? x.id}</a>: ${esc(x.error)}</li>`).join('')}</ul>`, foot: '<button class="btn primary" data-close>Entendi</button>' });
     sel.clear(); load().catch(fail);
   };
   const runBulk = async (body, verb) => { try { report(await api('purchases_bulk', { body: { ids: [...sel], ...body } }), verb); } catch (err) { fail(err); } };
@@ -5559,7 +5559,7 @@ async function viewPurchaseForm(v, id) {
   const fmt2 = (n) => (Number(n) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtC = (n) => { n = Number(n) || 0; return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: Math.abs(n * 100 - Math.round(n * 100)) > 0.0001 ? 4 : 2 }); };
 
-  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/compras">← Ordens de compra</a></p><h1>${isNew ? 'Nova ordem de compra' : 'Ordem de compra #' + o.id}</h1></div>
+  v.innerHTML = `<div class="page-head"><div><p class="small"><a href="#/compras">← Ordens de compra</a></p><h1>${isNew ? 'Nova ordem de compra' : 'Ordem de compra #' + (o.number ?? o.id)}</h1></div>
     <div class="actions">${!isNew && !editable ? `<a class="btn" href="${esc(o.public_url)}" target="_blank" rel="noopener">${icon('eye')}Visualizar / imprimir</a>` : ''}
       ${!isNew && !editable && canEdit ? `<button class="btn" id="edit">${icon('pencil')}Editar</button>` : ''}
       ${!isNew && !editable ? `<div class="dd"><button type="button" class="btn dd-btn qbtn-more" aria-haspopup="true" aria-expanded="false">${icon('menu')}Mais ações${icon('chevron')}</button>
@@ -5583,7 +5583,7 @@ async function viewPurchaseForm(v, id) {
     <div class="qform ${editable ? '' : 'locked'}">
       <aside class="card qside">
         <div class="qside-icon">${icon('order')}</div>
-        <div class="qside-title">${isNew ? 'Nova ordem de compra' : 'Ordem de compra #' + o.id}</div>
+        <div class="qside-title">${isNew ? 'Nova ordem de compra' : 'Ordem de compra #' + (o.number ?? o.id)}</div>
         <div style="text-align:center;margin-bottom:12px">${poBadge(o.status)}</div>
         <div class="form">
           <div><div class="qlabel-f">Fornecedor *</div><div id="supsel"></div>
@@ -5736,7 +5736,7 @@ async function viewPurchaseForm(v, id) {
     const b = e.target.closest('[data-st]'); if (!b) return;
     const st = b.dataset.st;
     let date = null;
-    if (st === 'cancelada' && !(await confirmBox(`Cancelar a ordem de compra #${o.id}?`, { ok: 'Cancelar ordem', danger: true }))) return;
+    if (st === 'cancelada' && !(await confirmBox(`Cancelar a ordem de compra #${o.number ?? o.id}?`, { ok: 'Cancelar ordem', danger: true }))) return;
     if (st === 'recebida') {
       date = await new Promise((resolve) => {
         const m = modal({ title: 'Mercadoria recebida', body: `<label>Data do recebimento <input type="date" id="rdate" value="${today()}"></label>
@@ -5749,10 +5749,10 @@ async function viewPurchaseForm(v, id) {
       });
       if (!date) return;
     }
-    busy(b, async () => { await api('purchase_status', { body: { id: o.id, status: st, date } }); toast(`Ordem #${o.id}: ${PO_STATUS[st].label}`); route(); });
+    busy(b, async () => { await api('purchase_status', { body: { id: o.id, status: st, date } }); toast(`Ordem #${o.number ?? o.id}: ${PO_STATUS[st].label}`); route(); });
   };
   if ($('#del', v)) $('#del', v).onclick = async (e) => {
-    if (!(await confirmBox(`Excluir a ordem de compra #${o.id}? Não dá para desfazer.`, { ok: 'Excluir', danger: true }))) return;
+    if (!(await confirmBox(`Excluir a ordem de compra #${o.number ?? o.id}? Não dá para desfazer.`, { ok: 'Excluir', danger: true }))) return;
     busy(e.target.closest('button'), async () => { await api('purchase_delete', { body: { id: o.id } }); toast('Ordem excluída'); go('compras'); });
   };
 }
@@ -5771,9 +5771,9 @@ function sendPurchase(o, onClose) {
     fornecedor: name && name !== '—' ? name : '', numero: o.id, entrega: o.expected_date ? `, com entrega até ${dOnly(o.expected_date)}` : '',
     itens: list, link: o.public_url, empresa: (state.meta.company || {}).name || '' });
   const wa = phone ? `https://wa.me/${phone.length <= 11 ? '55' + phone : phone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
-  const mail = `mailto:${encodeURIComponent(o.supplier_email || '')}?subject=${encodeURIComponent('Pedido de compra #' + o.id)}&body=${encodeURIComponent(msg)}`;
+  const mail = `mailto:${encodeURIComponent(o.supplier_email || '')}?subject=${encodeURIComponent('Pedido de compra #' + (o.number ?? o.id))}&body=${encodeURIComponent(msg)}`;
   const m = modal({
-    title: `Enviar pedido #${o.id}`,
+    title: `Enviar pedido #${o.number ?? o.id}`,
     body: `<p>A ordem está marcada como <strong>Enviada</strong>. Mande o link para o fornecedor: ele vê o pedido e imprime${confirmOn ? ', e pode confirmar por ele' : ''}.</p>
       <label>Link do pedido <span class="inline" style="flex-wrap:nowrap"><input id="plink" readonly value="${esc(o.public_url)}" style="flex:1"><button type="button" class="btn" id="cpy">${icon('copy')}Copiar</button></span></label>
       <div class="send-grid">
@@ -5838,7 +5838,7 @@ async function viewFinance(v) {
       ${data.rows.map((e) => `<tr class="click" data-id="${e.id}">
         <td class="nowrap">${dOnly(e.status === 'pago' ? e.paid_at : e.due_date)}<div class="small muted">${e.status === 'pago' ? (e.paid_at !== e.due_date ? 'venc. ' + dOnly(e.due_date) : '') : 'vencimento'}</div></td>
         <td><div class="fin-desc"><span class="fin-dot ${e.type}"></span>${esc(e.description)}${+e.installments > 1 ? ` <span class="badge">${e.installment}/${e.installments}</span>` : ''}</div>
-          <div class="small muted">${[e.type === 'receber' ? 'A receber' : 'A pagar', e.party_name, e.payment_method ? payLabel(e.payment_method) : '', e.sale_id ? 'venda #' + e.sale_id : ''].filter(Boolean).map(esc).join(' · ')}</div></td>
+          <div class="small muted">${[e.type === 'receber' ? 'A receber' : 'A pagar', e.party_name, e.payment_method ? payLabel(e.payment_method) : '', e.sale_id ? 'venda #' + (e.sale_number ?? e.sale_id) : ''].filter(Boolean).map(esc).join(' · ')}</div></td>
         <td class="hide-m">${esc(e.category || '—')}</td><td>${finBadge(e)}</td>
         <td class="num ${e.type === 'receber' ? 'qty-pos' : 'qty-neg'}">${e.type === 'receber' ? '' : '− '}${money(val(e))}</td>
         <td class="num">${e.status === 'aberto' ? `<button class="btn sm" data-pay="${e.id}">${e.type === 'receber' ? 'Receber' : 'Pagar'}</button>` : ''}</td></tr>`).join('')}</tbody>
@@ -5885,7 +5885,7 @@ function financeForm(e, meta, onSaved) {
     title: isNew ? `Nova conta ${word}` : `Conta ${word}`,
     body: `<form class="form" id="ff">
       ${!isNew ? `<div class="inline" style="justify-content:space-between">${finBadge(e)}<span class="small muted">${+e.installments > 1 ? `Parcela ${e.installment} de ${e.installments} · ` : ''}lançado ${dt(e.created_at)}${e.user_name ? ' por ' + esc(e.user_name) : ''}</span></div>` : ''}
-      ${e.sale_id ? `<div class="alert">Este recebimento veio da <a href="#/venda/${e.sale_id}">venda #${e.sale_id}</a>. Para desfazer, cancele a venda.</div>` : ''}
+      ${e.sale_id ? `<div class="alert">Este recebimento veio da <a href="#/venda/${e.sale_id}">venda #${e.sale_number ?? e.sale_id}</a>. Para desfazer, cancele a venda.</div>` : ''}
       ${e.status === 'pago' ? `<div class="alert ok">${rec ? 'Recebido' : 'Pago'} em ${dOnly(e.paid_at)}: ${money(e.paid_amount)}${e.payment_method ? ' · ' + escpayLabel(e.payment_method) : ''}</div>` : ''}
       <label>Descrição * <input name="description" value="${esc(e.description)}" maxlength="200" required placeholder="${rec ? 'Ex.: Serviço de manutenção, cliente X' : 'Ex.: Aluguel, conta de luz, boleto do fornecedor'}"></label>
       <div class="row"><label>Valor ${isNew ? 'total ' : ''}* <input name="amount" data-num="money" inputmode="decimal" value="${e.amount ? fmt2(e.amount) : ''}" placeholder="0,00" required></label>
@@ -6582,7 +6582,7 @@ function tkTaskCard(r) {
   return `<button class="tk-task" data-tkgo="m/os/${r.id}"><div class="tk-tt"><b>${esc(when.slice(11, 16))}</b><span>${day}</span></div>
     <div class="tk-tb"><div class="tk-th"><strong>${soCustomer(r)}</strong><span class="tk-st ${tkStatusCls(r.status)}">${esc((r.status_label || r.status).toLowerCase())}</span></div>
       <div class="tk-td">${esc(r.task_type_name || r.description || '')}</div>
-      <div class="tk-tags"><span class="tk-tag">ID: ${r.id}</span>${+r.pending ? `<span class="tk-tag warn">${r.pending} pendência${+r.pending > 1 ? 's' : ''}</span>` : ''}${r.technician_name && !r.mine ? `<span class="tk-tag">${esc(r.technician_name)}</span>` : ''}</div></div></button>`;
+      <div class="tk-tags"><span class="tk-tag">ID: ${r.number ?? r.id}</span>${+r.pending ? `<span class="tk-tag warn">${r.pending} pendência${+r.pending > 1 ? 's' : ''}</span>` : ''}${r.technician_name && !r.mine ? `<span class="tk-tag">${esc(r.technician_name)}</span>` : ''}</div></div></button>`;
 }
 const tkProgress = (done, total, pctShow = true) => `<div class="tk-prog"><div class="tk-progl"><span>${done}/${total} OS finalizadas</span>${pctShow ? `<b>${total ? Math.round(done * 100 / total) : 0}%</b>` : ''}</div>
   <div class="tk-bar"><i style="width:${total ? Math.round(done * 100 / total) : 0}%"></i></div></div>`;
@@ -6873,7 +6873,7 @@ async function tkOrderPage(v, D, page, sub) {
   }
   if (page === 'valores') return tkParts(v, D, top, ro);
   if (page === 'orcamentos') {
-    v.innerHTML = `${top('Orçamentos')}<div class="tk-card tk-acts">${D.quotes.length ? D.quotes.map((q) => `<a class="tk-arow" href="#/orcamento/${q.id}"><div><strong>Orçamento #${q.id}</strong><small>${esc(q.relation || '')}${q.status_label ? ' · ' + esc(q.status_label) : ''}</small></div><b>${money(q.total)}</b></a>`).join('') : '<p class="tk-empty">Nenhum orçamento ligado a esta tarefa.</p>'}</div>`;
+    v.innerHTML = `${top('Orçamentos')}<div class="tk-card tk-acts">${D.quotes.length ? D.quotes.map((q) => `<a class="tk-arow" href="#/orcamento/${q.id}"><div><strong>Orçamento #${q.number ?? q.id}</strong><small>${esc(q.relation || '')}${q.status_label ? ' · ' + esc(q.status_label) : ''}</small></div><b>${money(q.total)}</b></a>`).join('') : '<p class="tk-empty">Nenhum orçamento ligado a esta tarefa.</p>'}</div>`;
     return;
   }
   if (page === 'questionarios') return tkQuestionnaires(v, D, top);

@@ -184,7 +184,7 @@ class QuotePdf
     {
         $client = $q['customer_id'] ? ($q['customer_trade_name'] ?: $q['customer_name']) : $q['lead_name'];
         $slug = strtolower(trim(preg_replace('/[^A-Za-z0-9]+/', '-', (string)@iconv('UTF-8', 'ASCII//TRANSLIT', (string)$client)), '-'));
-        return 'orcamento-' . (int)$q['id'] . ($slug ? '-' . substr($slug, 0, 40) : '') . '.pdf';
+        return 'orcamento-' . (int)$q['number'] . ($slug ? '-' . substr($slug, 0, 40) : '') . '.pdf';
     }
 
     private function need(float $h): void
@@ -249,7 +249,7 @@ class QuotePdf
         foreach ($info as $line) foreach ($p->wrap($line, 300 - ($x - $L), 8.5) as $l) { $yl += 11.5; $p->text($x, $yl, $l, 8.5, false, self::MUTED); }
 
         $yr = $top + 14;
-        $p->text($R, $yr, 'Orçamento #' . (int)$q['id'], 14, true, self::ACCENT, 'R');
+        $p->text($R, $yr, 'Orçamento #' . (int)$q['number'], 14, true, self::ACCENT, 'R');
         $meta = array_filter([
             'Emitido em ' . self::date($q['request_date']),
             $q['expires_at'] ? 'Válido até ' . self::date($q['expires_at']) : '',
@@ -364,7 +364,7 @@ class QuotePdf
         for ($i = 0; $i < $n; $i++) {
             $p->setPage($i);
             $p->line($L, 808, $R, 808);
-            $p->text($L, 821, $company . ' · Orçamento #' . (int)$q['id'], 7.5, false, self::MUTED);
+            $p->text($L, 821, $company . ' · Orçamento #' . (int)$q['number'], 7.5, false, self::MUTED);
             $p->text($R, 821, 'Página ' . ($i + 1) . ' de ' . $n, 7.5, false, self::MUTED, 'R');
         }
         return $p->output();

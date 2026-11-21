@@ -288,7 +288,7 @@ try {
         },
         'GET sale' => function () {
             Auth::requirePerm('vendas', 'clientes', 'orcamentos');
-            $s = DB::one('SELECT s.*, u.name user_name, c.name canceled_by_name, k.name customer_name, k.trade_name customer_trade_name,
+            $s = DB::one('SELECT s.*, (SELECT qq.number FROM quotes qq WHERE qq.id = s.quote_id) quote_number, u.name user_name, c.name canceled_by_name, k.name customer_name, k.trade_name customer_trade_name,
                 k.document customer_document, k.phone customer_phone, k.city customer_city, k.state customer_state FROM sales s
                 LEFT JOIN users u ON u.id = s.user_id LEFT JOIN users c ON c.id = s.canceled_by
                 LEFT JOIN customers k ON k.id = s.customer_id WHERE s.id = ? AND s.company_id = ?', [(int)q('id'), Tenant::need()]);
@@ -299,7 +299,8 @@ try {
         },
         'POST sale_create' => function () {
             $u = Auth::requirePerm('vendas.add');
-            return ['id' => Inventory::createSale(input(), $u['id'])];
+            $sid = Inventory::createSale(input(), $u['id']);
+            return ['id' => $sid, 'number' => DB::numberOf('sales', $sid)];
         },
         'POST sale_cancel' => function () {
             $u = Auth::requirePerm('vendas.cancel');
@@ -483,7 +484,7 @@ try {
             $w = ['q.company_id = ?']; $p = [Tenant::need()];
             if (($s = trim((string)q('q', ''))) !== '') {
                 $like = '%' . mb_strtolower($s) . '%';
-                $w[] = '(LOWER(c.name) LIKE ? OR LOWER(c.trade_name) LIKE ? OR LOWER(q.lead_name) LIKE ? OR LOWER(q.external_code) LIKE ? OR q.id = ?)';
+                $w[] = '(LOWER(c.name) LIKE ? OR LOWER(c.trade_name) LIKE ? OR LOWER(q.lead_name) LIKE ? OR LOWER(q.external_code) LIKE ? OR q.number = ?)';
                 array_push($p, $like, $like, $like, $like, (int)ltrim($s, '#'));
             }
             if (($st = q('status')) && isset(QuoteStatuses::map()[$st])) { $w[] = 'q.status = ?'; $p[] = $st; }
@@ -502,7 +503,7 @@ try {
             $total = (int)DB::val("SELECT COUNT(*) $from", $p);
             $sum = (float)DB::val("SELECT COALESCE(SUM(q.total),0) $from", $p);
             $rows = DB::all("SELECT q.id, q.status, q.customer_id, q.lead_name, q.total, q.request_date, q.expires_at, q.external_code,
-                q.sale_id, q.service_order_id, (SELECT so.number FROM service_orders so WHERE so.id = q.service_order_id) service_order_number, q.user_id, q.updated_at, u.name user_name, c.name customer_name, c.trade_name customer_trade_name,
+                q.number, q.sale_id, (SELECT sa.number FROM sales sa WHERE sa.id = q.sale_id) sale_number, q.service_order_id, (SELECT so.number FROM service_orders so WHERE so.id = q.service_order_id) service_order_number, q.user_id, q.updated_at, u.name user_name, c.name customer_name, c.trade_name customer_trade_name,
                 (SELECT COUNT(*) FROM quote_items i WHERE i.quote_id = q.id) items
                 $from ORDER BY q.id DESC LIMIT $limit OFFSET $off", $p);
             return ['rows' => $rows, 'total' => $total, 'sum' => round($sum, 2), 'summary' => Quotes::summary(),
@@ -541,9 +542,10 @@ try {
             Auth::requirePerm('orcamentos.convert');
             $u = Auth::requirePerm('vendas.add');
             $in = input();
-            return ['sale_id' => Quotes::convert((int)($in['id'] ?? 0), (string)($in['payment_method'] ?? ''), $u['id'],
+            $saleId = Quotes::convert((int)($in['id'] ?? 0), (string)($in['payment_method'] ?? ''), $u['id'],
                 isset($in['installments']) ? (int)$in['installments'] : null, isset($in['installment_days']) ? (int)$in['installment_days'] : null,
-                $in['installment_plan'] ?? null, isset($in['installment_entry']) ? !empty($in['installment_entry']) : null)];
+                $in['installment_plan'] ?? null, isset($in['installment_entry']) ? !empty($in['installment_entry']) : null);
+            return ['sale_id' => $saleId, 'sale_number' => DB::numberOf('sales', $saleId)];
         },
         'POST quotes_bulk' => function () {
             $in = input();

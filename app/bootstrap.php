@@ -5,7 +5,7 @@
 
 declare(strict_types=1);
 
-const APP_VERSION = '3.7.0';
+const APP_VERSION = '3.8.0';
 define('APP_ROOT', dirname(__DIR__));
 define('CONFIG_FILE', __DIR__ . '/config.php');
 

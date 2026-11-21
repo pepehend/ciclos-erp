@@ -716,7 +716,7 @@ class OrderExec
     /** Orçamentos ligados à OS: o de origem e os abertos a partir dela. */
     public static function quotes(array $o): array
     {
-        $rows = DB::all('SELECT id, status, total, created_at, service_order_id FROM quotes WHERE company_id = ? AND (id = ? OR service_order_id = ?) ORDER BY id', [Tenant::need(), (int)$o['quote_id'], (int)$o['id']]);
+        $rows = DB::all('SELECT id, number, status, total, created_at, service_order_id FROM quotes WHERE company_id = ? AND (id = ? OR service_order_id = ?) ORDER BY id', [Tenant::need(), (int)$o['quote_id'], (int)$o['id']]);
         foreach ($rows as &$r) {
             $r['status_label'] = QuoteStatuses::label($r['status']);
             $r['relation'] = (int)$r['service_order_id'] === (int)$o['id'] ? 'associado a esta OS' : 'origem da OS';

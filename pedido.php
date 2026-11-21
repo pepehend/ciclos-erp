@@ -59,7 +59,7 @@ $canConfirm = in_array($o['status'], ['rascunho', 'enviada'], true) && !$message
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>Pedido de compra #<?= (int)$o['id'] ?> · <?= $e($company) ?></title>
+<title>Pedido de compra #<?= (int)$o['number'] ?> · <?= $e($company) ?></title>
 <style>
   :root { --ink: #212529; --muted: #6c757d; --line: #dee2e6; --accent: #b02a37; --soft: #f8d7da; }
   * { box-sizing: border-box; }
@@ -118,7 +118,7 @@ $canConfirm = in_array($o['status'], ['rascunho', 'enviada'], true) && !$message
     </div>
     </div>
     <div class="meta">
-      <div class="num-q">Pedido de compra #<?= (int)$o['id'] ?></div>
+      <div class="num-q">Pedido de compra #<?= (int)$o['number'] ?></div>
       <div>Data do pedido <?= $date($o['order_date']) ?></div>
       <?php if ($o['expected_date']): ?><div>Entrega desejada até <?= $date($o['expected_date']) ?></div><?php endif; ?>
       <div style="margin-top:6px">
@@ -185,7 +185,7 @@ $canConfirm = in_array($o['status'], ['rascunho', 'enviada'], true) && !$message
       <div style="text-align:right;margin-top:8px"><button class="btn primary">Enviar confirmação</button></div>
     </form>
   <?php endif; ?>
-  <footer>Solicitante: <?= $e($o['user_name']) ?> · Pedido de compra #<?= (int)$o['id'] ?></footer>
+  <footer>Solicitante: <?= $e($o['user_name']) ?> · Pedido de compra #<?= (int)$o['number'] ?></footer>
 </main>
 </body>
 </html>

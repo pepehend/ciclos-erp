@@ -92,6 +92,35 @@ class DB
         return (int)self::pdo()->lastInsertId();
     }
 
+    /** Tabelas com número próprio por empresa (coluna `number`; o `id` continua global). */
+    public const NUMBERED = ['service_orders', 'quotes', 'sales', 'purchase_orders'];
+
+    /**
+     * Insere numerando: o número é o próximo da empresa atual (MAX+1). A chave única (empresa, número)
+     * barra corrida entre dois pedidos ao mesmo tempo; nesse caso tenta de novo.
+     */
+    public static function insertNumbered(string $table, array $data): int
+    {
+        for ($try = 0; ; $try++) {
+            try {
+                return self::tx(function () use ($table, $data) {
+                    $next = (int)self::val("SELECT COALESCE(MAX(number), 0) + 1 FROM $table WHERE company_id = ?", [Tenant::need()]);
+                    return self::insert($table, $data + ['number' => $next]);
+                });
+            } catch (PDOException $e) {
+                if ($try >= 3) throw $e;
+            }
+        }
+    }
+
+    /** Número (por empresa) mostrado ao usuário para o id de um registro numerado. */
+    public static function numberOf(string $table, ?int $id): ?int
+    {
+        if (!$id) return null;
+        $n = self::val("SELECT number FROM $table WHERE id = ? AND company_id = ?", [$id, Tenant::need()]);
+        return $n === null ? null : (int)$n;
+    }
+
     /** Grava por id. Em tabela de empresa só mexe em linha da empresa atual (outra empresa = 0 linhas). */
     public static function update(string $table, int $id, array $data): void
     {
@@ -273,6 +302,7 @@ class DB
             "CREATE TABLE IF NOT EXISTS sales (
                 id $pk,
                 company_id $fk NOT NULL DEFAULT 0,
+                number INT NOT NULL DEFAULT 0,
                 customer_id $fk NULL,
                 customer VARCHAR(160) NULL,
                 payment_method VARCHAR(30) NOT NULL,
@@ -387,6 +417,7 @@ class DB
             "CREATE TABLE IF NOT EXISTS quotes (
                 id $pk,
                 company_id $fk NOT NULL DEFAULT 0,
+                number INT NOT NULL DEFAULT 0,
                 status VARCHAR(20) NOT NULL DEFAULT 'rascunho',
                 customer_id $fk NULL,
                 lead_name VARCHAR(200) NULL,
@@ -626,6 +657,7 @@ class DB
             "CREATE TABLE IF NOT EXISTS purchase_orders (
                 id $pk,
                 company_id $fk NOT NULL DEFAULT 0,
+                number INT NOT NULL DEFAULT 0,
                 status VARCHAR(20) NOT NULL DEFAULT 'rascunho',
                 supplier_id $fk NULL,
                 order_date DATE NOT NULL,
@@ -751,6 +783,9 @@ class DB
             "CREATE UNIQUE INDEX uq_pmethods_code ON payment_methods (company_id, code)",
             "CREATE UNIQUE INDEX uq_pprofiles_name ON permission_profiles (company_id, name)",
             "CREATE UNIQUE INDEX uq_so_number ON service_orders (company_id, number)",
+            "CREATE UNIQUE INDEX uq_quotes_number ON quotes (company_id, number)",
+            "CREATE UNIQUE INDEX uq_sales_number ON sales (company_id, number)",
+            "CREATE UNIQUE INDEX uq_po_number ON purchase_orders (company_id, number)",
         ];
         foreach (Tenant::TABLES as $t) $list[] = "CREATE INDEX idx_{$t}_company ON $t (company_id)";
         return $list;
@@ -829,20 +864,24 @@ class DB
         return true;
     }
 
-    /** v3.7.0: número da OS por empresa (começa em 1 em cada uma, na ordem de criação). O `id` continua sendo o identificador interno. */
+    /** v3.7.0/3.8.0: número por empresa (OS, orçamento, venda e ordem de compra) começando em 1, na ordem de criação. O `id` segue sendo o identificador interno. */
     private static function upgradeOrderNumbers(): void
     {
         $pdo = self::pdo();
-        try { $pdo->query('SELECT number FROM service_orders LIMIT 1'); return; }
-        catch (PDOException $e) { /* ainda não tem a coluna */ }
-        $pdo->exec('ALTER TABLE service_orders ADD COLUMN number INT NOT NULL DEFAULT 0');
-        $n = [];
-        foreach (self::all('SELECT id, company_id FROM service_orders ORDER BY id') as $r) {
-            $c = (int)$r['company_id'];
-            $n[$c] = ($n[$c] ?? 0) + 1;
-            self::run('UPDATE service_orders SET number = ? WHERE id = ?', [$n[$c], (int)$r['id']]);
+        $added = false;
+        foreach (self::NUMBERED as $t) {
+            try { $pdo->query("SELECT number FROM $t LIMIT 1"); continue; }
+            catch (PDOException $e) { /* ainda não tem a coluna */ }
+            $pdo->exec("ALTER TABLE $t ADD COLUMN number INT NOT NULL DEFAULT 0");
+            $n = [];
+            foreach (self::all("SELECT id, company_id FROM $t ORDER BY id") as $r) {
+                $c = (int)$r['company_id'];
+                $n[$c] = ($n[$c] ?? 0) + 1;
+                self::run("UPDATE $t SET number = ? WHERE id = ?", [$n[$c], (int)$r['id']]);
+            }
+            $added = true;
         }
-        self::migrate(); // índice único (empresa, número)
+        if ($added) self::migrate(); // índices únicos (empresa, número)
     }
 
     /** Sobrou linha sem empresa (company_id = 0), por exemplo criada pelos ajustes de versões antigas? Uma consulta só. */
