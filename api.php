@@ -467,6 +467,7 @@ try {
                 array_push($p, $like, $like, $like, $like, (int)ltrim($s, '#'));
             }
             if (($st = q('status')) && isset(QuoteStatuses::map()[$st])) { $w[] = 'q.status = ?'; $p[] = $st; }
+            if ((int)q('customer_id', 0)) { $w[] = 'q.customer_id = ?'; $p[] = (int)q('customer_id'); }
             Reports::listFilters($_GET, $w, $p, ['created' => 'q.created_at', 'total' => 'q.total', 'user' => 'q.user_id',
                 'names' => ['c.name', 'c.trade_name', 'q.lead_name'], 'doc' => 'c.document']);
             // Atalhos dos indicadores do topo (mês atual)
@@ -481,7 +482,7 @@ try {
             $total = (int)DB::val("SELECT COUNT(*) $from", $p);
             $sum = (float)DB::val("SELECT COALESCE(SUM(q.total),0) $from", $p);
             $rows = DB::all("SELECT q.id, q.status, q.customer_id, q.lead_name, q.total, q.request_date, q.expires_at, q.external_code,
-                q.sale_id, q.user_id, q.updated_at, u.name user_name, c.name customer_name, c.trade_name customer_trade_name,
+                q.sale_id, q.service_order_id, q.user_id, q.updated_at, u.name user_name, c.name customer_name, c.trade_name customer_trade_name,
                 (SELECT COUNT(*) FROM quote_items i WHERE i.quote_id = q.id) items
                 $from ORDER BY q.id DESC LIMIT $limit OFFSET $off", $p);
             return ['rows' => $rows, 'total' => $total, 'sum' => round($sum, 2), 'summary' => Quotes::summary(),
@@ -503,6 +504,12 @@ try {
             $in = input();
             $u = Auth::requirePerm(!empty($in['id']) ? 'orcamentos.edit' : 'orcamentos.add');
             return ['id' => Quotes::save($in, $u['id'], !empty($in['id']) ? (int)$in['id'] : null)];
+        },
+        'POST quote_link_os' => function () {
+            Auth::requirePerm('orcamentos.edit');
+            $in = input();
+            Quotes::linkOs((int)($in['id'] ?? 0), (int)($in['service_order_id'] ?? 0) ?: null);
+            return ['ok' => true];
         },
         'POST quote_status' => function () {
             Auth::requirePerm('orcamentos.status');

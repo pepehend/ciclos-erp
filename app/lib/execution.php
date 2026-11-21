@@ -717,7 +717,7 @@ class OrderExec
         $rows = DB::all('SELECT id, status, total, created_at, service_order_id FROM quotes WHERE id = ? OR service_order_id = ? ORDER BY id', [(int)$o['quote_id'], (int)$o['id']]);
         foreach ($rows as &$r) {
             $r['status_label'] = QuoteStatuses::label($r['status']);
-            $r['relation'] = (int)$r['service_order_id'] === (int)$o['id'] ? 'aberto pela OS' : 'origem da OS';
+            $r['relation'] = (int)$r['service_order_id'] === (int)$o['id'] ? 'associado a esta OS' : 'origem da OS';
         }
         unset($r);
         return $rows;
