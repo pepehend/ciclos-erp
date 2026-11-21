@@ -303,7 +303,7 @@ $csrf = $e(Portal::csrf());
 <?php if ($page === 'compra'): ?>
   <p style="margin-top:18px"><a href="./?aba=compras">← Minhas compras</a></p>
   <div class="card">
-    <h2 style="margin:0 0 4px">Compra #<?= (int)$sale['id'] ?> <?= $sale['status'] === 'cancelada' ? '<span class="badge err">Cancelada</span>' : '' ?></h2>
+    <h2 style="margin:0 0 4px">Compra #<?= (int)$sale['number'] ?> <?= $sale['status'] === 'cancelada' ? '<span class="badge err">Cancelada</span>' : '' ?></h2>
     <p class="muted" style="margin:0 0 14px"><?= $date($sale['created_at']) ?> · <?= $e(PaymentMethods::label($sale['payment_method'])) ?><?= (int)$sale['installments'] > 1 ? ' em ' . (int)$sale['installments'] . 'x' : '' ?><?= $sale['payment_terms'] ? ' · ' . $e($sale['payment_terms']) : '' ?></p>
     <div class="scroll"><table>
       <thead><tr><th>Item</th><th class="num">Qtd.</th><th class="num">Valor unit.</th><th class="num">Total</th></tr></thead>
@@ -348,7 +348,7 @@ $csrf = $e(Portal::csrf());
       <div class="scroll"><table>
         <thead><tr><th>Orçamento</th><th>Data</th><th>Validade</th><th class="num">Total</th><th>Situação</th><th></th></tr></thead>
         <tbody><?php foreach ($quotes as $q): ?>
-          <tr><td><strong>#<?= (int)$q['id'] ?></strong><?= $q['external_code'] ? ' <span class="small muted">' . $e($q['external_code']) . '</span>' : '' ?></td>
+          <tr><td><strong>#<?= (int)$q['number'] ?></strong><?= $q['external_code'] ? ' <span class="small muted">' . $e($q['external_code']) . '</span>' : '' ?></td>
           <td><?= $date($q['request_date']) ?></td><td><?= $date($q['expires_at']) ?: '—' ?></td><td class="num"><?= $money($q['total']) ?></td>
           <td><span class="badge <?= $e($q['tone']) ?>"><?= $e($q['label']) ?></span></td>
           <td class="num"><?php if ($q['public_token']): ?><a class="btn sm<?= $q['tone'] === 'warn' ? ' primary' : '' ?>" href="../orcamento.php?t=<?= $e($q['public_token']) ?>&amp;portal=1"><?= $q['tone'] === 'warn' ? 'Ver e responder' : 'Ver' ?></a><?php endif; ?></td></tr>
@@ -362,7 +362,7 @@ $csrf = $e(Portal::csrf());
       <div class="scroll"><table>
         <thead><tr><th>Compra</th><th>Data</th><th>Pagamento</th><th class="num">Itens</th><th class="num">Total</th><th></th></tr></thead>
         <tbody><?php foreach ($sales as $s): ?>
-          <tr><td><strong>#<?= (int)$s['id'] ?></strong> <?= $s['status'] === 'cancelada' ? '<span class="badge err">Cancelada</span>' : '' ?></td><td><?= $date($s['created_at']) ?></td>
+          <tr><td><strong>#<?= (int)$s['number'] ?></strong> <?= $s['status'] === 'cancelada' ? '<span class="badge err">Cancelada</span>' : '' ?></td><td><?= $date($s['created_at']) ?></td>
           <td><?= $e(PaymentMethods::label($s['payment_method'])) ?><?= (int)$s['installments'] > 1 ? ' · ' . (int)$s['installments'] . 'x' : '' ?></td>
           <td class="num"><?= (int)$s['items'] ?></td><td class="num"><?= $money($s['total']) ?></td>
           <td class="num"><a class="btn sm" href="./?p=compra&amp;id=<?= (int)$s['id'] ?>">Ver</a></td></tr>
@@ -377,7 +377,7 @@ $csrf = $e(Portal::csrf());
         <thead><tr><th>Descrição</th><th>Vencimento</th><th class="num">Valor</th><th>Situação</th></tr></thead>
         <tbody><?php foreach ($entries as $r): ?>
           <tr><td><?= $e($r['description']) ?><?= (int)$r['installments'] > 1 ? ' <span class="small muted">(' . (int)$r['installment'] . '/' . (int)$r['installments'] . ')</span>' : '' ?>
-            <?= $r['sale_id'] ? '<div class="small"><a href="./?p=compra&amp;id=' . (int)$r['sale_id'] . '">Compra #' . (int)$r['sale_id'] . '</a></div>' : '' ?></td>
+            <?= $r['sale_id'] ? '<div class="small"><a href="./?p=compra&amp;id=' . (int)$r['sale_id'] . '">Compra #' . (int)$r['sale_number'] . '</a></div>' : '' ?></td>
           <td><?= $date($r['due_date']) ?></td><td class="num"><?= $money($r['situation'] === 'pago' && $r['paid_amount'] !== null ? $r['paid_amount'] : $r['amount']) ?></td>
           <td><span class="badge <?= $sitLabel[$r['situation']][1] ?>"><?= $sitLabel[$r['situation']][0] ?></span><?= $r['situation'] === 'pago' && $r['paid_at'] ? ' <span class="small muted">em ' . $date($r['paid_at']) . '</span>' : '' ?></td></tr>
         <?php endforeach; ?></tbody>

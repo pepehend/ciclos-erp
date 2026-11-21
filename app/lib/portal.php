@@ -252,7 +252,7 @@ class Portal
     public static function quotes(int $customerId): array
     {
         $hidden = implode(',', array_fill(0, count(self::HIDDEN_QUOTE_STATUS), '?'));
-        $rows = DB::all("SELECT id, status, request_date, expires_at, total, public_token, external_code FROM quotes
+        $rows = DB::all("SELECT id, number, status, request_date, expires_at, total, public_token, external_code FROM quotes
             WHERE customer_id = ? AND company_id = ? AND (status NOT IN ($hidden) OR sent_at IS NOT NULL) ORDER BY id DESC LIMIT 200",
             array_merge([$customerId, Tenant::need()], self::HIDDEN_QUOTE_STATUS));
         $today = date('Y-m-d');
@@ -272,7 +272,7 @@ class Portal
 
     public static function sales(int $customerId): array
     {
-        return DB::all("SELECT s.id, s.created_at, s.total, s.status, s.payment_method, s.installments, s.payment_terms,
+        return DB::all("SELECT s.id, s.number, s.created_at, s.total, s.status, s.payment_method, s.installments, s.payment_terms,
             (SELECT COUNT(*) FROM sale_items i WHERE i.sale_id = s.id) items FROM sales s WHERE s.customer_id = ? AND s.company_id = ? ORDER BY s.id DESC LIMIT 200", [$customerId, Tenant::need()]);
     }
 
@@ -291,7 +291,8 @@ class Portal
     /** Parcelas (contas a receber) do cliente, com a situação calculada. */
     public static function entries(int $customerId): array
     {
-        $rows = DB::all("SELECT id, description, amount, due_date, status, paid_at, paid_amount, installment, installments, sale_id
+        $rows = DB::all("SELECT id, description, amount, due_date, status, paid_at, paid_amount, installment, installments, sale_id,
+                (SELECT sa.number FROM sales sa WHERE sa.id = financial_entries.sale_id) sale_number
             FROM financial_entries WHERE customer_id = ? AND company_id = ? AND type = 'receber' AND status <> 'cancelado'
             ORDER BY CASE WHEN status = 'pago' THEN 1 ELSE 0 END, due_date, id LIMIT 500", [$customerId, Tenant::need()]);
         $today = date('Y-m-d');

@@ -412,7 +412,7 @@ class Inventory
             }
             $plan = PaymentMethods::plan($instN, $instDays, $subtotal + $surcharge - $discount, substr($at, 0, 10),
                 $in['installment_plan'] ?? null, PaymentMethods::freeInterval($method), $instEntry);
-            $saleId = DB::insert('sales', [
+            $saleId = DB::insertNumbered('sales', [
                 'customer_id' => (int)$customer['id'],
                 'customer' => mb_substr($customer['trade_name'] ?: $customer['name'], 0, 160),
                 'payment_method' => $method,
@@ -434,7 +434,7 @@ class Inventory
                 'created_at' => $at,
             ]);
             $costTotal = 0.0;
-            $ctx = ['user_id' => $userId, 'sale_id' => $saleId, 'note' => 'Venda #' . $saleId, 'at' => $at];
+            $ctx = ['user_id' => $userId, 'sale_id' => $saleId, 'note' => 'Venda #' . DB::numberOf('sales', $saleId), 'at' => $at];
             // Configurações → Vendas: "Deixar vender sem estoque" (o saldo fica negativo)
             if (Settings::get('sale_negative_stock') === '1') $ctx['allow_negative'] = true;
             foreach ($lines as [$p, $q, $price, $total]) {
@@ -485,7 +485,7 @@ class Inventory
             $movs = DB::all("SELECT * FROM movements WHERE sale_id = ? AND company_id = ? AND type IN ('venda','consumo_venda')", [$saleId, Tenant::need()]);
             foreach ($movs as $m) {
                 self::move((int)$m['product_id'], 'estorno_venda', -(float)$m['quantity'], (float)$m['unit_cost'], [
-                    'user_id' => $userId, 'sale_id' => $saleId, 'note' => 'Cancelamento da venda #' . $saleId,
+                    'user_id' => $userId, 'sale_id' => $saleId, 'note' => 'Cancelamento da venda #' . ($s['number'] ?? $saleId),
                     'allow_inactive' => true,
                 ]);
             }

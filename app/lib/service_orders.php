@@ -292,7 +292,7 @@ class ServiceOrders
     {
         return [
             'equipments' => $customerId ? Equipments::list(['customer_id' => $customerId]) : [],
-            'quotes' => $customerId ? DB::all('SELECT id, status, lead_name, created_at FROM quotes WHERE customer_id = ? AND company_id = ? ORDER BY id DESC LIMIT 100', [$customerId, Tenant::need()]) : [],
+            'quotes' => $customerId ? DB::all('SELECT id, number, status, lead_name, created_at FROM quotes WHERE customer_id = ? AND company_id = ? ORDER BY id DESC LIMIT 100', [$customerId, Tenant::need()]) : [],
             'technicians' => self::$onlyTech ? DB::all('SELECT id, name FROM users WHERE id = ? AND company_id = ?', [self::$onlyTech, Tenant::need()]) : DB::all("SELECT id, name FROM users WHERE active = 1 AND company_id = ? ORDER BY name", [Tenant::need()]),
             'task_types' => TaskTypes::list(),
             'statuses' => self::STATUSES,
@@ -368,17 +368,7 @@ class ServiceOrders
         }
         $data += ['status' => $scheduled ? 'agendada' : 'aberta', 'user_id' => $userId, 'public_token' => bin2hex(random_bytes(16)), 'created_at' => now()];
         // Número da OS: sequência própria de cada empresa (o id é global). A chave única (empresa, número) barra corrida.
-        for ($try = 0; ; $try++) {
-            try {
-                $newId = DB::tx(function () use ($data) {
-                    $next = (int)DB::val('SELECT COALESCE(MAX(number), 0) + 1 FROM service_orders WHERE company_id = ?', [Tenant::need()]);
-                    return DB::insert('service_orders', $data + ['number' => $next]);
-                });
-                break;
-            } catch (PDOException $e) {
-                if ($try >= 3) throw $e;
-            }
-        }
+        $newId = DB::insertNumbered('service_orders', $data);
         OrderExec::logEvent($newId, null, $data['status'], $userId);
         return $newId;
     }

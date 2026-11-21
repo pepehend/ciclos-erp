@@ -15,7 +15,7 @@ class Finance
 
     public static function get(int $id): array
     {
-        $e = DB::one('SELECT f.*, c.name customer_name, s.name supplier_name, u.name user_name
+        $e = DB::one('SELECT f.*, (SELECT sa.number FROM sales sa WHERE sa.id = f.sale_id) sale_number, c.name customer_name, s.name supplier_name, u.name user_name
             FROM financial_entries f LEFT JOIN customers c ON c.id = f.customer_id
             LEFT JOIN suppliers s ON s.id = f.supplier_id LEFT JOIN users u ON u.id = f.user_id
             WHERE f.id = ? AND f.company_id = ?', [$id, Tenant::need()]);
@@ -137,7 +137,7 @@ class Finance
                 // Pagamento parcial: o lançamento fica com o valor pago e o restante vira um novo em aberto
                 $upd['amount'] = $value;
                 $copy = $e;
-                foreach (['id', 'customer_name', 'supplier_name', 'user_name', 'display_status', 'status_label', 'party_name'] as $k) unset($copy[$k]);
+                foreach (['id', 'number', 'sale_number', 'customer_name', 'supplier_name', 'user_name', 'display_status', 'status_label', 'party_name'] as $k) unset($copy[$k]);
                 DB::insert('financial_entries', array_merge($copy, [
                     'amount' => $rest, 'status' => 'aberto', 'paid_at' => null, 'paid_amount' => null,
                     'description' => mb_substr($e['description'] . ' (restante)', 0, 200),
@@ -208,7 +208,7 @@ class Finance
             $join WHERE $w", $p);
         $per = 50; $page = max(1, (int)($f['page'] ?? 1));
         $order = ($f['status'] ?? '') === 'pago' ? 'f.paid_at DESC, f.id DESC' : "$dateExpr ASC, f.id ASC";
-        $rows = DB::all("SELECT f.*, c.name customer_name, s.name supplier_name $join WHERE $w ORDER BY $order LIMIT $per OFFSET " . (($page - 1) * $per), $p);
+        $rows = DB::all("SELECT f.*, (SELECT sa.number FROM sales sa WHERE sa.id = f.sale_id) sale_number, c.name customer_name, s.name supplier_name $join WHERE $w ORDER BY $order LIMIT $per OFFSET " . (($page - 1) * $per), $p);
         return [
             'rows' => array_map([self::class, 'decorate'], $rows),
             'total' => (int)$tot['n'], 'page' => $page, 'per_page' => $per,
@@ -354,7 +354,7 @@ class Finance
             'created_at' => $s['created_at'],
             'updated_at' => now(),
         ];
-        $desc = 'Venda #' . $saleId . ($s['customer'] ? ' · ' . $s['customer'] : '');
+        $desc = 'Venda #' . ($s['number'] ?? $saleId) . ($s['customer'] ? ' · ' . $s['customer'] : '');
         if ($n === 1 && !$hasEntry) {
             // Configurações → Vendas: à vista entra como recebida (padrão) ou em aberto, para dar baixa depois
             $open = !$canceled && Settings::get('sale_cash_open') === '1';

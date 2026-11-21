@@ -67,7 +67,7 @@ class PurchaseOrders
         if (!empty($f['supplier_id'])) { $where[] = 'o.supplier_id = ?'; $p[] = (int)$f['supplier_id']; }
         $q = trim((string)($f['q'] ?? ''));
         if ($q !== '') {
-            $where[] = '(s.name LIKE ? OR s.trade_name LIKE ? OR o.notes LIKE ? OR o.id = ?
+            $where[] = '(s.name LIKE ? OR s.trade_name LIKE ? OR o.notes LIKE ? OR o.number = ?
                 OR EXISTS (SELECT 1 FROM purchase_order_items i WHERE i.purchase_order_id = o.id AND i.description LIKE ?))';
             array_push($p, "%$q%", "%$q%", "%$q%", (int)preg_replace('/\D/', '', $q), "%$q%");
         }
@@ -160,7 +160,7 @@ class PurchaseOrders
                 DB::update('purchase_orders', $id, $data);
                 DB::run('DELETE FROM purchase_order_items WHERE purchase_order_id = ? AND company_id = ?', [$id, Tenant::need()]);
             } else {
-                $id = DB::insert('purchase_orders', $data + [
+                $id = DB::insertNumbered('purchase_orders', $data + [
                     'user_id' => $userId, 'public_token' => bin2hex(random_bytes(16)), 'created_at' => now(),
                 ]);
             }
@@ -214,7 +214,7 @@ class PurchaseOrders
                 }
                 $ok++;
             } catch (AppError $e) {
-                $errors[] = ['id' => $id, 'error' => $e->getMessage()];
+                $errors[] = ['id' => $id, 'number' => DB::numberOf('purchase_orders', $id) ?? $id, 'error' => $e->getMessage()];
             }
         }
         return ['ok' => $ok, 'errors' => $errors];

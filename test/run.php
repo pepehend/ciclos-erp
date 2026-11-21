@@ -566,7 +566,7 @@ Tenant::with(0, fn() => Auth::seedProfiles());   // no banco antigo, o que já e
 foreach (['DROP TABLE financial_entries', 'DROP TABLE purchase_order_items', 'DROP TABLE purchase_orders'] as $sql) DB::pdo()->exec($sql);
 DB::pdo()->exec("UPDATE permission_profiles SET permissions = 'vendas,produtos' WHERE name = 'Acesso total'");
 $c4 = Tenant::with(0, fn() => Customers::ensureDefault());
-DB::pdo()->exec("INSERT INTO sales (customer_id, customer, payment_method, subtotal, discount, surcharge, total, cost_total, status, user_id, created_at) VALUES ($c4, 'Consumidor', 'pix', 80, 0, 0, 80, 10, 'ok', NULL, '2026-01-05 10:00:00'), ($c4, 'Consumidor', 'dinheiro', 30, 0, 0, 30, 5, 'cancelada', NULL, '2026-01-06 10:00:00')");
+DB::pdo()->exec("INSERT INTO sales (number, customer_id, customer, payment_method, subtotal, discount, surcharge, total, cost_total, status, user_id, created_at) VALUES (1, $c4, 'Consumidor', 'pix', 80, 0, 0, 80, 10, 'ok', NULL, '2026-01-05 10:00:00'), (2, $c4, 'Consumidor', 'dinheiro', 30, 0, 0, 30, 5, 'cancelada', NULL, '2026-01-06 10:00:00')");
 DB::upgrade();
 ok((int)DB::val("SELECT COUNT(*) FROM financial_entries WHERE status = 'pago'") === 1, 'vendas antigas entram no caixa');
 ok(DB::val("SELECT paid_at FROM financial_entries") === '2026-01-05', 'com a data da venda');
@@ -1898,6 +1898,30 @@ $bkAll = Backup::sql(true);
 ok(str_contains($bkAll, 'Mesmo CNPJ na B') && str_contains($bkAll, 'INSERT INTO `companies`'), 'backup completo leva todas as empresas');
 ok(Tenant::activeIds() === [$companyA, $companyB], 'cron percorre as empresas ativas');
 
+echo "Número de orçamento, venda e ordem de compra por empresa
+";
+Tenant::set($companyA);
+$mxQ = (int)DB::val('SELECT MAX(number) FROM quotes WHERE company_id = ?', [$companyA]);
+$mxS = (int)DB::val('SELECT MAX(number) FROM sales WHERE company_id = ?', [$companyA]);
+$mxP = (int)DB::val('SELECT MAX(number) FROM purchase_orders WHERE company_id = ?', [$companyA]);
+ok($mxQ > 1 && $mxS > 1 && $mxP > 1, 'a empresa A já tem vários orçamentos, vendas e ordens de compra numerados');
+Tenant::set($companyB);
+$qB1 = Quotes::save(['target' => 'lead', 'lead_name' => 'Lead B1', 'items' => [], 'request_date' => date('Y-m-d')], $betoId);
+ok(Quotes::get($qB1)['number'] === (int)DB::val('SELECT COUNT(*) FROM quotes WHERE company_id = ?', [$companyB]), 'orçamento da B segue a sequência da B');
+$svB = Inventory::saveProduct(['name' => 'Serviço da B', 'type' => 'servico', 'sale_price' => '10,00']);
+$cfB = Customers::ensureDefault();
+$sB1 = Inventory::createSale(['customer_id' => $cfB, 'payment_method' => 'pix', 'items' => [['product_id' => $svB, 'quantity' => 1, 'unit_price' => '10,00']]], $betoId);
+$sB2 = Inventory::createSale(['customer_id' => $cfB, 'payment_method' => 'pix', 'items' => [['product_id' => $svB, 'quantity' => 1, 'unit_price' => '10,00']]], $betoId);
+ok(DB::numberOf('sales', $sB1) === 1 && DB::numberOf('sales', $sB2) === 2, 'vendas da B começam em 1');
+ok(str_contains((string)DB::val('SELECT description FROM financial_entries WHERE sale_id = ? LIMIT 1', [$sB2]), 'Venda #2'), 'o financeiro usa o número da venda');
+$supB = Customers::save(['type' => 'pj', 'name' => 'Fornecedor B'], null, 'suppliers');
+$prodB2 = Inventory::saveProduct(['name' => 'Peça da B', 'type' => 'produto']);
+$poB1 = PurchaseOrders::save(['supplier_id' => $supB, 'items' => [['product_id' => $prodB2, 'quantity' => 2, 'unit_cost' => '3,00']]], $betoId);
+$poB2 = PurchaseOrders::save(['supplier_id' => $supB, 'items' => [['product_id' => $prodB2, 'quantity' => 1, 'unit_cost' => '3,00']]], $betoId);
+ok(PurchaseOrders::get($poB1)['number'] === 1 && PurchaseOrders::get($poB2)['number'] === 2, 'ordens de compra da B começam em 1');
+ok(count(PurchaseOrders::list(['q' => '2'])['rows']) >= 1 && PurchaseOrders::list(['q' => '2'])['rows'][0]['number'] === 2, 'a busca "2" acha a ordem de compra número 2');
+Tenant::set($companyA);
+
 echo "Número da OS por empresa
 ";
 Tenant::set($companyA);
@@ -1930,7 +1954,7 @@ $pdoL->exec('PRAGMA foreign_keys = OFF');
 $pdoL->exec('DROP TABLE supplier_map');   // tinha a chave única global inline: recria como era
 $pdoL->exec('CREATE TABLE supplier_map (id INTEGER PRIMARY KEY AUTOINCREMENT, supplier_cnpj VARCHAR(20) NOT NULL, supplier_code VARCHAR(60) NOT NULL, product_id INTEGER NOT NULL, factor DECIMAL(16,4) NOT NULL DEFAULT 1, UNIQUE (supplier_cnpj, supplier_code), FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE)');
 foreach (array_diff([...Tenant::TABLES, 'users'], ['supplier_map']) as $t) $pdoL->exec("ALTER TABLE $t DROP COLUMN company_id");
-$pdoL->exec('ALTER TABLE service_orders DROP COLUMN number');
+foreach (['service_orders', 'quotes', 'sales', 'purchase_orders'] as $tn) $pdoL->exec("ALTER TABLE $tn DROP COLUMN number");
 $pdoL->exec('DROP TABLE companies');
 $pdoL->exec('PRAGMA foreign_keys = ON');
 $pdoL->exec("INSERT INTO users (name, email, password_hash, role, active, created_at) VALUES ('Velho', 'velho@example.com', 'x', 'admin', 1, '2026-01-01 10:00:00')");
@@ -1939,6 +1963,8 @@ $pdoL->exec("INSERT INTO customers (type, name, document, active, created_at, up
 $pdoL->exec("INSERT INTO products (name, type, unit, stock, avg_cost, sale_price, created_at, updated_at) VALUES ('Item antigo', 'produto', 'un', 3, 2, 5, '2026-01-01 10:00:00', '2026-01-01 10:00:00')");
 $pdoL->exec("INSERT INTO payment_methods (code, name, active, max_installments, interval_mode, sort, created_at, updated_at) VALUES ('pix', 'PIX', 1, 1, 'fixo', 1, '2026-01-01 10:00:00', '2026-01-01 10:00:00')");
 $pdoL->exec("INSERT INTO service_orders (status, origin, customer_id, description, created_at, updated_at) VALUES ('aberta', 'chamado', (SELECT id FROM customers LIMIT 1), 'OS antiga 1', '2026-01-01 10:00:00', '2026-01-01 10:00:00'), ('aberta', 'chamado', (SELECT id FROM customers LIMIT 1), 'OS antiga 2', '2026-01-02 10:00:00', '2026-01-02 10:00:00')");
+$pdoL->exec("INSERT INTO sales (customer, payment_method, subtotal, total, created_at) VALUES ('A', 'pix', 1, 1, '2026-01-01 10:00:00'), ('B', 'pix', 2, 2, '2026-01-02 10:00:00'), ('C', 'pix', 3, 3, '2026-01-03 10:00:00')");
+$pdoL->exec("INSERT INTO quotes (status, request_date, public_token, created_at, updated_at) VALUES ('rascunho', '2026-01-01', 'tok1', '2026-01-01 10:00:00', '2026-01-01 10:00:00'), ('rascunho', '2026-01-02', 'tok2', '2026-01-02 10:00:00', '2026-01-02 10:00:00')");
 DB::upgrade();
 $c1 = Companies::bySlug('loja-antiga-ltda');
 ok($c1 && $c1['name'] === 'Loja Antiga Ltda' && $c1['document'] === '11222333000181', 'cria a empresa #1 com o nome e o CNPJ das configurações antigas');
@@ -1958,6 +1984,8 @@ throws(fn() => Customers::save(['type' => 'pj', 'document' => '11222333000181', 
 ok(count(DB::all("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'uq_customers_doc'")) === 1, 'índice único por empresa criado');
 ok(DB::all('SELECT number FROM service_orders ORDER BY id') === [['number' => 1], ['number' => 2]], 'OS antigas ganham número 1, 2… na ordem de criação');
 ok(count(DB::all("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'uq_so_number'")) === 1, 'índice único (empresa, número) da OS criado');
+ok(array_column(DB::all('SELECT number FROM sales ORDER BY id'), 'number') === [1, 2, 3] && array_column(DB::all('SELECT number FROM quotes ORDER BY id'), 'number') === [1, 2], 'vendas e orçamentos antigos também ganham número 1, 2… na ordem de criação');
+ok(count(DB::all("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name IN ('uq_sales_number', 'uq_quotes_number', 'uq_po_number')")) === 3, 'índices únicos (empresa, número) criados');
 @unlink($leg);
 
 @unlink($db);

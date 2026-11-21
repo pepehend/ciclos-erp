@@ -85,7 +85,7 @@ function itemsTable(array $rows, string $title, bool $disc, callable $e, callabl
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>Orçamento #<?= (int)$q['id'] ?> · <?= $e($company) ?></title>
+<title>Orçamento #<?= (int)$q['number'] ?> · <?= $e($company) ?></title>
 <style>
   :root { --ink: #212529; --muted: #6c757d; --line: #dee2e6; --accent: #b02a37; --soft: #f8d7da; }
   * { box-sizing: border-box; }
@@ -150,7 +150,7 @@ function itemsTable(array $rows, string $title, bool $disc, callable $e, callabl
     </div>
     </div>
     <div class="meta">
-      <div class="num-q">Orçamento #<?= (int)$q['id'] ?></div>
+      <div class="num-q">Orçamento #<?= (int)$q['number'] ?></div>
       <div>Emitido em <?= $date($q['request_date']) ?></div>
       <?php if ($q['expires_at']): ?><div>Válido até <?= $date($q['expires_at']) ?></div><?php endif; ?>
       <?php if ($q['external_code']): ?><div>Ref.: <?= $e($q['external_code']) ?></div><?php endif; ?>
@@ -228,7 +228,7 @@ function itemsTable(array $rows, string $title, bool $disc, callable $e, callabl
       </form>
     </details>
   <?php endif; ?>
-  <footer>Responsável: <?= $e($q['user_name']) ?> · Orçamento #<?= (int)$q['id'] ?></footer>
+  <footer>Responsável: <?= $e($q['user_name']) ?> · Orçamento #<?= (int)$q['number'] ?></footer>
 </main>
 <?php if (isset($_GET['pdf'])): ?><script>window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 300); });</script><?php endif; ?>
 </body>
