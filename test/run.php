@@ -1788,6 +1788,10 @@ $companyB = Companies::create(['name' => 'Empresa B', 'admin' => ['name' => 'Bet
 ok($companyB > $companyA && (int)DB::val('SELECT COUNT(*) FROM payment_methods WHERE company_id = ?', [$companyB]) > 0, 'empresa nova nasce com formas de pagamento, perfis e status próprios');
 ok(Companies::bySlug('empresa-b')['id'] == $companyB && Settings::get('company_name') === $settingsA, 'criar a empresa não troca a empresa atual');
 throws(fn() => Companies::create(['name' => 'Empresa B']), 'Já existe uma empresa', 'código (slug) único');
+$nEmp = (int)DB::val('SELECT COUNT(*) FROM companies');
+throws(fn() => Companies::create(['name' => 'Empresa Gama', 'admin' => ['name' => 'Ana', 'email' => 'PEDRO@example.com', 'password' => 'senha12345']]), 'já está cadastrado', 'não cria empresa com administrador de e-mail já cadastrado');
+ok((int)DB::val('SELECT COUNT(*) FROM companies') === $nEmp && !Companies::bySlug('empresa-gama'), 'e-mail repetido não deixa empresa pela metade');
+throws(fn() => Companies::create(['name' => 'Empresa Delta', 'admin' => ['name' => 'Ana', 'email' => 'nao-e-email', 'password' => 'senha12345']]), 'e-mail válido', 'e-mail do administrador precisa ser válido');
 $betoId = (int)DB::val("SELECT id FROM users WHERE email = 'beto@example.com'");
 ok((int)DB::val('SELECT company_id FROM users WHERE id = ?', [$betoId]) === $companyB, 'administrador novo pertence à empresa nova');
 

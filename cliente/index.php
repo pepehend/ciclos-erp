@@ -98,7 +98,6 @@ $company = $co['company_name'] ?: 'Portal do cliente';
 // Tela de entrada (login e convite): mesmo visual da entrada do sistema
 $hour = (int)date('G');
 $hello = $hour < 12 ? 'Bom dia' : ($hour < 18 ? 'Boa tarde' : 'Boa noite');
-$brandName = $co['company_name'] ?: 'CiclosERP';
 $loginIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>';
 $sitLabel = ['pago' => ['Pago', 'ok'], 'aberto' => ['Em aberto', 'warn'], 'vencido' => ['Vencido', 'err']];
 $csrf = $e(Portal::csrf());
@@ -111,21 +110,25 @@ $csrf = $e(Portal::csrf());
 <meta name="robots" content="noindex, nofollow">
 <script>(function(){try{var t=localStorage.getItem('portalTheme')||'auto';var d=t==='dark'||(t==='auto'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.setAttribute('data-theme',d?'dark':'light');}catch(e){}})();</script>
 <title>Portal do cliente · <?= $e($company) ?></title>
-<?php if ($co['company_logo']): ?><link rel="icon" href="<?= $e($co['company_logo']) ?>"><?php endif; ?>
+<link rel="icon" type="image/svg+xml" href="../assets/brand/favicon.svg">
+<link rel="alternate icon" href="../assets/brand/favicon.ico">
+<link rel="apple-touch-icon" href="../assets/brand/apple-touch-icon.png">
 <style>
-  :root { --ink: #212529; --muted: #6c757d; --line: #dee2e6; --accent: #b02a37; --soft: #f8d7da; --bg: #eef0f2; --card: #fff; --field: #ced4da;
+  :root { --ink: #212529; --muted: #6c757d; --line: #dee2e6; --accent: #b02a37; --accent-text: #b02a37; --soft: #f8d7da; --bg: #eef0f2; --card: #fff; --field: #ced4da;
     --ok-bg: #e8f5ee; --ok: #146c43; --err-bg: #fdecea; --err: #b42318; --warn-bg: #fff4e5; --warn: #b54708; --info-bg: #e7f1ff; --info: #1d4ed8; --mute-bg: #f1f3f5; color-scheme: light; }
-  html[data-theme="dark"] { --ink: #e7e7ea; --muted: #a1a1aa; --line: #2e2e33; --accent: #e5707b; --soft: #3a2427; --bg: #121214; --card: #1c1c1f; --field: #3a3a40;
-    --ok-bg: #16301f; --ok: #6fd39a; --err-bg: #3a1d1d; --err: #ff8f8a; --warn-bg: #3a2c14; --warn: #f5b25c; --info-bg: #17243d; --info: #8fb4ff; --mute-bg: #26262b; color-scheme: dark; }
-  html[data-theme="dark"] .btn.primary { color: #1c1c1f; }
+  html[data-theme="dark"] { --ink: #E8EEF8; --muted: #9FB3D1; --line: #25508F; --accent: #b02a37; --accent-text: #ff8f9a; --soft: #3c305b; --bg: #0B2A58; --card: #0F3369; --field: #25508F;
+    --ok-bg: #12404a; --ok: #6fd39a; --err-bg: #432545; --err: #ff8f8a; --warn-bg: #3a3520; --warn: #f5b25c; --info-bg: #143C77; --info: #8fb4ff; --mute-bg: #143C77; color-scheme: dark; }
   * { box-sizing: border-box; }
   body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); }
-  a { color: var(--accent); }
+  a { color: var(--accent-text, var(--accent)); }
   .wrap { max-width: 980px; margin: 0 auto; padding: 0 16px; }
   header.bar { background: var(--card); border-bottom: 1px solid var(--line); }
   header.bar .wrap { display: flex; align-items: center; gap: 14px; min-height: 64px; flex-wrap: wrap; padding-top: 8px; padding-bottom: 8px; }
   .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 1.1rem; color: var(--ink); text-decoration: none; margin-right: auto; }
-  .brand img { max-height: 40px; max-width: 120px; object-fit: contain; }
+  .brand img { max-height: 34px; max-width: 170px; object-fit: contain; }
+  .brand .b-dark { display: none; } html[data-theme="dark"] .brand .b-light { display: none; } html[data-theme="dark"] .brand .b-dark { display: inline; }
+  .brand .b-co { font-size: .9rem; font-weight: 600; color: var(--muted); }
+  .lg-logo-img { height: 42px; width: auto; display: block; }
   .who { color: var(--muted); font-size: .9rem; text-align: right; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 22px; margin: 18px 0; }
   .login { max-width: 420px; margin: 8vh auto; }
@@ -148,8 +151,8 @@ $csrf = $e(Portal::csrf());
   .stat.err strong { color: var(--err); }
   nav.tabs { display: flex; gap: 4px; margin-top: 18px; border-bottom: 1px solid var(--line); overflow-x: auto; }
   nav.tabs a { padding: 10px 14px; text-decoration: none; color: var(--muted); font-weight: 600; border-bottom: 2px solid transparent; white-space: nowrap; }
-  nav.tabs a.on { color: var(--accent); border-color: var(--accent); }
-  nav.tabs a .n { background: var(--soft); color: var(--accent); border-radius: 99px; padding: 0 7px; font-size: .78rem; margin-left: 4px; }
+  nav.tabs a.on { color: var(--accent-text); border-color: var(--accent); }
+  nav.tabs a .n { background: var(--soft); color: var(--accent-text); border-radius: 99px; padding: 0 7px; font-size: .78rem; margin-left: 4px; }
   .scroll { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; }
   th { text-align: left; font-size: .75rem; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); padding: 8px; white-space: nowrap; }
@@ -169,7 +172,7 @@ $csrf = $e(Portal::csrf());
   @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } dl.data { grid-template-columns: 1fr; gap: 0 0; } dl.data dd { margin-bottom: 8px; } .who { text-align: left; } }
   footer { text-align: center; color: var(--muted); font-size: .8rem; margin: 28px 0; }
 /* ============ Tela de login (sempre escura, com céu estrelado) ============ */
-.lg-page { --lg-bg: #1f1633; --lg-card: #1a1229; --lg-line: #352a4f; --lg-lime: #c6f04a; --lg-text: #f4f1fb; --lg-muted: #b9b0cf;
+.lg-page { --lg-bg: #0B2A58; --lg-card: #08214A; --lg-line: #25508F; --lg-lime: #c6f04a; --lg-text: #f4f1fb; --lg-muted: #b9b0cf;
   min-height: 100vh; display: flex; flex-direction: column; color: var(--lg-text); padding: 20px clamp(16px, 4vw, 48px) 24px;
   background-color: var(--lg-bg);
   background-image:
@@ -189,7 +192,7 @@ $csrf = $e(Portal::csrf());
 .lg-client svg { width: 16px; height: 16px; }
 .lg-main { flex: 1; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, 420px); gap: clamp(24px, 6vw, 96px); align-items: center; padding: 40px 0; }
 .lg-hero { position: relative; }
-.lg-ver { display: inline-block; background: #120c1e; color: var(--lg-text); font-weight: 700; font-size: .85rem; padding: 5px 9px; border-radius: 5px; }
+.lg-ver { display: inline-block; background: #061B3D; color: var(--lg-text); font-weight: 700; font-size: .85rem; padding: 5px 9px; border-radius: 5px; }
 .lg-hero h1 { font-size: clamp(2.6rem, 6.4vw, 5.2rem); line-height: 1.04; font-weight: 800; letter-spacing: -.035em; margin: 22px 0 18px; color: #fff; }
 .lg-hero mark { background: var(--lg-lime); color: var(--lg-bg); padding: 0 .12em; border-radius: 2px; white-space: nowrap; }
 .lg-hero p { color: var(--lg-muted); font-weight: 600; font-size: 1.05rem; margin: 0; }
@@ -234,14 +237,14 @@ $csrf = $e(Portal::csrf());
 <body>
 <?php if (!$me || $page === 'convite'): ?>
 <div class="lg-page">
-  <header class="lg-top"><div class="lg-brand"><span class="lg-logo<?= $co['company_logo'] ? ' img' : '' ?>"><?php if ($co['company_logo']): ?><img src="<?= $e($co['company_logo']) ?>" alt=""><?php else: ?><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg><?php endif; ?></span><?= $e($brandName) ?></div><a class="lg-client" href="../"><?= $loginIcon ?>Acesso da equipe</a></header>
+  <header class="lg-top"><div class="lg-brand"><img class="lg-logo-img" src="../assets/brand/ciclos-logo-escuro.svg" alt="CiclosERP"></div><a class="lg-client" href="../"><?= $loginIcon ?>Acesso da equipe</a></header>
   <main class="lg-main">
     <section class="lg-hero">
       <span class="lg-ver">Portal do cliente</span>
       <h1>Suas ordens<br><mark>em dia</mark>.</h1>
       <p>Acompanhe suas ordens de serviço, orçamentos e parcelas</p>
-      <svg viewBox="0 0 120 120" class="lg-st st1" aria-hidden="true"><g stroke="#1f1633" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><path d="M20 42 60 24l40 18v44L60 104 20 86z" fill="#f4a259"/><path d="M20 42l40 18 40-18M60 60v44" fill="none"/><path d="M60 60 100 42 100 86 60 104z" fill="#e0823a"/><path d="M40 33l40 18v14l-9-4-9 4V47L22 41" fill="#c6f04a"/><path d="M86 14l3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="#f78fb3"/><path d="M16 96l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" fill="#fff"/></g></svg>
-      <svg viewBox="0 0 120 120" class="lg-st st2" aria-hidden="true"><g stroke="#1f1633" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><rect x="24" y="18" width="66" height="86" rx="10" fill="#f78fb3"/><rect x="33" y="30" width="48" height="64" rx="5" fill="#fff"/><rect x="44" y="12" width="26" height="12" rx="4" fill="#c6f04a"/><path d="M42 82V68M54 82V56M66 82V62M78 82V48" stroke-width="6"/><path d="M40 45h20" stroke="#a78bfa"/><path d="M96 70l3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="#c6f04a"/></g></svg>
+      <svg viewBox="0 0 120 120" class="lg-st st1" aria-hidden="true"><g stroke="#0B2A58" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><path d="M20 42 60 24l40 18v44L60 104 20 86z" fill="#f4a259"/><path d="M20 42l40 18 40-18M60 60v44" fill="none"/><path d="M60 60 100 42 100 86 60 104z" fill="#e0823a"/><path d="M40 33l40 18v14l-9-4-9 4V47L22 41" fill="#c6f04a"/><path d="M86 14l3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="#f78fb3"/><path d="M16 96l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" fill="#fff"/></g></svg>
+      <svg viewBox="0 0 120 120" class="lg-st st2" aria-hidden="true"><g stroke="#0B2A58" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><rect x="24" y="18" width="66" height="86" rx="10" fill="#f78fb3"/><rect x="33" y="30" width="48" height="64" rx="5" fill="#fff"/><rect x="44" y="12" width="26" height="12" rx="4" fill="#c6f04a"/><path d="M42 82V68M54 82V56M66 82V62M78 82V48" stroke-width="6"/><path d="M40 45h20" stroke="#a78bfa"/><path d="M96 70l3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="#c6f04a"/></g></svg>
     </section>
     <div class="lg-card">
     <?php if ($page === 'convite' && !$invite): ?>
@@ -288,7 +291,7 @@ $csrf = $e(Portal::csrf());
 </div>
 <?php else: ?>
 <header class="bar"><div class="wrap">
-  <a class="brand" href="./"><?php if ($co['company_logo']): ?><img src="<?= $e($co['company_logo']) ?>" alt=""><?php endif; ?><span><?= $e($company) ?></span></a>
+  <a class="brand" href="./"><img class="b-light" src="../assets/brand/ciclos-logo.svg" alt="CiclosERP"><img class="b-dark" src="../assets/brand/ciclos-logo-escuro.svg" alt="CiclosERP"><?php if ($co['company_name']): ?><span class="b-co"><?= $e($co['company_name']) ?></span><?php endif; ?></a>
   <button type="button" class="btn sm theme" id="theme" title="Tema claro ou escuro" aria-label="Alternar tema claro ou escuro">
     <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
     <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>

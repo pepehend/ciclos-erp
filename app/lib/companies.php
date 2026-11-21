@@ -49,6 +49,16 @@ class Companies
         $slug = self::slugify((string)(($d['slug'] ?? '') !== '' ? $d['slug'] : $name));
         if (self::bySlug($slug)) throw new AppError('Já existe uma empresa com o código "' . $slug . '".');
         $admin = $d['admin'] ?? null;
+        if ($admin) {
+            // Confere tudo antes de criar qualquer coisa: o e-mail é o login e só pode existir uma vez no sistema inteiro
+            $email = mb_strtolower(trim((string)($admin['email'] ?? '')));
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) throw new AppError('Informe um e-mail válido para o administrador da empresa.');
+            if (DB::val('SELECT id FROM users WHERE email = ?', [$email])) {
+                throw new AppError('O e-mail ' . $email . ' já está cadastrado no sistema (cada e-mail só pode ser de um usuário, de uma única empresa). Use outro e-mail para o administrador.');
+            }
+            if (trim((string)($admin['name'] ?? '')) === '') throw new AppError('Informe o nome do administrador da empresa.');
+            Auth::checkPassword((string)($admin['password'] ?? ''));
+        }
 
         return DB::tx(function () use ($name, $doc, $slug, $admin) {
             $id = DB::insert('companies', ['name' => $name, 'slug' => $slug, 'document' => $doc !== '' ? $doc : null,
