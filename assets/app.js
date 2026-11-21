@@ -6418,12 +6418,32 @@ async function viewAccount(v) {
       <label>Nova senha <input type="password" name="new" minlength="8" required autocomplete="new-password"></label>
       <label>Repita a nova senha <input type="password" name="new2" minlength="8" required autocomplete="new-password"></label>
       <button class="btn primary">Salvar nova senha</button></form></div>
+    <div class="card" style="max-width:560px"><h2>Aparelhos do aplicativo</h2><p class="muted" style="margin-top:-4px">Celulares em que você entrou pelo aplicativo CiclosERP. Remova um aparelho perdido ou que você não usa mais: ele precisa entrar de novo com a senha.</p>
+      <div id="mytokens"><p class="muted small">Carregando…</p></div></div>
     <section id="myappearance" style="margin-top:28px"></section>
     <p class="muted small">Versão ${esc(state.version || '')}</p>`;
   // Aparência (tema e cor de destaque): só muda para o próprio usuário, por isso fica aqui e não em Configurações
   const ap = $('#myappearance', v);
   await viewAppearance(ap);
   const h = $('.page-head h1', ap); if (h) h.outerHTML = `<h2 style="margin:0">${esc(h.textContent)}</h2>`;
+  // Aparelhos do aplicativo (tokens de acesso à API): lista e remoção
+  const tk = $('#mytokens', v);
+  const drawTokens = async () => {
+    try {
+      const rows = await api('api_tokens');
+      tk.innerHTML = rows.length ? rows.map((r) => `<div class="inline" style="justify-content:space-between;padding:8px 0;border-top:1px solid var(--line, #ddd)">
+          <div><strong>${esc(r.device)}</strong>${r.current ? ' <span class="muted small">(este aparelho)</span>' : ''}
+          <div class="muted small">Entrou em ${esc(dt(r.created_at))} · último uso ${esc(dt(r.last_used_at))}</div></div>
+          <button type="button" class="btn ghost danger" data-tk="${r.id}">Remover</button></div>`).join('')
+        : '<p class="muted small" style="margin:0">Nenhum aparelho conectado.</p>';
+    } catch (err) { tk.innerHTML = `<p class="muted small">${esc(err.message)}</p>`; }
+  };
+  tk.onclick = async (e) => {
+    const b = e.target.closest('[data-tk]'); if (!b) return;
+    if (!(await confirmBox('Remover este aparelho? O aplicativo nele vai pedir login de novo.', { ok: 'Remover', danger: true }))) return;
+    try { await api('api_token_revoke', { body: { id: +b.dataset.tk } }); toast('Aparelho removido'); drawTokens(); } catch (err) { fail(err); }
+  };
+  drawTokens();
   $('#myav', v).onclick = async (e) => {
     const b = e.target.closest('[data-av]'); if (!b) return;
     try {
@@ -6675,7 +6695,7 @@ async function tkOrder(v, id, page, sub) {
       <div class="tk-card"><div class="tk-progl"><strong>Checklist do relatório</strong><b>${doneN} de ${list.length} concluídos</b></div><div class="tk-bar"><i style="width:${Math.round(doneN * 100 / list.length)}%"></i></div>
         <p class="tk-hint">Complete os itens abaixo antes de assinar e enviar.</p></div>
       <div class="tk-card tk-rows">${list.map(([k, l, ic, ok, extra, warn]) => `<button class="tk-row" data-tkgo="m/os/${id}/${k}"><span class="tk-chk ${ok ? 'ok' : warn ? 'warn' : ''}">${ok ? icon('check') : ''}</span><span class="tk-ri">${icon(ic)}</span><span class="tk-rl">${l}${extra ? `<small>${extra}</small>` : ''}</span>${icon('chevron')}</button>`).join('')}
-        <button class="tk-row" data-tkgo="m/os/${id}/pausas"><span class="tk-chk ${D.hours.running === 'pause' ? 'warn' : ''}"></span><span class="tk-ri r">${icon('pause')}</span><span class="tk-rl">Pausas${D.hours.pause ? `<small>${fmtDur(D.hours.pause)} em pausa</small>` : ''}</span>${icon('chevron')}</button></div>
+        <button class="tk-row" data-tkgo="m/os/${id}/pausas"><span class="tk-chk ${D.hours.running === 'pause' ? 'warn' : ''}"></span><span class="tk-ri r">${icon('pause')}</span><span class="tk-rl">Controle de horas${D.hours.pause ? `<small>${fmtDur(D.hours.pause)} em pausa</small>` : ''}</span>${icon('chevron')}</button></div>
       <div class="tk-card tk-ck">${icon('clock')}<span>Check-in: ${tkActTime(D.hours, 'checkin')}</span><span>·</span><span>Check-out: ${tkActTime(D.hours, 'checkout')}</span></div></div>
     <div data-pane="pendencias" ${tab === 'pendencias' ? '' : 'hidden'}>
       ${pend.length && o.status !== 'concluida' ? `<div class="tk-pend"><strong>${icon('warn')} ${pend.length} pendência${pend.length > 1 ? 's' : ''}</strong>${pend.map((p) => `<button class="tk-pitem" data-tkgo="m/os/${id}/${/questionário/i.test(p) ? 'questionarios' : /relato/i.test(p) ? 'relato' : /assin|cpf|nome de quem/i.test(p) ? 'assinar' : /foto/i.test(p) ? 'fotos' : /km/i.test(p) ? 'km' : 'relatorio'}"><span>${esc(p)}</span>${icon('chevron')}</button>`).join('')}</div>`
@@ -6715,7 +6735,7 @@ function tkPauseReason() {
   });
 }
 
-/** Páginas de dentro da OS: fotos, questionários, quilometragem, relato, assinatura, pausas, cliente, valores e orçamentos. */
+/** Páginas de dentro da OS: fotos, questionários, quilometragem, relato, assinatura, controle de horas, cliente, valores e orçamentos. */
 async function tkOrderPage(v, D, page, sub) {
   const o = D.order, id = o.id;
   // Depois do check-out, no celular só se consulta (alterações só pela versão completa, no computador)
@@ -6778,7 +6798,7 @@ async function tkOrderPage(v, D, page, sub) {
   if (page === 'pausas') {
     const h = D.hours;
     const rows = h.rows || [];
-    v.innerHTML = `${top('Pausas')}<div class="tk-card tk-tot"><div><span>Deslocamento</span><b>${tkHms(h.travel)}</b></div><div><span>Pausa</span><b>${tkHms(h.pause)}</b></div><div><span>Trabalho</span><b>${tkHms(h.work)}</b></div></div>
+    v.innerHTML = `${top('Controle de horas')}<div class="tk-card tk-tot"><div><span>Deslocamento</span><b>${tkHms(h.travel)}</b></div><div><span>Pausa</span><b>${tkHms(h.pause)}</b></div><div><span>Trabalho</span><b>${tkHms(h.work)}</b></div></div>
       <div class="tk-card tk-acts">${rows.length ? rows.map((r) => `<div class="tk-arow"><span class="tk-ri ${r.kind === 'pausa_inicio' || r.kind === 'pausa_fim' ? 'r' : 'b'}">${icon(r.kind === 'pausa_inicio' ? 'pause' : r.kind === 'pausa_fim' || r.kind === 'checkin' ? 'play' : r.kind === 'checkout' ? 'check' : 'truck')}</span>
         <div><strong>${esc(r.label)}</strong><small>${dt(r.at)}${r.reason ? ' · ' + esc(r.reason) : ''}</small></div></div>`).join('') : '<p class="tk-empty">Nenhuma atividade registrada.</p>'}</div>
       ${o.status === 'em_execucao' ? `<button class="tk-btn" data-pz="pausada">${icon('pause')}Pausar atendimento</button>` : o.status === 'pausada' ? `<button class="tk-btn p" data-pz="em_execucao">${icon('play')}Retomar atendimento</button>` : ''}`;

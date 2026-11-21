@@ -44,7 +44,8 @@ try {
 
     $r = (string)q('r', '');
     $method = $_SERVER['REQUEST_METHOD'];
-    if ($method === 'POST') Auth::checkCsrf();
+    // token_login: entrada do aplicativo (sem cookie, então sem CSRF; o limite de tentativas vale igual)
+    if ($method === 'POST' && $r !== 'token_login') Auth::checkCsrf();
     $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
     // Ordens de serviço: sem "Ver as OS de todos os técnicos" só aparecem as do próprio usuário
     if ($me0 = Auth::user()) {
@@ -66,6 +67,23 @@ try {
             return ['user' => Auth::withAvatar($u), 'csrf' => Auth::csrf()];
         },
         'POST logout' => function () { Auth::logout(); return ['ok' => true]; },
+
+        // ---- Aplicativo: acesso por token (Authorization: Bearer <token>) ----
+        'POST token_login' => function () use ($ip) {
+            $in = input();
+            $r = Auth::tokenLogin((string)($in['email'] ?? ''), (string)($in['password'] ?? ''), $ip, (string)($in['device'] ?? ''));
+            return $r + ['version' => APP_VERSION, 'perms' => Auth::perms(), 'perm_modules' => Auth::modules()];
+        },
+        // Aparelhos conectados do próprio usuário (Minha conta → Aparelhos)
+        'GET api_tokens' => function () {
+            $u = Auth::require();
+            return ApiTokens::listFor($u['id'], Auth::$api['id'] ?? null);
+        },
+        'POST api_token_revoke' => function () {
+            $u = Auth::require();
+            ApiTokens::revoke((int)(input()['id'] ?? 0), $u['id']);
+            return ['ok' => true];
+        },
         'POST password' => function () {
             $u = Auth::require();
             $in = input();
@@ -73,6 +91,8 @@ try {
             if (!password_verify((string)($in['current'] ?? ''), $row['password_hash'])) throw new AppError('Senha atual incorreta');
             Auth::checkPassword((string)($in['new'] ?? ''));
             DB::update('users', $u['id'], ['password_hash' => password_hash((string)$in['new'], PASSWORD_DEFAULT)]);
+            // Senha nova: os outros aparelhos do aplicativo precisam entrar de novo
+            ApiTokens::revokeAll($u['id'], Auth::$api['id'] ?? null);
             return ['ok' => true];
         },
 
@@ -930,6 +950,7 @@ try {
                 throw new AppError(Auth::ADMIN_LOCKED, 403);
             }
             if ($data) DB::update('users', $id, $data);
+            if (isset($data['password_hash'])) ApiTokens::revokeAll($id);
             return ['id' => $id];
         },
         'POST user_delete' => function () {
