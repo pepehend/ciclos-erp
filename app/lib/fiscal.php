@@ -335,7 +335,7 @@ class Fiscal
     {
         if ($mode === 'nunca') return false;
         $all = $mode === 'sempre';
-        $p = DB::one('SELECT type, fiscal FROM products WHERE id = ?', [$productId]);
+        $p = DB::one('SELECT type, fiscal FROM products WHERE id = ? AND company_id = ?', [$productId, Tenant::need()]);
         if (!$p || $p['type'] === 'servico') return false;
         $f = self::decode($p['fiscal']);
         $ncm = preg_replace('/\D/', '', (string)$ncm);

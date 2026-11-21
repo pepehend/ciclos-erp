@@ -41,7 +41,8 @@ class Reports
     public static function summary(?string $from, ?string $to): array
     {
         [$a, $b, $f, $t] = self::range($from, $to);
-        $ok = "status = 'ok' AND created_at BETWEEN ? AND ?";
+        $cid = Tenant::need();
+        $ok = "company_id = $cid AND status = 'ok' AND created_at BETWEEN ? AND ?";
 
         $tot = DB::one("SELECT COUNT(*) n, COALESCE(SUM(total),0) revenue, COALESCE(SUM(cost_total),0) cost,
             COALESCE(SUM(discount),0) discount FROM sales WHERE $ok", [$a, $b]);
@@ -50,17 +51,17 @@ class Reports
         $n = (int)$tot['n'];
 
         $losses = (float)DB::val("SELECT COALESCE(SUM(-quantity * unit_cost),0) FROM movements
-            WHERE type = 'perda' AND created_at BETWEEN ? AND ?", [$a, $b]);
-        $purchases = (float)DB::val("SELECT COALESCE(SUM(total),0) FROM invoices WHERE created_at BETWEEN ? AND ?", [$a, $b])
-            + (float)DB::val("SELECT COALESCE(SUM(quantity * unit_cost),0) FROM movements WHERE type = 'entrada' AND created_at BETWEEN ? AND ?", [$a, $b]);
+            WHERE company_id = ? AND type = 'perda' AND created_at BETWEEN ? AND ?", [$cid, $a, $b]);
+        $purchases = (float)DB::val("SELECT COALESCE(SUM(total),0) FROM invoices WHERE company_id = ? AND created_at BETWEEN ? AND ?", [$cid, $a, $b])
+            + (float)DB::val("SELECT COALESCE(SUM(quantity * unit_cost),0) FROM movements WHERE company_id = ? AND type = 'entrada' AND created_at BETWEEN ? AND ?", [$cid, $a, $b]);
 
         // Por produto: o desconto da venda é rateado proporcionalmente entre os itens
         $byProduct = DB::all("SELECT p.id, p.name, p.unit, SUM(i.quantity) qty,
                 SUM(CASE WHEN s.subtotal > 0 THEN i.total * s.total / s.subtotal ELSE 0 END) revenue,
                 SUM(i.quantity * i.unit_cost) cost
             FROM sale_items i JOIN sales s ON s.id = i.sale_id JOIN products p ON p.id = i.product_id
-            WHERE s.status = 'ok' AND s.created_at BETWEEN ? AND ?
-            GROUP BY p.id, p.name, p.unit ORDER BY revenue DESC", [$a, $b]);
+            WHERE s.company_id = ? AND s.status = 'ok' AND s.created_at BETWEEN ? AND ?
+            GROUP BY p.id, p.name, p.unit ORDER BY revenue DESC", [$cid, $a, $b]);
         foreach ($byProduct as &$r) {
             $r['qty'] = (float)$r['qty'];
             $r['revenue'] = round((float)$r['revenue'], 2);
@@ -82,9 +83,9 @@ class Reports
         $byCustomer = DB::all("SELECT COALESCE(c.id, 0) id, COALESCE(c.trade_name, c.name, s.customer, 'Sem cliente') name,
                 COUNT(*) n, SUM(s.total) total, SUM(s.total - s.cost_total) profit
             FROM sales s LEFT JOIN customers c ON c.id = s.customer_id
-            WHERE s.status = 'ok' AND s.created_at BETWEEN ? AND ?
+            WHERE s.company_id = ? AND s.status = 'ok' AND s.created_at BETWEEN ? AND ?
             GROUP BY COALESCE(c.id, 0), COALESCE(c.trade_name, c.name, s.customer, 'Sem cliente')
-            ORDER BY total DESC LIMIT 15", [$a, $b]);
+            ORDER BY total DESC LIMIT 15", [$cid, $a, $b]);
         foreach ($byCustomer as &$r) {
             $r['id'] = (int)$r['id']; $r['n'] = (int)$r['n'];
             $r['total'] = round((float)$r['total'], 2); $r['profit'] = round((float)$r['profit'], 2);
@@ -129,9 +130,9 @@ class Reports
     public static function stockValue(): array
     {
         $r = DB::one("SELECT COALESCE(SUM(CASE WHEN stock > 0 THEN stock * avg_cost ELSE 0 END),0) v,
-            COUNT(*) n FROM products WHERE active = 1 AND type <> 'servico'");
+            COUNT(*) n FROM products WHERE company_id = ? AND active = 1 AND type <> 'servico'", [Tenant::need()]);
         // Serviços não têm estoque: ficam fora do valor, da contagem e do mínimo
-        $low = (int)DB::val("SELECT COUNT(*) FROM products WHERE active = 1 AND type <> 'servico' AND min_stock > 0 AND stock <= min_stock");
+        $low = (int)DB::val("SELECT COUNT(*) FROM products WHERE company_id = ? AND active = 1 AND type <> 'servico' AND min_stock > 0 AND stock <= min_stock", [Tenant::need()]);
         return ['value' => round((float)$r['v'], 2), 'products' => (int)$r['n'], 'low' => $low];
     }
 
@@ -141,10 +142,10 @@ class Reports
         $d = self::summary($today, $today);
         $m = self::summary(date('Y-m-01'), $today);
         $low = DB::all("SELECT id, name, unit, stock, min_stock FROM products
-            WHERE active = 1 AND type <> 'servico' AND min_stock > 0 AND stock <= min_stock ORDER BY (stock / min_stock), name LIMIT 20");
+            WHERE company_id = ? AND active = 1 AND type <> 'servico' AND min_stock > 0 AND stock <= min_stock ORDER BY (stock / min_stock), name LIMIT 20", [Tenant::need()]);
         $recent = DB::all('SELECT m.*, p.name product_name, p.unit, u.name user_name FROM movements m
             JOIN products p ON p.id = m.product_id LEFT JOIN users u ON u.id = m.user_id
-            ORDER BY m.id DESC LIMIT 10');
+            WHERE m.company_id = ? ORDER BY m.id DESC LIMIT 10', [Tenant::need()]);
         return [
             'today' => ['revenue' => $d['revenue'], 'profit' => $d['gross_profit'], 'sales' => $d['sales_count']],
             'month' => ['revenue' => $m['revenue'], 'profit' => $m['gross_profit'], 'sales' => $m['sales_count'], 'margin' => $m['margin']],

@@ -55,14 +55,15 @@ class ApiTokens
     {
         $now = $now ?: now();
         if (!str_starts_with($token, self::PREFIX) || strlen($token) > 200) return null;
-        $row = DB::one('SELECT t.id, t.user_id, t.last_used_at, u.active FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = ?', [self::hash($token)]);
+        $row = DB::one('SELECT t.id, t.user_id, t.last_used_at, u.active, c.active company_active FROM api_tokens t JOIN users u ON u.id = t.user_id
+            LEFT JOIN companies c ON c.id = u.company_id WHERE t.token_hash = ?', [self::hash($token)]);
         if (!$row) return null;
         $last = strtotime((string)$row['last_used_at']);
         if ($last < strtotime($now) - self::IDLE_DAYS * 86400) {
             DB::run('DELETE FROM api_tokens WHERE id = ?', [(int)$row['id']]);
             return null;
         }
-        if (!(int)$row['active']) return null;
+        if (!(int)$row['active'] || !(int)$row['company_active']) return null;   // usuário desativado ou empresa desativada
         if (strtotime($now) - $last > self::TOUCH_SECONDS) {
             DB::run('UPDATE api_tokens SET last_used_at = ? WHERE id = ?', [$now, (int)$row['id']]);
         }

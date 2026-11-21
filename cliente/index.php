@@ -25,8 +25,6 @@ $doc = function ($d) {
 
 if (!app_connect()) { http_response_code(503); echo 'Sistema indisponível no momento.'; exit; }
 Portal::start();
-$co = Settings::all();
-$company = $co['company_name'] ?: 'Portal do cliente';
 
 $page = (string)($_GET['p'] ?? '');
 $tab = (string)($_GET['aba'] ?? 'orcamentos');
@@ -46,6 +44,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         switch ($act) {
             case 'login':
                 Portal::login((string)($_POST['documento'] ?? ''), (string)($_POST['senha'] ?? ''));
+                $go();
+            case 'empresa':
+                Portal::pickCompany((int)($_POST['cliente'] ?? 0));
                 $go();
             case 'convite':
                 Portal::acceptInvite((string)($_POST['t'] ?? ''), (string)($_POST['senha'] ?? ''), (string)($_POST['senha2'] ?? ''));
@@ -69,13 +70,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$me = Portal::customer();
-
+$me = Portal::customer();   // define a empresa pela sessão do cliente
+$choices = $me ? [] : Portal::choices();   // cliente de mais de uma empresa: escolhe depois do login
 // ---------------------------------------------------------------- dados da página
 $invite = null;
 if ($page === 'convite') {
     $token = (string)($_GET['t'] ?? $_POST['t'] ?? '');
-    $invite = Portal::inviteCustomer($token);
+    $invite = Portal::inviteCustomer($token);   // define a empresa pelo convite
 } elseif ($me) {
     $quotes = Portal::quotes((int)$me['id']);
     $sales = Portal::sales((int)$me['id']);
@@ -89,8 +90,11 @@ if ($page === 'convite') {
         if (!$sale) $go('aba=compras');
     }
     if (!in_array($tab, ['orcamentos', 'compras', 'parcelas', 'dados'], true)) $tab = 'orcamentos';
-    $requests = DB::all('SELECT message, created_at, resolved_at FROM portal_requests WHERE customer_id = ? ORDER BY id DESC LIMIT 10', [$me['id']]);
+    $requests = DB::all('SELECT message, created_at, resolved_at FROM portal_requests WHERE customer_id = ? AND company_id = ? ORDER BY id DESC LIMIT 10', [$me['id'], Tenant::need()]);
 }
+// Marca e dados da empresa (a empresa já foi definida pela sessão ou pelo convite; sem ela vale o padrão)
+$co = Settings::all();
+$company = $co['company_name'] ?: 'Portal do cliente';
 // Tela de entrada (login e convite): mesmo visual da entrada do sistema
 $hour = (int)date('G');
 $hello = $hour < 12 ? 'Bom dia' : ($hour < 18 ? 'Boa tarde' : 'Boa noite');
@@ -254,6 +258,17 @@ $csrf = $e(Portal::csrf());
         <label>Repita a senha <i>*</i><input type="password" name="senha2" minlength="<?= Portal::MIN_PASSWORD ?>" autocomplete="new-password" required></label>
         <button class="lg-btn"><?= $loginIcon ?>Criar senha e entrar</button>
       </form>
+    <?php elseif ($choices): ?>
+      <h2>Escolha a empresa</h2>
+      <p class="lg-help" style="font-size:.9rem">Seu CPF/CNPJ está cadastrado em mais de uma empresa. Em qual delas você quer entrar?</p>
+      <?php if ($error): ?><div class="alert err"><?= $e($error) ?></div><?php endif; ?>
+      <form method="post">
+        <input type="hidden" name="csrf" value="<?= $csrf ?>"><input type="hidden" name="act" value="empresa">
+        <?php foreach ($choices as $ch): ?>
+          <button class="lg-btn" name="cliente" value="<?= (int)$ch['id'] ?>"><?= $loginIcon ?><?= $e($ch['company']) ?></button>
+        <?php endforeach; ?>
+      </form>
+      <form method="post"><input type="hidden" name="csrf" value="<?= $csrf ?>"><input type="hidden" name="act" value="sair"><p class="lg-help"><button class="lg-help" style="background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;color:inherit">Entrar com outro CPF/CNPJ</button></p></form>
     <?php else: ?>
       <h2><?= $hello ?>! Entre na sua conta</h2>
       <?php if ($flash): ?><div class="alert"><?= $e($flash) ?></div><?php endif; ?>

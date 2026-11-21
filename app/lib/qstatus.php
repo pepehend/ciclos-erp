@@ -23,14 +23,16 @@ class QuoteStatuses
 
     private static ?array $cache = null;
 
+    public static function reset(): void { self::$cache = null; }
+
     public static function rows(): array
     {
         if (self::$cache === null) {
             self::$cache = array_map(function ($r) {
                 $r['system'] = isset(self::SYSTEM[$r['code']]);
-                $r['used'] = (int)DB::val('SELECT COUNT(*) FROM quotes WHERE status = ?', [$r['code']]);
+                $r['used'] = (int)DB::val('SELECT COUNT(*) FROM quotes WHERE company_id = ? AND status = ?', [Tenant::need(), $r['code']]);
                 return $r;
-            }, DB::all('SELECT * FROM quote_statuses ORDER BY sort, id'));
+            }, DB::all('SELECT * FROM quote_statuses WHERE company_id = ? ORDER BY sort, id', [Tenant::need()]));
         }
         return self::$cache;
     }
@@ -77,13 +79,13 @@ class QuoteStatuses
         if (mb_strlen($name) > 60) throw new AppError('Nome muito longo (máximo 60 caracteres)');
         $color = strtolower(trim((string)($in['color'] ?? '')));
         if (!preg_match('/^#[0-9a-f]{6}$/', $color)) throw new AppError('Escolha uma cor válida');
-        if (DB::val('SELECT id FROM quote_statuses WHERE LOWER(name) = ? AND id <> ?', [mb_strtolower($name), (int)$id])) {
+        if (DB::val('SELECT id FROM quote_statuses WHERE company_id = ? AND LOWER(name) = ? AND id <> ?', [Tenant::need(), mb_strtolower($name), (int)$id])) {
             throw new AppError('Já existe um status chamado "' . $name . '"');
         }
         $data = ['name' => $name, 'color' => $color, 'updated_at' => now()];
         self::$cache = null;
         if ($id) {
-            $old = DB::one('SELECT * FROM quote_statuses WHERE id = ?', [$id]);
+            $old = DB::one('SELECT * FROM quote_statuses WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);
             if (!$old) throw new AppError('Status não encontrado', 404);
             if (array_key_exists('active', $in)) {
                 $active = $in['active'] ? 1 : 0;
@@ -97,40 +99,40 @@ class QuoteStatuses
             return $id;
         }
         $newId = DB::insert('quote_statuses', $data + ['code' => 'tmp' . bin2hex(random_bytes(6)), 'active' => 1,
-            'sort' => (int)DB::val('SELECT COALESCE(MAX(sort), 0) + 1 FROM quote_statuses WHERE code <> ?', ['vendido']), 'created_at' => now()]);
+            'sort' => (int)DB::val('SELECT COALESCE(MAX(sort), 0) + 1 FROM quote_statuses WHERE company_id = ? AND code <> ?', [Tenant::need(), 'vendido']), 'created_at' => now()]);
         DB::update('quote_statuses', $newId, ['code' => 'st_' . $newId]);
         // "Vendido" fica sempre por último
-        DB::run('UPDATE quote_statuses SET sort = ? WHERE code = ?', [(int)DB::val('SELECT MAX(sort) FROM quote_statuses') + 1, 'vendido']);
+        DB::run('UPDATE quote_statuses SET sort = ? WHERE code = ? AND company_id = ?', [(int)DB::val('SELECT MAX(sort) FROM quote_statuses WHERE company_id = ?', [Tenant::need()]) + 1, 'vendido', Tenant::need()]);
         return $newId;
     }
 
     public static function delete(int $id): void
     {
-        $r = DB::one('SELECT * FROM quote_statuses WHERE id = ?', [$id]);
+        $r = DB::one('SELECT * FROM quote_statuses WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);
         if (!$r) throw new AppError('Status não encontrado', 404);
         if (isset(self::SYSTEM[$r['code']])) throw new AppError('Os status do sistema não podem ser excluídos (dá para renomear e trocar a cor)');
-        if (DB::val('SELECT COUNT(*) FROM quotes WHERE status = ?', [$r['code']])) {
+        if (DB::val('SELECT COUNT(*) FROM quotes WHERE company_id = ? AND status = ?', [Tenant::need(), $r['code']])) {
             throw new AppError('Há orçamentos com este status. Mude o status deles ou desative este status.');
         }
         if (in_array($r['code'], [Settings::get('quote_on_sent'), Settings::get('quote_on_approved'), Settings::get('quote_on_refused')], true)) {
             throw new AppError('Este status está em uso em Configurações → Orçamento. Troque lá antes de excluir.');
         }
-        DB::run('DELETE FROM quote_statuses WHERE id = ?', [$id]);
+        DB::run('DELETE FROM quote_statuses WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);
         self::$cache = null;
     }
 
     public static function reorder(array $ids): void
     {
         DB::tx(function () use ($ids) {
-            foreach (array_values($ids) as $i => $id) DB::run('UPDATE quote_statuses SET sort = ? WHERE id = ?', [$i + 1, (int)$id]);
+            foreach (array_values($ids) as $i => $id) DB::run('UPDATE quote_statuses SET sort = ? WHERE id = ? AND company_id = ?', [$i + 1, (int)$id, Tenant::need()]);
         });
         self::$cache = null;
     }
 
     public static function seed(): void
     {
-        $have = array_column(DB::all('SELECT code FROM quote_statuses'), 'code');
-        $i = (int)DB::val('SELECT COALESCE(MAX(sort), 0) FROM quote_statuses');
+        $have = array_column(DB::all('SELECT code FROM quote_statuses WHERE company_id = ?', [Tenant::need()]), 'code');
+        $i = (int)DB::val('SELECT COALESCE(MAX(sort), 0) FROM quote_statuses WHERE company_id = ?', [Tenant::need()]);
         foreach (self::SYSTEM as $code => [$name, $color]) {
             if (in_array($code, $have, true)) continue;
             DB::insert('quote_statuses', ['code' => $code, 'name' => $name, 'color' => $color, 'active' => 1, 'sort' => ++$i,

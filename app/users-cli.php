@@ -11,6 +11,7 @@
  *   php app/users-cli.php excluir <e-mail>      (apaga se nunca usou o sistema; senão só desativa)
  *   php app/users-cli.php senha <e-mail>        (gera uma senha nova e mostra)
  *   php app/users-cli.php email <e-mail> <novo> (troca o e-mail/login)
+ *   php app/users-cli.php superadmin <e-mail> <nome>   (cria um superadmin: administra as empresas; gera a senha)
  *
  * Nunca deixa o sistema sem nenhum administrador ativo.
  */
@@ -36,21 +37,34 @@ Uso: php users-cli.php <comando> [e-mail]
   excluir <e-mail>    apaga se nunca usou o sistema; se tiver registros, só desativa
   senha <e-mail>      gera uma senha nova e mostra na tela
   email <e-mail> <novo-e-mail>   troca o e-mail (login)
+  superadmin <e-mail> <nome>     cria um superadmin (cadastra e ativa as empresas; não vê os dados delas)
 TXT;
 
 try {
     if ($cmd === 'listar') {
-        $rows = DB::all('SELECT id, name, email, role, active FROM users ORDER BY role, name');
+        $rows = DB::all('SELECT u.id, u.name, u.email, u.role, u.active, c.slug FROM users u LEFT JOIN companies c ON c.id = u.company_id ORDER BY c.slug, u.role, u.name');
         foreach ($rows as $r) {
-            $out(sprintf('%-28s %-34s %-14s %s', mb_strimwidth($r['name'], 0, 27, '…'), $r['email'],
-                $r['role'] === 'admin' ? 'administrador' : 'membro', $r['active'] ? 'ativo' : 'INATIVO'));
+            $out(sprintf('%-18s %-26s %-32s %-14s %s', mb_strimwidth((string)($r['slug'] ?? '(superadmin)'), 0, 17, '…'), mb_strimwidth($r['name'], 0, 25, '…'), $r['email'],
+                $r['role'] === 'superadmin' ? 'superadmin' : ($r['role'] === 'admin' ? 'administrador' : 'membro'), $r['active'] ? 'ativo' : 'INATIVO'));
         }
+        exit(0);
+    }
+    if ($cmd === 'superadmin') {
+        $nome = trim((string)($argv[3] ?? ''));
+        if ($email === '' || $nome === '') $fail('uso: php users-cli.php superadmin <e-mail> <nome>');
+        $nova = '';
+        $chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+        for ($i = 0; $i < 12; $i++) $nova .= $chars[random_int(0, strlen($chars) - 1)];
+        Auth::createUser(['name' => $nome, 'email' => $email, 'password' => $nova, '_superadmin' => true]);
+        $out("Superadmin criado: $nome ($email). Senha: $nova");
+        $out('Passe para a pessoa e peça para ela trocar em Minha conta.');
         exit(0);
     }
     if (!in_array($cmd, ['desativar', 'ativar', 'rebaixar', 'promover', 'excluir', 'senha', 'email'], true)) { $out($ajuda); exit($cmd === '' ? 0 : 1); }
     if ($email === '') $fail("informe o e-mail do usuário. Ex.: php users-cli.php $cmd fulano@empresa.com");
-    $u = DB::one('SELECT id, name, email, role, active FROM users WHERE email = ?', [$email]);
+    $u = DB::one('SELECT id, name, email, role, active, company_id FROM users WHERE email = ?', [$email]);
     if (!$u) $fail("nenhum usuário com o e-mail $email (veja a lista com: php users-cli.php listar)");
+    Tenant::set($u['company_id'] !== null ? (int)$u['company_id'] : null);   // o e-mail é único: ele já diz a empresa
     $id = (int)$u['id'];
     $lastAdmin = $u['role'] === 'admin' && $u['active'] && Auth::activeAdmins() <= 1;
 

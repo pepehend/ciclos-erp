@@ -29,15 +29,16 @@ class GDrive
 
     public static function get(string $k, string $default = ''): string
     {
-        $v = DB::val('SELECT value FROM settings WHERE name = ?', ['gdrive_' . $k]);
+        $v = DB::val('SELECT value FROM settings WHERE name = ? AND company_id = ?', ['gdrive_' . $k, Tenant::need()]);
         return $v === null || $v === false ? $default : (string)$v;
     }
 
     public static function set(string $k, ?string $v): void
     {
         $name = 'gdrive_' . $k;
-        if (DB::val('SELECT id FROM settings WHERE name = ?', [$name])) {
-            DB::run('UPDATE settings SET value = ? WHERE name = ?', [(string)$v, $name]);
+        $cid = Tenant::need();
+        if (DB::val('SELECT id FROM settings WHERE name = ? AND company_id = ?', [$name, $cid])) {
+            DB::run('UPDATE settings SET value = ? WHERE name = ? AND company_id = ?', [(string)$v, $name, $cid]);
         } else {
             DB::insert('settings', ['name' => $name, 'value' => (string)$v]);
         }
@@ -195,17 +196,19 @@ JS;
     {
         $now = $now ?: now();
         if (!self::connected()) throw new AppError('Configure antes o script e a pasta do Google Drive');
-        $lock = fopen(sys_get_temp_dir() . '/estoque-gdrive-' . md5(__DIR__) . '.lock', 'c');
+        $company = Companies::get(Tenant::need());
+        $prefix = self::FILE_PREFIX . ($company['slug'] ?? 'empresa') . '-';   // cada empresa limpa só os próprios backups
+        $lock = fopen(sys_get_temp_dir() . '/estoque-gdrive-' . md5(__DIR__) . '-' . Tenant::need() . '.lock', 'c');
         if ($lock && !flock($lock, LOCK_EX | LOCK_NB)) throw new AppError('Já há um backup sendo enviado. Aguarde um pouco.');
         self::set('last_try', $now);
         try {
-            $name = self::FILE_PREFIX . date('Y-m-d-His', strtotime($now)) . '.sql.gz';
+            $name = $prefix . date('Y-m-d-His', strtotime($now)) . '.sql.gz';
             $data = gzencode(Backup::sql(), 6);
             if (strlen($data) > self::MAX_BYTES) throw new AppError('O backup ficou grande demais para o Google Apps Script (' . round(strlen($data) / 1048576) . ' MB)');
             $res = self::call(self::get('url'), [
                 'acao' => 'enviar', 'pasta' => self::get('folder_id'), 'nome' => $name, 'dados' => base64_encode($data),
-                'guardar' => (int)self::get('keep', (string)self::KEEP_DEFAULT), 'prefixo' => self::FILE_PREFIX,
-                'prefixos' => array_merge([self::FILE_PREFIX], self::OLD_PREFIXES),
+                'guardar' => (int)self::get('keep', (string)self::KEEP_DEFAULT), 'prefixo' => $prefix,
+                'prefixos' => array_merge([$prefix], self::OLD_PREFIXES),
             ]);
             self::set('last_ok', $now);
             self::set('last_file', $name);

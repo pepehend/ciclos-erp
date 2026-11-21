@@ -32,7 +32,7 @@ class Removals
     public static function delete(string $table, int $id): string
     {
         if (!isset(self::REFS[$table])) throw new AppError('Cadastro inválido');
-        $row = DB::one("SELECT * FROM $table WHERE id = ?", [$id]);
+        $row = DB::one("SELECT * FROM $table WHERE id = ? AND company_id = ?", [$id, Tenant::need()]);
         if (!$row || !empty($row['deleted_at'])) throw new AppError(self::LABELS[$table] . ' não encontrado', 404);
         if ($table === 'customers' && $id === Customers::ensureDefault()) {
             throw new AppError('O cliente "' . Customers::DEFAULT_NAME . '" é usado nas vendas de balcão e não pode ser excluído');
@@ -40,19 +40,19 @@ class Removals
         return DB::tx(function () use ($table, $id) {
             if ($table === 'customers') {
                 // Cliente excluído perde o acesso ao portal
-                DB::run('DELETE FROM customer_portal WHERE customer_id = ?', [$id]);
+                DB::run('DELETE FROM customer_portal WHERE customer_id = ? AND company_id = ?', [$id, Tenant::need()]);
             }
             if ($table === 'questionnaires') {
                 // Sai dos tipos de tarefa; as OS que já responderam continuam mostrando as respostas
-                foreach (DB::all('SELECT id, questionnaire_ids FROM task_types') as $t) {
+                foreach (DB::all('SELECT id, questionnaire_ids FROM task_types WHERE company_id = ?', [Tenant::need()]) as $t) {
                     $ids = json_decode((string)$t['questionnaire_ids'], true) ?: [];
                     $keep = array_values(array_filter($ids, fn($q) => (int)$q !== $id));
                     if (count($keep) !== count($ids)) DB::update('task_types', (int)$t['id'], ['questionnaire_ids' => json_encode($keep), 'updated_at' => now()]);
                 }
             }
             if (!self::used($table, $id)) {
-                if ($table === 'customers') DB::run('DELETE FROM portal_requests WHERE customer_id = ?', [$id]);
-                DB::run("DELETE FROM $table WHERE id = ?", [$id]);
+                if ($table === 'customers') DB::run('DELETE FROM portal_requests WHERE customer_id = ? AND company_id = ?', [$id, Tenant::need()]);
+                DB::run("DELETE FROM $table WHERE id = ? AND company_id = ?", [$id, Tenant::need()]);
                 return 'apagado';
             }
             DB::update($table, $id, ['deleted_at' => now(), 'active' => 0, 'updated_at' => now()]);
@@ -67,7 +67,7 @@ class Removals
     public static function check(string $table, ?int $id, ?int $current = null): void
     {
         if (!$id || $id === $current) return;
-        $del = DB::val("SELECT deleted_at FROM $table WHERE id = ?", [$id]);
+        $del = DB::val("SELECT deleted_at FROM $table WHERE id = ? AND company_id = ?", [$id, Tenant::need()]);
         if ($del) throw new AppError(self::LABELS[$table] . ' excluído. Escolha outro.');
     }
 }

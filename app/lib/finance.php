@@ -18,7 +18,7 @@ class Finance
         $e = DB::one('SELECT f.*, c.name customer_name, s.name supplier_name, u.name user_name
             FROM financial_entries f LEFT JOIN customers c ON c.id = f.customer_id
             LEFT JOIN suppliers s ON s.id = f.supplier_id LEFT JOIN users u ON u.id = f.user_id
-            WHERE f.id = ?', [$id]);
+            WHERE f.id = ? AND f.company_id = ?', [$id, Tenant::need()]);
         if (!$e) throw new AppError('Lançamento não encontrado', 404);
         return self::decorate($e);
     }
@@ -36,7 +36,7 @@ class Finance
     public static function categories(): array
     {
         $out = self::CATEGORIES;
-        foreach (DB::all("SELECT DISTINCT type, category FROM financial_entries WHERE category IS NOT NULL AND category <> ''") as $r) {
+        foreach (DB::all("SELECT DISTINCT type, category FROM financial_entries WHERE company_id = ? AND category IS NOT NULL AND category <> ''", [Tenant::need()]) as $r) {
             if (isset($out[$r['type']]) && !in_array($r['category'], $out[$r['type']], true)) $out[$r['type']][] = $r['category'];
         }
         return $out;
@@ -169,7 +169,7 @@ class Finance
         $e = self::get($id);
         if ($e['sale_id']) throw new AppError('Este recebimento veio de uma venda. Para desfazer, cancele a venda.');
         if ($e['status'] === 'pago') throw new AppError('Reabra o lançamento antes de excluir');
-        DB::run('DELETE FROM financial_entries WHERE id = ?', [$id]);
+        DB::run('DELETE FROM financial_entries WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);
     }
 
     /**
@@ -178,7 +178,7 @@ class Finance
      */
     public static function list(array $f): array
     {
-        $where = ['1 = 1']; $p = [];
+        $where = ['f.company_id = ?']; $p = [Tenant::need()];
         if (isset(self::TYPES[$f['type'] ?? ''])) { $where[] = 'f.type = ?'; $p[] = $f['type']; }
         $today = date('Y-m-d');
         switch ($f['status'] ?? '') {
@@ -230,7 +230,7 @@ class Finance
                     SUM(CASE WHEN status = 'aberto' AND due_date < ? THEN 1 ELSE 0 END) overdue_count,
                     COALESCE(SUM(CASE WHEN status = 'aberto' AND due_date >= ? AND due_date <= ? THEN amount ELSE 0 END), 0) next7,
                     COALESCE(SUM(CASE WHEN status = 'pago' AND paid_at >= ? AND paid_at <= ? THEN paid_amount ELSE 0 END), 0) paid_month
-                FROM financial_entries WHERE type = ?", [$today, $today, $today, $week, $m1, $m2, $t]);
+                FROM financial_entries WHERE company_id = ? AND type = ?", [$today, $today, $today, $week, $m1, $m2, Tenant::need(), $t]);
             $out[$t] = array_map(fn($v) => round((float)$v, 2), $r);
             $out[$t]['overdue_count'] = (int)$r['overdue_count'];
         }
@@ -244,7 +244,7 @@ class Finance
         $r = DB::one("SELECT
                 COALESCE(SUM(CASE WHEN type = 'receber' THEN paid_amount ELSE 0 END), 0) i,
                 COALESCE(SUM(CASE WHEN type = 'pagar' THEN paid_amount ELSE 0 END), 0) o
-            FROM financial_entries WHERE status = 'pago' AND paid_at < ?", [$date]);
+            FROM financial_entries WHERE company_id = ? AND status = 'pago' AND paid_at < ?", [Tenant::need(), $date]);
         return round(self::opening() + (float)$r['i'] - (float)$r['o'], 2);
     }
 
@@ -281,7 +281,7 @@ class Finance
             $buckets[$k] ??= ['key' => $k, 'in' => 0.0, 'out' => 0.0, 'in_proj' => 0.0, 'out_proj' => 0.0];
         }
         $real = DB::all("SELECT type, paid_at d, SUM(paid_amount) v FROM financial_entries
-            WHERE status = 'pago' AND paid_at >= ? AND paid_at <= ? GROUP BY type, paid_at", [$from, $to]);
+            WHERE company_id = ? AND status = 'pago' AND paid_at >= ? AND paid_at <= ? GROUP BY type, paid_at", [Tenant::need(), $from, $to]);
         foreach ($real as $r) $buckets[$key($r['d'])][$r['type'] === 'receber' ? 'in' : 'out'] += (float)$r['v'];
 
         // Previsto (em aberto) só faz sentido de hoje em diante. O que vence antes do
@@ -291,7 +291,7 @@ class Finance
         $overdue = ['receber' => 0.0, 'pagar' => 0.0];
         $pre = 0.0;
         foreach (DB::all("SELECT type, due_date d, SUM(amount) v FROM financial_entries
-                WHERE status = 'aberto' AND due_date <= ? GROUP BY type, due_date", [$to]) as $r) {
+                WHERE company_id = ? AND status = 'aberto' AND due_date <= ? GROUP BY type, due_date", [Tenant::need(), $to]) as $r) {
             $v = (float)$r['v']; $sign = $r['type'] === 'receber' ? 1 : -1;
             if ($r['d'] < $today) $overdue[$r['type']] += $v;
             if ($projFrom > $to) continue;
@@ -314,8 +314,8 @@ class Finance
             $rows[] = $b;
         }
         $cats = DB::all("SELECT type, COALESCE(NULLIF(category, ''), 'Sem categoria') category, SUM(paid_amount) v
-            FROM financial_entries WHERE status = 'pago' AND paid_at >= ? AND paid_at <= ?
-            GROUP BY type, COALESCE(NULLIF(category, ''), 'Sem categoria') ORDER BY v DESC", [$from, $to]);
+            FROM financial_entries WHERE company_id = ? AND status = 'pago' AND paid_at >= ? AND paid_at <= ?
+            GROUP BY type, COALESCE(NULLIF(category, ''), 'Sem categoria') ORDER BY v DESC", [Tenant::need(), $from, $to]);
         return [
             'from' => $from, 'to' => $to, 'group' => $group, 'today' => $today,
             'opening' => $opening, 'opening_proj' => round($openingProj, 2), 'opening_setting' => self::opening(),
@@ -335,8 +335,8 @@ class Finance
      */
     public static function fromSale(int $saleId): void
     {
-        if (DB::val('SELECT id FROM financial_entries WHERE sale_id = ?', [$saleId])) return;
-        $s = DB::one('SELECT * FROM sales WHERE id = ?', [$saleId]);
+        if (DB::val('SELECT id FROM financial_entries WHERE sale_id = ? AND company_id = ?', [$saleId, Tenant::need()])) return;
+        $s = DB::one('SELECT * FROM sales WHERE id = ? AND company_id = ?', [$saleId, Tenant::need()]);
         if (!$s || (float)$s['total'] <= 0) return;
         $d = substr($s['created_at'], 0, 10);
         $total = round((float)$s['total'], 2);
@@ -428,7 +428,7 @@ class Finance
 
     public static function cancelSale(int $saleId): void
     {
-        DB::run("UPDATE financial_entries SET status = 'cancelado', updated_at = ? WHERE sale_id = ?", [now(), $saleId]);
+        DB::run("UPDATE financial_entries SET status = 'cancelado', updated_at = ? WHERE sale_id = ? AND company_id = ?", [now(), $saleId, Tenant::need()]);
     }
 
     // ---------- Utilidades ----------

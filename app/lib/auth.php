@@ -148,20 +148,37 @@ class Auth
     {
         $uid = $_SESSION['uid'] ?? null;
         if (!$uid) return null;
-        static $cache = null;
-        if ($cache && $cache['id'] == $uid) return $cache;
+        if (self::$userCache && self::$userCache['id'] == $uid) return self::$userCache;
         $u = self::load((int)$uid);
         if (!$u) { self::logout(); return null; }
-        return $cache = $u;
+        return self::$userCache = $u;
     }
+
+    /** Usuário do pedido atual, guardado na memória (zerado ao trocar de empresa). */
+    private static ?array $userCache = null;
+    public static function resetCache(): void { self::$userCache = null; }
 
     /** Usuário ativo com as permissões calculadas (null se não existe ou está desativado). */
     private static function load(int $uid): ?array
     {
-        $u = DB::one('SELECT u.id, u.name, u.email, u.phone, u.accent_color, u.role, u.active, u.permissions, u.profile_id, p.name profile_name, p.permissions profile_permissions
-            FROM users u LEFT JOIN permission_profiles p ON p.id = u.profile_id WHERE u.id = ?', [$uid]);
+        $u = DB::one('SELECT u.id, u.name, u.email, u.phone, u.accent_color, u.role, u.active, u.permissions, u.profile_id, u.company_id,
+                p.name profile_name, p.permissions profile_permissions, c.name company_name, c.slug company_slug, c.active company_active
+            FROM users u LEFT JOIN permission_profiles p ON p.id = u.profile_id AND p.company_id = u.company_id
+            LEFT JOIN companies c ON c.id = u.company_id WHERE u.id = ?', [$uid]);
         if (!$u || !$u['active']) return null;
         $u['id'] = (int)$u['id'];
+        if ($u['role'] === 'superadmin') {
+            // O superadmin não pertence a empresa: só administra as empresas
+            Tenant::clear();
+            $u['company_id'] = null;
+        } else {
+            // Todo usuário comum pertence a uma empresa ativa
+            if ($u['company_id'] === null || !(int)$u['company_active']) return null;
+            $u['company_id'] = (int)$u['company_id'];
+            Tenant::set($u['company_id']);
+        }
+        $u['company'] = $u['company_id'] ? ['id' => $u['company_id'], 'name' => $u['company_name'], 'slug' => $u['company_slug']] : null;
+        unset($u['company_name'], $u['company_slug'], $u['company_active']);
         $u['permissions'] = self::permsOf($u);
         return $u;
     }
@@ -170,6 +187,7 @@ class Auth
     public static function permsOf(array $u): array
     {
         $all = array_keys(self::perms());
+        if (($u['role'] ?? '') === 'superadmin') return [];
         if (($u['role'] ?? '') === 'admin') return $all;
         // Com perfil: vale o perfil. Sem perfil: lista própria do usuário (vazia = acesso total, para não travar quem já usava)
         $raw = !empty($u['profile_id']) ? ($u['profile_permissions'] ?? '') : ($u['permissions'] ?? null);
@@ -214,7 +232,7 @@ class Auth
     public static function profiles(): array
     {
         $rows = DB::all('SELECT p.*, (SELECT COUNT(*) FROM users u WHERE u.profile_id = p.id AND u.role <> \'admin\') users
-            FROM permission_profiles p ORDER BY p.name');
+            FROM permission_profiles p WHERE p.company_id = ? ORDER BY p.name', [Tenant::need()]);
         foreach ($rows as &$r) {
             $r['id'] = (int)$r['id']; $r['users'] = (int)$r['users'];
             $r['permissions'] = $r['permissions'] === null || $r['permissions'] === '' ? [] : array_values(array_diff(explode(',', $r['permissions']), ['_v2']));
@@ -228,11 +246,11 @@ class Auth
         if ($name === '') throw new AppError('Dê um nome ao perfil');
         $name = mb_substr($name, 0, 80);
         $id = (int)($in['id'] ?? 0);
-        $dup = DB::val('SELECT id FROM permission_profiles WHERE LOWER(name) = LOWER(?)' . ($id ? ' AND id <> ?' : ''), $id ? [$name, $id] : [$name]);
+        $dup = DB::val('SELECT id FROM permission_profiles WHERE company_id = ? AND LOWER(name) = LOWER(?)' . ($id ? ' AND id <> ?' : ''), $id ? [Tenant::need(), $name, $id] : [Tenant::need(), $name]);
         if ($dup) throw new AppError('Já existe um perfil com este nome');
         $data = ['name' => $name, 'permissions' => self::normalizePerms($in['permissions'] ?? [])];
         if ($id) {
-            if (!DB::val('SELECT id FROM permission_profiles WHERE id = ?', [$id])) throw new AppError('Perfil não encontrado', 404);
+            if (!DB::val('SELECT id FROM permission_profiles WHERE id = ? AND company_id = ?', [$id, Tenant::need()])) throw new AppError('Perfil não encontrado', 404);
             DB::update('permission_profiles', $id, $data);
             return $id;
         }
@@ -241,10 +259,12 @@ class Auth
 
     public static function deleteProfile(int $id): void
     {
-        $n = (int)DB::val("SELECT COUNT(*) FROM users WHERE profile_id = ? AND role <> 'admin'", [$id]);
+        $cid = Tenant::need();
+        if (!DB::val('SELECT id FROM permission_profiles WHERE id = ? AND company_id = ?', [$id, $cid])) throw new AppError('Perfil não encontrado', 404);
+        $n = (int)DB::val("SELECT COUNT(*) FROM users WHERE profile_id = ? AND role <> 'admin' AND company_id = ?", [$id, $cid]);
         if ($n) throw new AppError("Este perfil está em uso por $n usuário(s). Troque o perfil deles antes de excluir.");
-        DB::run('UPDATE users SET profile_id = NULL WHERE profile_id = ?', [$id]);
-        DB::run('DELETE FROM permission_profiles WHERE id = ?', [$id]);
+        DB::run('UPDATE users SET profile_id = NULL WHERE profile_id = ? AND company_id = ?', [$id, $cid]);
+        DB::run('DELETE FROM permission_profiles WHERE id = ? AND company_id = ?', [$id, $cid]);
     }
 
     /** Perfis de exemplo criados na primeira vez (podem ser editados ou excluídos). */
@@ -257,7 +277,7 @@ class Auth
             'Técnico' => ['ordens', 'ordens.execute', 'ordens.send', 'equipamentos', 'equipamentos.add', 'clientes'],
         ];
         foreach ($base as $name => $perms) {
-            if (!DB::val('SELECT id FROM permission_profiles WHERE name = ?', [$name])) {
+            if (!DB::val('SELECT id FROM permission_profiles WHERE name = ? AND company_id = ?', [$name, Tenant::need()])) {
                 DB::insert('permission_profiles', ['name' => $name, 'permissions' => self::normalizePerms($perms), 'created_at' => now()]);
             }
         }
@@ -286,6 +306,14 @@ class Auth
         return $u;
     }
 
+    /** Só o superadmin (administra as empresas; não enxerga dados de nenhuma). */
+    public static function requireSuper(): array
+    {
+        $u = self::require();
+        if ($u['role'] !== 'superadmin') throw new AppError('Apenas o superadmin pode fazer isso', 403);
+        return $u;
+    }
+
     public static function requireAdmin(): array
     {
         $u = self::require();
@@ -309,6 +337,7 @@ class Auth
     public static function tokenLogin(string $email, string $password, string $ip, string $device): array
     {
         $u = self::verifyLogin($email, $password, $ip);
+        if ($u['role'] === 'superadmin') throw new AppError('O superadmin administra as empresas pelo sistema web; o aplicativo é para os usuários de cada empresa.', 403);
         $token = ApiTokens::issue((int)$u['id'], $device, $ip);
         return ['token' => $token, 'user' => self::withAvatar(self::load((int)$u['id']))];
     }
@@ -326,6 +355,9 @@ class Auth
         if (!$u || !$u['active'] || !password_verify($password, $u['password_hash'])) {
             DB::insert('login_attempts', ['ip' => $ip, 'created_at' => now()]);
             throw new AppError('E-mail ou senha incorretos', 401);
+        }
+        if ($u['role'] !== 'superadmin' && !(int)DB::val('SELECT active FROM companies WHERE id = ?', [(int)$u['company_id']])) {
+            throw new AppError('O acesso desta empresa está desativado. Fale com o suporte.', 403);
         }
         if (password_needs_rehash($u['password_hash'], PASSWORD_DEFAULT)) {
             DB::update('users', (int)$u['id'], ['password_hash' => password_hash($password, PASSWORD_DEFAULT)]);
@@ -382,7 +414,11 @@ class Auth
      */
     public static function deleteUser(int $id, int $byId, bool $console = false): string
     {
-        $u = DB::one('SELECT id, role, active FROM users WHERE id = ?', [$id]);
+        // Sem empresa (console, superadmin) só alcança superadmins; com empresa, só os dela
+        $cid = Tenant::id();
+        $scope = $cid !== null ? ' AND company_id = ?' : ' AND company_id IS NULL';
+        $sp = $cid !== null ? [$id, $cid] : [$id];
+        $u = DB::one('SELECT id, role, active FROM users WHERE id = ?' . $scope, $sp);
         if (!$u) throw new AppError('Usuário não encontrado', 404);
         if (!$console) {
             if ((int)$u['id'] === $byId) throw new AppError('Você não pode excluir a si mesmo');
@@ -395,13 +431,13 @@ class Auth
             return 'deactivated';
         }
         ApiTokens::revokeAll($id);
-        DB::run('DELETE FROM users WHERE id = ?', [$id]);
+        DB::run('DELETE FROM users WHERE id = ?' . $scope, $sp);
         return 'deleted';
     }
 
     public static function activeAdmins(): int
     {
-        return (int)DB::val("SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = 1");
+        return (int)DB::val("SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = 1 AND company_id = ?", [Tenant::need()]);
     }
 
     /** E-mail (login) em minúsculas, válido e sem outro usuário com ele ($exceptId = o próprio usuário, na edição). */
@@ -418,18 +454,21 @@ class Auth
         $name = trim((string)($in['name'] ?? ''));
         $email = mb_strtolower(trim((string)($in['email'] ?? '')));
         $pass = (string)($in['password'] ?? '');
-        $role = ($in['role'] ?? '') === 'admin' ? 'admin' : 'membro';
+        // 'superadmin' só pelo console (app/users-cli.php), que passa _superadmin
+        $super = !empty($in['_superadmin']);
+        $role = $super ? 'superadmin' : (($in['role'] ?? '') === 'admin' ? 'admin' : 'membro');
         if ($name === '') throw new AppError('Informe o nome');
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) throw new AppError('E-mail inválido');
         self::checkPassword($pass);
         if (DB::val('SELECT id FROM users WHERE email = ?', [$email])) throw new AppError('Já existe um usuário com este e-mail');
         $perms = isset($in['permissions']) && is_array($in['permissions']) ? self::normalizePerms($in['permissions']) : null;
         $profile = !empty($in['profile_id']) ? (int)$in['profile_id'] : null;
-        if ($profile && !DB::val('SELECT id FROM permission_profiles WHERE id = ?', [$profile])) throw new AppError('Perfil de permissão não encontrado');
+        if ($profile && ($super || !DB::val('SELECT id FROM permission_profiles WHERE id = ? AND company_id = ?', [$profile, Tenant::need()]))) throw new AppError('Perfil de permissão não encontrado');
         return DB::insert('users', [
             'name' => mb_substr($name, 0, 120), 'email' => $email, 'phone' => self::phone($in['phone'] ?? null), 'permissions' => $perms, 'profile_id' => $profile,
             'password_hash' => password_hash($pass, PASSWORD_DEFAULT),
             'role' => $role, 'active' => 1, 'created_at' => now(),
+            'company_id' => $super ? null : Tenant::need(),
         ]);
     }
 

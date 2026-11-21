@@ -425,15 +425,15 @@ class Invoices
             $it['match'] = null;
             if ($cnpj && !empty($it['code'])) {
                 $m = DB::one('SELECT m.product_id, m.factor FROM supplier_map m JOIN products p ON p.id = m.product_id
-                    WHERE m.supplier_cnpj = ? AND m.supplier_code = ? AND p.active = 1', [$cnpj, $it['code']]);
+                    WHERE m.company_id = ? AND p.company_id = m.company_id AND m.supplier_cnpj = ? AND m.supplier_code = ? AND p.active = 1', [Tenant::need(), $cnpj, $it['code']]);
                 if ($m) { $it['product_id'] = (int)$m['product_id']; $it['factor'] = (float)$m['factor']; $it['match'] = 'fornecedor'; continue; }
             }
             if (!empty($it['ean'])) {
-                $p = DB::one('SELECT id FROM products WHERE barcode = ? AND active = 1', [$it['ean']]);
+                $p = DB::one('SELECT id FROM products WHERE company_id = ? AND barcode = ? AND active = 1', [Tenant::need(), $it['ean']]);
                 if ($p) { $it['product_id'] = (int)$p['id']; $it['match'] = 'codigo_barras'; continue; }
             }
             if (!empty($it['description'])) {
-                $p = DB::one('SELECT id FROM products WHERE LOWER(name) = LOWER(?) AND active = 1', [trim($it['description'])]);
+                $p = DB::one('SELECT id FROM products WHERE company_id = ? AND LOWER(name) = LOWER(?) AND active = 1', [Tenant::need(), trim($it['description'])]);
                 if ($p) { $it['product_id'] = (int)$p['id']; $it['match'] = 'nome'; }
             }
         }
@@ -441,7 +441,7 @@ class Invoices
         $inv['recipient_error'] = self::recipientError($inv);
         $inv['duplicate'] = false;
         if (!empty($inv['access_key'])) {
-            $d = DB::one('SELECT id, created_at FROM invoices WHERE access_key = ?', [$inv['access_key']]);
+            $d = DB::one('SELECT id, created_at FROM invoices WHERE company_id = ? AND access_key = ?', [Tenant::need(), $inv['access_key']]);
             if ($d) {
                 $inv['duplicate'] = (int)$d['id'];
                 array_unshift($inv['warnings'], 'Esta nota já foi importada em ' . date('d/m/Y H:i', strtotime($d['created_at'])) . '.');
@@ -464,7 +464,7 @@ class Invoices
         }
 
         return DB::tx(function () use ($in, $items, $key, $kind, $cnpj, $userId) {
-            if ($key && DB::val('SELECT id FROM invoices WHERE access_key = ?', [$key])) {
+            if ($key && DB::val('SELECT id FROM invoices WHERE company_id = ? AND access_key = ?', [Tenant::need(), $key])) {
                 throw new AppError('Esta nota já foi importada antes');
             }
             $issued = self::parseDate($in['issued_at'] ?? null);
@@ -528,7 +528,7 @@ class Invoices
                 }
                 if ($cnpj && !empty($it['code'])) {
                     $code = mb_substr((string)$it['code'], 0, 60);
-                    $ex = DB::one('SELECT id FROM supplier_map WHERE supplier_cnpj = ? AND supplier_code = ?', [$cnpj, $code]);
+                    $ex = DB::one('SELECT id FROM supplier_map WHERE company_id = ? AND supplier_cnpj = ? AND supplier_code = ?', [Tenant::need(), $cnpj, $code]);
                     if ($ex) DB::update('supplier_map', (int)$ex['id'], ['product_id' => $pid, 'factor' => $factor]);
                     else DB::insert('supplier_map', ['supplier_cnpj' => $cnpj, 'supplier_code' => $code, 'product_id' => $pid, 'factor' => $factor]);
                 }
@@ -546,21 +546,21 @@ class Invoices
     public static function revert(int $invoiceId, int $userId): void
     {
         DB::tx(function () use ($invoiceId, $userId) {
-            $inv = DB::one('SELECT * FROM invoices WHERE id = ?', [$invoiceId]);
+            $inv = DB::one('SELECT * FROM invoices WHERE id = ? AND company_id = ?', [$invoiceId, Tenant::need()]);
             if (!$inv) throw new AppError('Nota não encontrada', 404);
-            if (DB::val("SELECT COUNT(*) FROM financial_entries WHERE invoice_id = ? AND status = 'pago'", [$invoiceId])) {
+            if (DB::val("SELECT COUNT(*) FROM financial_entries WHERE invoice_id = ? AND company_id = ? AND status = 'pago'", [$invoiceId, Tenant::need()])) {
                 throw new AppError('Esta nota tem parcelas já pagas em Contas a pagar. Reabra os pagamentos antes de desfazer a entrada.');
             }
-            DB::run('DELETE FROM financial_entries WHERE invoice_id = ?', [$invoiceId]);
-            $movs = DB::all("SELECT * FROM movements WHERE invoice_id = ? AND type = 'nota'", [$invoiceId]);
+            DB::run('DELETE FROM financial_entries WHERE invoice_id = ? AND company_id = ?', [$invoiceId, Tenant::need()]);
+            $movs = DB::all("SELECT * FROM movements WHERE invoice_id = ? AND company_id = ? AND type = 'nota'", [$invoiceId, Tenant::need()]);
             foreach ($movs as $m) {
                 Inventory::move((int)$m['product_id'], 'estorno_nota', -(float)$m['quantity'], null, [
                     'user_id' => $userId, 'reverse_cost' => (float)$m['unit_cost'], 'allow_inactive' => true,
                     'note' => 'Estorno da NF ' . ($inv['number'] ?? 's/n'),
                 ]);
             }
-            DB::run('UPDATE movements SET invoice_id = NULL WHERE invoice_id = ?', [$invoiceId]);
-            DB::run('DELETE FROM invoices WHERE id = ?', [$invoiceId]);
+            DB::run('UPDATE movements SET invoice_id = NULL WHERE invoice_id = ? AND company_id = ?', [$invoiceId, Tenant::need()]);
+            DB::run('DELETE FROM invoices WHERE id = ? AND company_id = ?', [$invoiceId, Tenant::need()]);
         });
     }
 

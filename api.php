@@ -57,7 +57,7 @@ try {
         // ---- Sessão ----
         'GET me' => function () {
             $u = Auth::withAvatar(Auth::user());
-            $r = ['user' => $u, 'csrf' => Auth::csrf(), 'version' => APP_VERSION, 'perms' => Auth::perms(), 'perm_modules' => Auth::modules()];
+            $r = ['user' => $u, 'company' => $u['company'] ?? null, 'csrf' => Auth::csrf(), 'version' => APP_VERSION, 'perms' => Auth::perms(), 'perm_modules' => Auth::modules()];
             // Tela de login: nome e logo da empresa (só quando ninguém está logado)
             if (!$u) $r['brand'] = ['name' => Settings::get('company_name'), 'logo' => Settings::get('company_logo')];
             return $r;
@@ -72,7 +72,7 @@ try {
         'POST token_login' => function () use ($ip) {
             $in = input();
             $r = Auth::tokenLogin((string)($in['email'] ?? ''), (string)($in['password'] ?? ''), $ip, (string)($in['device'] ?? ''));
-            return $r + ['version' => APP_VERSION, 'perms' => Auth::perms(), 'perm_modules' => Auth::modules()];
+            return $r + ['company' => $r['user']['company'] ?? null, 'version' => APP_VERSION, 'perms' => Auth::perms(), 'perm_modules' => Auth::modules()];
         },
         // Aparelhos conectados do próprio usuário (Minha conta → Aparelhos)
         'GET api_tokens' => function () {
@@ -112,7 +112,7 @@ try {
         'POST user_avatar' => function () {
             $me = Auth::requireAdmin();
             $in = input();
-            $u = DB::one('SELECT * FROM users WHERE id = ?', [(int)($in['id'] ?? 0)]);
+            $u = DB::one('SELECT * FROM users WHERE id = ? AND company_id = ?', [(int)($in['id'] ?? 0), Tenant::need()]);
             if (!$u) throw new AppError('Usuário não encontrado', 404);
             Auth::assertCanEdit($u, $me);
             return ['avatar' => Auth::setAvatar((int)$u['id'], (string)($in['avatar'] ?? ''))];
@@ -134,15 +134,15 @@ try {
             if ($rk) $d['items_review'] = count(OrderExec::reviewList($rk));
             if (Auth::can('orcamentos')) {
                 $d['quotes'] = [
-                    'approved' => (int)DB::val("SELECT COUNT(*) FROM quotes WHERE status = 'aprovado'"),
-                    'approved_total' => (float)DB::val("SELECT COALESCE(SUM(total),0) FROM quotes WHERE status = 'aprovado'"),
-                    'from_os' => (int)DB::val("SELECT COUNT(*) FROM quotes WHERE service_order_id IS NOT NULL AND created_at >= ?", [date('Y-m-01') . ' 00:00:00']),
+                    'approved' => (int)DB::val("SELECT COUNT(*) FROM quotes WHERE company_id = ? AND status = 'aprovado'", [Tenant::need()]),
+                    'approved_total' => (float)DB::val("SELECT COALESCE(SUM(total),0) FROM quotes WHERE company_id = ? AND status = 'aprovado'", [Tenant::need()]),
+                    'from_os' => (int)DB::val("SELECT COUNT(*) FROM quotes WHERE company_id = ? AND service_order_id IS NOT NULL AND created_at >= ?", [Tenant::need(), date('Y-m-01') . ' 00:00:00']),
                 ];
             }
             if (Auth::can('compras')) {
                 $d['purchases'] = [
-                    'open' => (int)DB::val("SELECT COUNT(*) FROM purchase_orders WHERE status IN ('rascunho','enviada','confirmada')"),
-                    'late' => (int)DB::val("SELECT COUNT(*) FROM purchase_orders WHERE status IN ('enviada','confirmada') AND expected_date < ?", [date('Y-m-d')]),
+                    'open' => (int)DB::val("SELECT COUNT(*) FROM purchase_orders WHERE company_id = ? AND status IN ('rascunho','enviada','confirmada')", [Tenant::need()]),
+                    'late' => (int)DB::val("SELECT COUNT(*) FROM purchase_orders WHERE company_id = ? AND status IN ('enviada','confirmada') AND expected_date < ?", [Tenant::need(), date('Y-m-d')]),
                 ];
             }
             return $d;
@@ -150,9 +150,9 @@ try {
         'GET meta' => function () {
             Auth::require();
             return [
-                'categories' => array_column(DB::all('SELECT DISTINCT category FROM products WHERE category IS NOT NULL ORDER BY category'), 'category'),
+                'categories' => array_column(DB::all('SELECT DISTINCT category FROM products WHERE company_id = ? AND category IS NOT NULL ORDER BY category', [Tenant::need()]), 'category'),
                 'fiscal' => Fiscal::options(),
-                'brands' => array_column(DB::all('SELECT DISTINCT brand FROM products WHERE brand IS NOT NULL AND deleted_at IS NULL ORDER BY brand'), 'brand'),
+                'brands' => array_column(DB::all('SELECT DISTINCT brand FROM products WHERE company_id = ? AND brand IS NOT NULL AND deleted_at IS NULL ORDER BY brand', [Tenant::need()]), 'brand'),
                 'company' => ['name' => Settings::get('company_name'), 'logo' => Settings::get('company_logo')],
                 'units' => ['un', 'kg', 'g', 'L', 'ml', 'cx', 'pct', 'dz', 'm', 'fardo'],
                 'payment_methods' => PaymentMethods::active(),
@@ -168,7 +168,7 @@ try {
         // ---- Produtos ----
         'GET products' => function () {
             Auth::require();
-            $w = ['1=1']; $p = [];
+            $w = ['company_id = ?']; $p = [Tenant::need()];
             if (($s = trim((string)q('q', ''))) !== '') {
                 [$sql, $sp] = Inventory::searchSql($s);
                 $w[] = $sql; array_push($p, ...$sp);
@@ -185,7 +185,7 @@ try {
             if ($all) foreach ($rows as &$r0) { unset($r0['description'], $r0['fiscal']); } unset($r0);
             // Códigos das referências cruzadas (para as buscas feitas no navegador)
             $map = [];
-            foreach (DB::all('SELECT product_id, code, code_norm FROM product_refs') as $r) $map[$r['product_id']][] = $r;
+            foreach (DB::all('SELECT product_id, code, code_norm FROM product_refs WHERE company_id = ?', [Tenant::need()]) as $r) $map[$r['product_id']][] = $r;
             foreach ($rows as &$row) {
                 $rs = $map[$row['id']] ?? [];
                 $row['refs'] = implode(' ', array_column($rs, 'code'));
@@ -201,7 +201,7 @@ try {
             $p['fiscal'] = Fiscal::decode($p['fiscal'] ?? null) ?: new stdClass();
             $p['refs'] = Inventory::refs($id);
             $p['movements'] = DB::all('SELECT m.*, u.name user_name FROM movements m LEFT JOIN users u ON u.id = m.user_id
-                WHERE m.product_id = ? ORDER BY m.id DESC LIMIT 30', [$id]);
+                WHERE m.product_id = ? AND m.company_id = ? ORDER BY m.id DESC LIMIT 30', [$id, Tenant::need()]);
             return $p;
         },
         // Importação de produtos por planilha: 1) prévia (lê o arquivo e confere) 2) cadastro em lotes
@@ -234,13 +234,13 @@ try {
         },
         'POST product_delete' => function () {
             $pid = (int)(input()['id'] ?? 0);
-            Auth::requirePerm(DB::val('SELECT type FROM products WHERE id = ?', [$pid]) === 'servico' ? 'servicos.delete' : 'produtos.delete');
+            Auth::requirePerm(DB::val('SELECT type FROM products WHERE id = ? AND company_id = ?', [$pid, Tenant::need()]) === 'servico' ? 'servicos.delete' : 'produtos.delete');
             return ['result' => Inventory::deleteProduct($pid)];
         },
         'POST product_save' => function () {
             $in = input();
             $isService = ($in['type'] ?? '') === 'servico'
-                || (!empty($in['id']) && DB::val('SELECT type FROM products WHERE id = ?', [(int)$in['id']]) === 'servico');
+                || (!empty($in['id']) && DB::val('SELECT type FROM products WHERE id = ? AND company_id = ?', [(int)$in['id'], Tenant::need()]) === 'servico');
             $id = !empty($in['id']) ? (int)$in['id'] : null;
             Auth::requirePerm(($isService ? 'servicos' : 'produtos') . ($id ? '.edit' : '.add'));
             if (isset($in['active']) && !$in['active']) Auth::requireAdmin();
@@ -251,7 +251,7 @@ try {
         'GET movements' => function () {
             Auth::requirePerm('movimentacoes', 'produtos');
             [$limit, $off] = page();
-            $w = ['1=1']; $p = [];
+            $w = ['m.company_id = ?']; $p = [Tenant::need()];
             if ($pid = (int)q('product_id', 0)) { $w[] = 'm.product_id = ?'; $p[] = $pid; }
             if (($t = q('type')) && isset(Inventory::MOVEMENT_LABELS[$t])) { $w[] = 'm.type = ?'; $p[] = $t; }
             [$a, $b] = Reports::range(q('from'), q('to'));
@@ -272,7 +272,7 @@ try {
         'GET sales' => function () {
             Auth::requirePerm('vendas');
             [$limit, $off] = page();
-            $w = ['1=1']; $p = [];
+            $w = ['s.company_id = ?']; $p = [Tenant::need()];
             Reports::listFilters($_GET, $w, $p, ['created' => 's.created_at', 'total' => 's.total', 'user' => 's.user_id',
                 'names' => ['s.customer', 'k.name', 'k.trade_name'], 'doc' => 'k.document']);
             if (in_array(q('status'), ['ok', 'cancelada'], true)) { $w[] = 's.status = ?'; $p[] = q('status'); }
@@ -291,7 +291,7 @@ try {
             $s = DB::one('SELECT s.*, u.name user_name, c.name canceled_by_name, k.name customer_name, k.trade_name customer_trade_name,
                 k.document customer_document, k.phone customer_phone, k.city customer_city, k.state customer_state FROM sales s
                 LEFT JOIN users u ON u.id = s.user_id LEFT JOIN users c ON c.id = s.canceled_by
-                LEFT JOIN customers k ON k.id = s.customer_id WHERE s.id = ?', [(int)q('id')]);
+                LEFT JOIN customers k ON k.id = s.customer_id WHERE s.id = ? AND s.company_id = ?', [(int)q('id'), Tenant::need()]);
             if (!$s) throw new AppError('Venda não encontrada', 404);
             $s['items'] = DB::all('SELECT i.*, p.name, p.unit, p.type FROM sale_items i JOIN products p ON p.id = i.product_id WHERE i.sale_id = ?', [$s['id']]);
             $s['extras'] = json_decode((string)($s['extras'] ?? ''), true) ?: [];
@@ -339,14 +339,14 @@ try {
         'GET invoices' => function () {
             Auth::requirePerm('notas', 'fornecedores');
             [$limit, $off] = page();
-            $total = (int)DB::val('SELECT COUNT(*) FROM invoices');
+            $total = (int)DB::val('SELECT COUNT(*) FROM invoices WHERE company_id = ?', [Tenant::need()]);
             $rows = DB::all("SELECT i.*, u.name user_name, (SELECT COUNT(*) FROM invoice_items x WHERE x.invoice_id = i.id) items
-                FROM invoices i LEFT JOIN users u ON u.id = i.user_id ORDER BY i.id DESC LIMIT $limit OFFSET $off");
+                FROM invoices i LEFT JOIN users u ON u.id = i.user_id WHERE i.company_id = ? ORDER BY i.id DESC LIMIT $limit OFFSET $off", [Tenant::need()]);
             return ['rows' => $rows, 'total' => $total];
         },
         'GET invoice' => function () {
             Auth::requirePerm('notas', 'fornecedores');
-            $i = DB::one('SELECT i.*, u.name user_name FROM invoices i LEFT JOIN users u ON u.id = i.user_id WHERE i.id = ?', [(int)q('id')]);
+            $i = DB::one('SELECT i.*, u.name user_name FROM invoices i LEFT JOIN users u ON u.id = i.user_id WHERE i.id = ? AND i.company_id = ?', [(int)q('id'), Tenant::need()]);
             if (!$i) throw new AppError('Nota não encontrada', 404);
             $i['items'] = DB::all('SELECT x.*, p.name product_name, p.unit FROM invoice_items x JOIN products p ON p.id = x.product_id WHERE x.invoice_id = ?', [$i['id']]);
             $i['payables'] = DB::all('SELECT id, description, amount, due_date, status, paid_at, paid_amount, installment, installments FROM financial_entries WHERE invoice_id = ? ORDER BY due_date, id', [$i['id']]);
@@ -365,7 +365,7 @@ try {
         'GET customers' => function () {
             Auth::require();
             [$limit, $off] = page();
-            $w = ['deleted_at IS NULL']; $p = [];
+            $w = ['company_id = ?', 'deleted_at IS NULL']; $p = [Tenant::need()];
             if (($s = trim((string)q('q', ''))) !== '') {
                 $digits = preg_replace('/\D/', '', $s);
                 $like = '%' . mb_strtolower($s) . '%';
@@ -431,7 +431,7 @@ try {
         'GET suppliers' => function () {
             Auth::requirePerm('fornecedores', 'notas', 'compras', 'financeiro');
             [$limit, $off] = page();
-            $w = ['deleted_at IS NULL']; $p = [];
+            $w = ['company_id = ?', 'deleted_at IS NULL']; $p = [Tenant::need()];
             if (($s = trim((string)q('q', ''))) !== '') {
                 $digits = preg_replace('/\D/', '', $s);
                 $like = '%' . mb_strtolower($s) . '%';
@@ -480,7 +480,7 @@ try {
         'GET quotes' => function () {
             Auth::requirePerm('orcamentos');
             $limit = min(500, max(1, (int)q('limit', 200))); $off = (max(1, (int)q('page', 1)) - 1) * $limit;
-            $w = ['1=1']; $p = [];
+            $w = ['q.company_id = ?']; $p = [Tenant::need()];
             if (($s = trim((string)q('q', ''))) !== '') {
                 $like = '%' . mb_strtolower($s) . '%';
                 $w[] = '(LOWER(c.name) LIKE ? OR LOWER(c.trade_name) LIKE ? OR LOWER(q.lead_name) LIKE ? OR LOWER(q.external_code) LIKE ? OR q.id = ?)';
@@ -502,7 +502,7 @@ try {
             $total = (int)DB::val("SELECT COUNT(*) $from", $p);
             $sum = (float)DB::val("SELECT COALESCE(SUM(q.total),0) $from", $p);
             $rows = DB::all("SELECT q.id, q.status, q.customer_id, q.lead_name, q.total, q.request_date, q.expires_at, q.external_code,
-                q.sale_id, q.service_order_id, q.user_id, q.updated_at, u.name user_name, c.name customer_name, c.trade_name customer_trade_name,
+                q.sale_id, q.service_order_id, (SELECT so.number FROM service_orders so WHERE so.id = q.service_order_id) service_order_number, q.user_id, q.updated_at, u.name user_name, c.name customer_name, c.trade_name customer_trade_name,
                 (SELECT COUNT(*) FROM quote_items i WHERE i.quote_id = q.id) items
                 $from ORDER BY q.id DESC LIMIT $limit OFFSET $off", $p);
             return ['rows' => $rows, 'total' => $total, 'sum' => round($sum, 2), 'summary' => Quotes::summary(),
@@ -692,7 +692,7 @@ try {
         'POST so_item_review' => function () {
             $u = Auth::requirePerm('produtos.review', 'servicos.review');
             $in = input();
-            $it = DB::one('SELECT * FROM so_items WHERE id = ?', [(int)($in['item_id'] ?? 0)]);
+            $it = DB::one('SELECT * FROM so_items WHERE id = ? AND company_id = ?', [(int)($in['item_id'] ?? 0), Tenant::need()]);
             if (!$it) throw new AppError('Item não encontrado', 404);
             Auth::requirePerm(OrderExec::reviewPerm($it));
             OrderExec::reviewItem((int)$it['id'], (string)($in['action'] ?? ''), $in, (int)$u['id']);
@@ -895,7 +895,7 @@ try {
 
         'GET team' => function () {
             Auth::require();
-            return DB::all('SELECT id, name FROM users WHERE active = 1 ORDER BY name');
+            return DB::all('SELECT id, name FROM users WHERE active = 1 AND company_id = ? ORDER BY name', [Tenant::need()]);
         },
         'GET settings' => function () { Auth::require(); return Settings::all(); },
         'POST settings' => function () { Auth::requireAdmin(); return Settings::save(input()); },
@@ -908,7 +908,7 @@ try {
             Auth::requireAdmin();
             $rows = DB::all('SELECT u.id, u.name, u.email, u.phone, u.avatar, u.role, u.active, u.permissions, u.profile_id, u.created_at,
                 p.name profile_name, p.permissions profile_permissions
-                FROM users u LEFT JOIN permission_profiles p ON p.id = u.profile_id ORDER BY u.name');
+                FROM users u LEFT JOIN permission_profiles p ON p.id = u.profile_id AND p.company_id = u.company_id WHERE u.company_id = ? ORDER BY u.name', [Tenant::need()]);
             foreach ($rows as &$r) { $r['permissions'] = Auth::permsOf($r); unset($r['profile_permissions']); }
             return $rows;
         },
@@ -917,7 +917,7 @@ try {
             $in = input();
             $id = (int)($in['id'] ?? 0);
             if (!$id) return ['id' => Auth::createUser($in)];
-            $u = DB::one('SELECT * FROM users WHERE id = ?', [$id]);
+            $u = DB::one('SELECT * FROM users WHERE id = ? AND company_id = ?', [$id, Tenant::need()]);
             if (!$u) throw new AppError('Usuário não encontrado', 404);
             Auth::assertCanEdit($u, $me);
             $data = [];
@@ -934,7 +934,7 @@ try {
             }
             if (array_key_exists('profile_id', $in)) {
                 $pid = (int)$in['profile_id'] ?: null;
-                if ($pid && !DB::val('SELECT id FROM permission_profiles WHERE id = ?', [$pid])) throw new AppError('Perfil de permissão não encontrado');
+                if ($pid && !DB::val('SELECT id FROM permission_profiles WHERE id = ? AND company_id = ?', [$pid, Tenant::need()])) throw new AppError('Perfil de permissão não encontrado');
                 $data['profile_id'] = $pid;
                 if (!$pid && !isset($in['permissions'])) $data['permissions'] = null; // sem perfil = acesso total
             }
@@ -963,8 +963,32 @@ try {
         'GET backup' => function () {
             Auth::requireAdmin();
             header('Content-Type: application/sql; charset=utf-8');
-            header('Content-Disposition: attachment; filename="' . GDrive::FILE_PREFIX . date('Y-m-d-His') . '.sql"');
+            header('Content-Disposition: attachment; filename="' . GDrive::FILE_PREFIX . (Companies::get(Tenant::need())['slug'] ?? 'empresa') . '-' . date('Y-m-d-His') . '.sql"');
             echo Backup::sql();
+            exit;
+        },
+
+        // ---- Empresas (só o superadmin, que não pertence a nenhuma delas) ----
+        'GET companies' => function () { Auth::requireSuper(); return Companies::list(); },
+        'POST company_save' => function () {
+            Auth::requireSuper();
+            $in = input();
+            $id = (int)($in['id'] ?? 0);
+            if ($id) { Companies::update($id, $in); return ['id' => $id]; }
+            return ['id' => Companies::create($in)];
+        },
+        'POST company_toggle' => function () {
+            Auth::requireSuper();
+            $in = input();
+            Companies::setActive((int)($in['id'] ?? 0), !empty($in['active']));
+            return ['ok' => true];
+        },
+        // Dump do banco inteiro (todas as empresas), para guardar fora do servidor
+        'GET backup_all' => function () {
+            Auth::requireSuper();
+            header('Content-Type: application/sql; charset=utf-8');
+            header('Content-Disposition: attachment; filename="' . GDrive::FILE_PREFIX . 'todas-' . date('Y-m-d-His') . '.sql"');
+            echo Backup::sql(true);
             exit;
         },
         // ---- Backup automático no Google Drive (Configurações → Sistema → Backup) ----

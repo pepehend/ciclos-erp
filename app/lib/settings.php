@@ -64,13 +64,22 @@ class Settings
     const FLAGS = ['sale_negative_stock', 'sale_default_customer', 'sale_cash_open', 'sale_cancel_admin', 'po_supplier_confirm'];
     const PO_STATUS_CODES = ['rascunho', 'enviada', 'confirmada', 'recebida', 'cancelada'];
 
+    /** Configurações da empresa atual, lidas uma vez por requisição (zeradas ao trocar de empresa e ao salvar). */
+    private static ?array $cache = null;
+
+    public static function reset(): void { self::$cache = null; }
+
+    /** Sem empresa (tela de login, superadmin) vale só o padrão. */
     public static function all(): array
     {
+        if (self::$cache !== null) return self::$cache;
         $out = self::DEFAULTS;
-        foreach (DB::all('SELECT name, value FROM settings') as $r) {
+        $cid = Tenant::id();
+        if ($cid === null) return $out;
+        foreach (DB::all('SELECT name, value FROM settings WHERE company_id = ?', [$cid]) as $r) {
             if (array_key_exists($r['name'], $out)) $out[$r['name']] = (string)$r['value'];
         }
-        return $out;
+        return self::$cache = $out;
     }
 
     public static function get(string $key): string
@@ -99,7 +108,9 @@ class Settings
         }
         if (array_key_exists('company_branches', $in)) $in['company_branches'] = json_encode(self::cleanBranches($in['company_branches']), JSON_UNESCAPED_UNICODE);
         if (DB::driver() === 'mysql') self::ensureLargeValue();
-        DB::tx(function () use ($in) {
+        $cid = Tenant::need();
+        self::reset();
+        DB::tx(function () use ($in, $cid) {
             foreach (self::DEFAULTS as $k => $_) {
                 if (!array_key_exists($k, $in)) continue;
                 $v = trim((string)$in[$k]);
@@ -116,13 +127,14 @@ class Settings
                 }
                 if ($k === 'po_statuses') $v = json_encode(self::cleanPoStatuses($in[$k]), JSON_UNESCAPED_UNICODE);
                 if (!in_array($k, ['company_logo', 'company_branches', 'po_statuses'], true)) $v = mb_substr($v, 0, 2000);
-                if (DB::val('SELECT id FROM settings WHERE name = ?', [$k])) {
-                    DB::run('UPDATE settings SET value = ? WHERE name = ?', [$v, $k]);
+                if (DB::val('SELECT id FROM settings WHERE name = ? AND company_id = ?', [$k, $cid])) {
+                    DB::run('UPDATE settings SET value = ? WHERE name = ? AND company_id = ?', [$v, $k, $cid]);
                 } else {
                     DB::insert('settings', ['name' => $k, 'value' => $v]);
                 }
             }
         });
+        self::reset();
         return self::all();
     }
 

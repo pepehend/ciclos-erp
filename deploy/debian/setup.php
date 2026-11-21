@@ -34,11 +34,16 @@ try {
     DB::connect($cfg['db']);
     DB::migrate();           // CREATE TABLE IF NOT EXISTS
     DB::upgrade();           // colunas e ajustes de versões novas
-    Customers::ensureDefault();
-    Auth::seedProfiles();
-    PaymentMethods::seed();
-    PaymentTerms::seed();
-    QuoteStatuses::seed();
+    // Cadastros padrão de cada empresa (as que já existem; empresa nova nasce pronta por Companies::create)
+    foreach (DB::all('SELECT id FROM companies ORDER BY id') as $c) {
+        Tenant::with((int)$c['id'], function () {
+            Customers::ensureDefault();
+            Auth::seedProfiles();
+            PaymentMethods::seed();
+            PaymentTerms::seed();
+            QuoteStatuses::seed();
+        });
+    }
 } catch (Throwable $e) {
     fwrite(STDERR, 'Erro ao preparar o banco: ' . $e->getMessage() . "\n");
     exit(1);
@@ -48,7 +53,7 @@ $say('Banco pronto (' . APP_VERSION . '). Usuários cadastrados: ' . $users . '.
 
 if ($adminIfEmpty) {
     if ($users) exit(0);
-    echo "\nVamos criar o administrador do sistema (o primeiro login).\n";
+    echo "\nVamos criar a empresa e o administrador dela (o primeiro login).\n";
     $admin = true;
 }
 if (!$admin) {
@@ -64,13 +69,25 @@ $ask = function (string $q, bool $secret = false): string {
     if ($secret && DIRECTORY_SEPARATOR === '/') { system('stty echo 2>/dev/null'); echo "\n"; }
     return $v;
 };
+$companies = DB::all('SELECT id, name, slug FROM companies ORDER BY id');
+$companyName = $companies ? '' : $ask('Nome da empresa: ');
+$companySlug = '';
+if ($companies) {
+    foreach ($companies as $c) echo "  {$c['slug']}  ({$c['name']})\n";
+    $companySlug = $ask('Código da empresa (um dos acima) [' . $companies[0]['slug'] . ']: ') ?: $companies[0]['slug'];
+    if (!Companies::bySlug($companySlug)) { fwrite(STDERR, "Empresa não encontrada.\n"); exit(1); }
+}
 $name = $ask('Seu nome: ');
 $email = $ask('E-mail (login): ');
 $pass = $ask('Senha (mínimo 8 caracteres): ', true);
 $pass2 = $ask('Repita a senha: ', true);
 if ($pass !== $pass2) { fwrite(STDERR, "As senhas não conferem.\n"); exit(1); }
 try {
-    Auth::createUser(['name' => $name, 'email' => $email, 'password' => $pass, 'role' => 'admin']);
+    if ($companyName !== '') {
+        Companies::create(['name' => $companyName, 'admin' => ['name' => $name, 'email' => $email, 'password' => $pass]]);
+    } else {
+        Tenant::with((int)Companies::bySlug($companySlug)['id'], fn() => Auth::createUser(['name' => $name, 'email' => $email, 'password' => $pass, 'role' => 'admin']));
+    }
 } catch (AppError $e) {
     fwrite(STDERR, $e->getMessage() . "\n");
     exit(1);
