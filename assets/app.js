@@ -6347,12 +6347,32 @@ async function viewAccount(v) {
       <label>Nova senha <input type="password" name="new" minlength="8" required autocomplete="new-password"></label>
       <label>Repita a nova senha <input type="password" name="new2" minlength="8" required autocomplete="new-password"></label>
       <button class="btn primary">Salvar nova senha</button></form></div>
+    <div class="card" style="max-width:560px"><h2>Aparelhos do aplicativo</h2><p class="muted" style="margin-top:-4px">Celulares em que você entrou pelo aplicativo CiclosERP. Remova um aparelho perdido ou que você não usa mais: ele precisa entrar de novo com a senha.</p>
+      <div id="mytokens"><p class="muted small">Carregando…</p></div></div>
     <section id="myappearance" style="margin-top:28px"></section>
     <p class="muted small">Versão ${esc(state.version || '')}</p>`;
   // Aparência (tema e cor de destaque): só muda para o próprio usuário, por isso fica aqui e não em Configurações
   const ap = $('#myappearance', v);
   await viewAppearance(ap);
   const h = $('.page-head h1', ap); if (h) h.outerHTML = `<h2 style="margin:0">${esc(h.textContent)}</h2>`;
+  // Aparelhos do aplicativo (tokens de acesso à API): lista e remoção
+  const tk = $('#mytokens', v);
+  const drawTokens = async () => {
+    try {
+      const rows = await api('api_tokens');
+      tk.innerHTML = rows.length ? rows.map((r) => `<div class="inline" style="justify-content:space-between;padding:8px 0;border-top:1px solid var(--line, #ddd)">
+          <div><strong>${esc(r.device)}</strong>${r.current ? ' <span class="muted small">(este aparelho)</span>' : ''}
+          <div class="muted small">Entrou em ${esc(dt(r.created_at))} · último uso ${esc(dt(r.last_used_at))}</div></div>
+          <button type="button" class="btn ghost danger" data-tk="${r.id}">Remover</button></div>`).join('')
+        : '<p class="muted small" style="margin:0">Nenhum aparelho conectado.</p>';
+    } catch (err) { tk.innerHTML = `<p class="muted small">${esc(err.message)}</p>`; }
+  };
+  tk.onclick = async (e) => {
+    const b = e.target.closest('[data-tk]'); if (!b) return;
+    if (!(await confirmBox('Remover este aparelho? O aplicativo nele vai pedir login de novo.', { ok: 'Remover', danger: true }))) return;
+    try { await api('api_token_revoke', { body: { id: +b.dataset.tk } }); toast('Aparelho removido'); drawTokens(); } catch (err) { fail(err); }
+  };
+  drawTokens();
   $('#myav', v).onclick = async (e) => {
     const b = e.target.closest('[data-av]'); if (!b) return;
     try {

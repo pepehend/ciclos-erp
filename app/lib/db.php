@@ -147,6 +147,17 @@ class DB
                 ip VARCHAR(64) NOT NULL,
                 created_at $dt NOT NULL
             )$end",
+            // Aparelhos com acesso à API por token (aplicativo). Só o SHA-256 do token fica no banco.
+            "CREATE TABLE IF NOT EXISTS api_tokens (
+                id $pk,
+                user_id $fk NOT NULL,
+                token_hash CHAR(64) NOT NULL UNIQUE,
+                device VARCHAR(120) NOT NULL,
+                ip VARCHAR(64) NULL,
+                created_at $dt NOT NULL,
+                last_used_at $dt NOT NULL
+            )$end",
+            "CREATE INDEX idx_api_tokens_user ON api_tokens (user_id)",
             "CREATE TABLE IF NOT EXISTS products (
                 id $pk,
                 name VARCHAR(200) NOT NULL,
@@ -969,6 +980,16 @@ class DB
             self::pdo()->query('SELECT avatar FROM users LIMIT 1');
         } catch (PDOException $e) {
             self::pdo()->exec('ALTER TABLE users ADD COLUMN avatar ' . (self::$driver === 'mysql' ? 'MEDIUMTEXT' : 'TEXT') . ' NULL');
+        }
+        // v3.4.0: acesso à API por token (aplicativo Android)
+        try {
+            self::pdo()->query('SELECT id FROM api_tokens LIMIT 1');
+        } catch (PDOException $e) {
+            foreach (self::schema() as $sql) {
+                if (str_contains($sql, ' api_tokens ')) {
+                    try { self::pdo()->exec($sql); } catch (PDOException $e2) { /* índice já existe */ }
+                }
+            }
         }
     }
 
